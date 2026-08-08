@@ -1,0 +1,7 @@
+.build/
+build/
+.DS_Store
+rig/audio/
+rig/out/
+*.bin
+*.mlmodelc

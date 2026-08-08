@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quill — gauntlet run</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#08090a; --panel:#0e1011; --line:#1c1f21; --line2:#282c2f;
+    --fg:#e9ecef; --dim:#7c848b; --dimmer:#4a5157;
+    --ok:#4ade80; --run:#e5e7eb; --wait:#3f4549; --bad:#f87171; --warn:#fbbf24;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Inter","SF Pro Text",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-font-smoothing:antialiased}
+  body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.5;
+       padding:40px 32px 80px;max-width:1120px;margin:0 auto;}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:radial-gradient(700px 380px at 15% -8%, rgba(255,255,255,.045), transparent 70%);}
+  .z{position:relative;z-index:1}
+
+  header{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;
+         padding-bottom:22px;border-bottom:1px solid var(--line);margin-bottom:28px;flex-wrap:wrap}
+  h1{font-size:19px;font-weight:600;letter-spacing:-.02em}
+  h1 span{color:var(--dimmer);font-weight:400}
+  .sub{color:var(--dim);font-size:12.5px;margin-top:5px}
+  .stamp{font-family:var(--mono);font-size:11px;color:var(--dimmer);text-align:right;line-height:1.7}
+  .live{display:inline-flex;align-items:center;gap:6px;color:var(--dim)}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);animation:p 2s ease-in-out infinite}
+  @keyframes p{0%,100%{opacity:1}50%{opacity:.25}}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:30px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--dimmer);margin-bottom:7px}
+  .v{font-size:15px;font-weight:500;letter-spacing:-.01em}
+  .v small{color:var(--dim);font-weight:400;font-size:12px}
+
+  .meter{height:4px;background:var(--line2);border-radius:99px;overflow:hidden;margin-top:10px}
+  .meter i{display:block;height:100%;background:var(--fg);border-radius:99px}
+
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dimmer);
+     margin:32px 0 12px;font-weight:600}
+
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;
+     color:var(--dimmer);font-weight:500;padding:0 12px 9px 0;border-bottom:1px solid var(--line)}
+  td{padding:11px 12px 11px 0;border-bottom:1px solid var(--line);vertical-align:top;font-size:13.5px}
+  tr:last-child td{border-bottom:none}
+  td.num{font-family:var(--mono);font-size:12px;color:var(--dim);white-space:nowrap}
+  .name{font-weight:500}
+  .note{color:var(--dim);font-size:12.5px;margin-top:3px;max-width:62ch}
+
+  .st{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);white-space:nowrap}
+  .st::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--wait);flex:none}
+  .st.run::before{background:var(--run);animation:p 1.6s ease-in-out infinite}
+  .st.run{color:var(--fg)}
+  .st.done::before{background:var(--ok)} .st.done{color:var(--ok)}
+  .st.block::before{background:var(--warn)} .st.block{color:var(--warn)}
+  .st.fail::before{background:var(--bad)} .st.fail{color:var(--bad)}
+
+  .log{font-family:var(--mono);font-size:11.5px;line-height:1.85;color:var(--dim);
+       background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+       max-height:320px;overflow-y:auto}
+  .log b{color:var(--fg);font-weight:500}
+  .log i{color:var(--dimmer);font-style:normal}
+
+  .callout{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--warn);
+           border-radius:8px;padding:13px 16px;margin-bottom:10px;font-size:13px}
+  .callout b{display:block;color:var(--warn);font-size:11px;text-transform:uppercase;
+             letter-spacing:.08em;margin-bottom:5px;font-weight:600}
+  footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);
+         color:var(--dimmer);font-size:11.5px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="z">
+
+<header>
+  <div>
+    <h1>Quill <span>— gauntlet run</span></h1>
+    <div class="sub">macOS on-device dictation, built from scratch, judged blind against Wispr&nbsp;Flow.</div>
+  </div>
+  <div class="stamp">
+    <div class="live"><span class="dot"></span>auto-refresh 10s</div>
+    <div id="ts">—</div>
+  </div>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <div class="k">Phase</div>
+    <div class="v">Recon <small>1 / 5</small></div>
+  </div>
+  <div class="card">
+    <div class="k">The bar</div>
+    <div class="v">Wispr Flow <small>not yet installed</small></div>
+  </div>
+  <div class="card">
+    <div class="k">Pieces won blind</div>
+    <div class="v">0 <small>/ 7</small></div>
+  </div>
+  <div class="card">
+    <div class="k">Ceiling</div>
+    <div class="v">~40k <small>/ 1M tokens</small></div>
+    <div class="meter"><i style="width:4%"></i></div>
+  </div>
+</div>
+
+<div class="callout">
+  <b>Rig first, code second</b>
+  Wispr Flow isn't installed, there are no speech models on disk, and there's no virtual audio device.
+  Until the same audio can be fed into both apps and both transcripts captured, any "comparison" would be
+  the critic inventing one — the single most common way a gauntlet loop produces confident garbage.
+</div>
+
+<h2>Phases</h2>
+<table>
+  <thead><tr><th style="width:34%">Phase</th><th style="width:16%">Status</th><th>Detail</th></tr></thead>
+  <tbody>
+    <tr><td class="name">1 · Recon</td><td><span class="st run">running</span></td>
+        <td>5 parallel scouts: the bar, the engine, the rig, the injection path, murmur's traps.</td></tr>
+    <tr><td class="name">2 · Comparison rig</td><td><span class="st">queued</span></td>
+        <td>Virtual audio in, transcript capture out, WER scoring. Gates everything downstream.</td></tr>
+    <tr><td class="name">3 · Baseline</td><td><span class="st">queued</span></td>
+        <td>Install Wispr Flow, run the eval clips through it, bank its transcripts + latency.</td></tr>
+    <tr><td class="name">4 · Scaffold</td><td><span class="st">queued</span></td>
+        <td>SwiftPM app, .app bundle, permissions, hotkey → capture → transcribe → insert loop.</td></tr>
+    <tr><td class="name">5 · Gauntlet</td><td><span class="st">queued</span></td>
+        <td>Per piece: builder + separate harsh critic, blind A/B, loop until ours wins.</td></tr>
+  </tbody>
+</table>
+
+<h2>The seven pieces</h2>
+<table>
+  <thead><tr><th style="width:26%">Piece</th><th style="width:15%">Verdict</th><th style="width:10%">Rounds</th><th>Biggest remaining gap</th></tr></thead>
+  <tbody>
+    <tr><td class="name">Capture</td><td><span class="st">queued</span></td><td class="num">0</td><td class="note">—</td></tr>
+    <tr><td class="name">Transcription accuracy</td><td><span class="st">queued</span></td><td class="num">0</td><td class="note">—</td></tr>
+    <tr><td class="name">Latency</td><td><span class="st">queued</span></td><td class="num">0</td><td class="note">—</td></tr>
+    <tr><td class="name">Punctuation &amp; formatting</td><td><span class="st">queued</span></td><td class="num">0</td><td class="note">—</td></tr>
+    <tr><td class="name">Insertion into focused app</td><td><span class="st">queued</span></td><td class="num">0</td><td class="note">—</td></tr>
+    <tr><td class="name">Hotkey feel</td><td><span class="st">queued</span></td><td class="num">0</td><td class="note">—</td></tr>
+    <tr><td class="name">UI</td><td><span class="st">queued</span></td><td class="num">0</td><td class="note">—</td></tr>
+  </tbody>
+</table>
+
+<h2>Log</h2>
+<div class="log" id="log">
+<div><i>—</i> <b>Project created</b> at Projects/quill, git initialised.</div>
+<div><i>—</i> Machine check: macOS 27.0, Swift 6.4, Command Line Tools only (no full Xcode), ffmpeg present.</div>
+<div><i>—</i> Absent: Wispr Flow, any speech model, any virtual audio device. All three are blockers for a real comparison.</div>
+<div><i>—</i> <b>Recon fan-out launched</b> — 5 scouts, structured returns, current sources only (no answering from memory).</div>
+</div>
+
+<footer>Bar: Wispr Flow · Ceiling: 1M tokens · Exit condition: harsh critic picks ours blind, on every piece.</footer>
+
+</div>
+<script>
+  document.getElementById('ts').textContent =
+    new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  setTimeout(()=>location.reload(), 10000);
+</script>
+</body>
+</html>
