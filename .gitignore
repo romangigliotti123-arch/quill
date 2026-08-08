@@ -5,3 +5,5 @@ rig/audio/
 rig/out/
 *.bin
 *.mlmodelc
+Quill.app
+diagnostics.txt
