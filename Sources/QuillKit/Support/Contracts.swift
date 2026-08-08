@@ -9,6 +9,12 @@ import Foundation
 
 /// What the hotkey engine reports. Push-to-talk is a *hold*, so down and up are
 /// separate events rather than one toggle.
+///
+/// @MainActor is enforced rather than merely requested: the tap callback runs on
+/// its own runloop, and an engine that forwards straight from there would race
+/// the coordinator's state. Making it a compile error is cheaper than finding it
+/// as an intermittent bug later.
+@MainActor
 public protocol HotkeyEngineDelegate: AnyObject {
     func hotkeyPressed()
     func hotkeyReleased()
@@ -38,8 +44,11 @@ public struct Transcript: Sendable, Equatable {
     }
 }
 
+/// Same reasoning as HotkeyEngineDelegate: Speech delivers on its own queue, and
+/// forwarding from there would race the coordinator.
+@MainActor
 public protocol TranscriberDelegate: AnyObject {
-    /// Called for every partial and final. Always on the main actor.
+    /// Called for every partial and final.
     func transcriber(didProduce transcript: Transcript)
     func transcriber(didFail error: Error)
 }

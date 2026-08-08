@@ -324,10 +324,15 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
         ProcessInfo.processInfo.systemUptime
     }
 
-    private func deliver(_ call: @escaping (HotkeyEngineDelegate) -> Void) {
+    /// DispatchQueue.main rather than Task { @MainActor }: press and release must
+    /// arrive in the order they happened, and only the queue guarantees FIFO.
+    /// assumeIsolated is safe because this block only ever runs on the main queue.
+    private func deliver(_ call: @escaping @MainActor (HotkeyEngineDelegate) -> Void) {
         DispatchQueue.main.async { [weak self] in
-            guard let delegate = self?.delegate else { return }
-            call(delegate)
+            MainActor.assumeIsolated {
+                guard let delegate = self?.delegate else { return }
+                call(delegate)
+            }
         }
     }
 
