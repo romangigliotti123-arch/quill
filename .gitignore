@@ -7,3 +7,4 @@ rig/out/
 *.mlmodelc
 Quill.app
 diagnostics.txt
+.claude/worktrees/

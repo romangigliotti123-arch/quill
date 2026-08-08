@@ -41,10 +41,17 @@ esac
 CLT="/Library/Developer/CommandLineTools"
 XCODE="/Applications/Xcode.app/Contents/Developer"
 
+# SwiftPM's scratch dir must live outside ~/Documents too. iCloud stamps
+# com.apple.fileprovider xattrs on intermediate products, and codesign then
+# refuses to sign the test bundle ("resource fork ... not allowed"). Keeping it
+# here also stops every incremental build from fighting the sync daemon.
+SCRATCH="${QUILL_SCRATCH:-$HOME/Library/Application Support/Quill/.build}"
+export QUILL_SCRATCH="$SCRATCH"
+
 build_with() {
     local dev_dir="$1"
     echo "==> swift build -c $CONFIG   (toolchain: $dev_dir)"
-    DEVELOPER_DIR="$dev_dir" swift build -c "$CONFIG" --product "$APP_NAME"
+    DEVELOPER_DIR="$dev_dir" swift build -c "$CONFIG" --product "$APP_NAME" --scratch-path "$SCRATCH"
 }
 
 if [[ -n "${DEVELOPER_DIR:-}" ]]; then
@@ -58,7 +65,7 @@ else
     CHOSEN="$XCODE"
 fi
 
-BIN_PATH="$(DEVELOPER_DIR="$CHOSEN" swift build -c "$CONFIG" --product "$APP_NAME" --show-bin-path)/$APP_NAME"
+BIN_PATH="$(DEVELOPER_DIR="$CHOSEN" swift build -c "$CONFIG" --product "$APP_NAME" --scratch-path "$SCRATCH" --show-bin-path)/$APP_NAME"
 [[ -x "$BIN_PATH" ]] || { echo "!! No binary at $BIN_PATH" >&2; exit 1; }
 
 # The bundle is assembled OUTSIDE ~/Documents on purpose. iCloud Drive stamps
