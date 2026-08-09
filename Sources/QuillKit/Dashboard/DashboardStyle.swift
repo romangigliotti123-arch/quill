@@ -62,8 +62,8 @@ public enum DashboardMetrics {
     public static let navRowHeight: CGFloat = 36
     public static let navRowGap: CGFloat = 4
 
-    public static let contentPaddingX: CGFloat = 40
-    public static let contentPaddingY: CGFloat = 34
+    public static let contentPaddingX: CGFloat = 46
+    public static let contentPaddingY: CGFloat = 40
 
     public static func panelFrame(in size: NSSize) -> NSRect {
         NSRect(x: sidebarWidth,

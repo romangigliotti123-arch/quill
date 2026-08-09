@@ -145,13 +145,23 @@ public final class InsightsView: NSView {
         // 2 — Pace, and the spread it sits inside. This is the card that
         // replaces Flow's "Top 6%": same question, answered with data the user
         // can audit.
+        // Pace needs a spoken duration to divide by. Dictations recorded before
+        // Quill stored one contribute nothing, so with only old history this card
+        // has no answer — and "0 wpm, usual range 0–0" is a confident wrong one.
+        // Say there is nothing to report instead.
+        let hasPace = m.medianWPM > 0
         paceCard.configure(
-            value: [(String(m.medianWPM), false), ("  wpm", true)],
-            caption: "median pace over \(InsightsFormat.count(m.sessions)) dictations",
-            footnote: "your usual range is \(m.wpmP10)–\(m.wpmP90)",
+            value: hasPace ? [(String(m.medianWPM), false), ("  wpm", true)]
+                           : [("—", true)],
+            caption: hasPace ? "median pace over \(InsightsFormat.count(m.sessions)) dictations"
+                             : "speaking pace",
+            footnote: hasPace ? "your usual range is \(m.wpmP10)–\(m.wpmP90)"
+                              : "needs a few more dictations before this means anything",
             chip: nil,
             accent: false,
-            accessory: .range(low: Double(m.wpmP10), high: Double(m.wpmP90), median: Double(m.medianWPM))
+            accessory: hasPace
+                ? .range(low: Double(m.wpmP10), high: Double(m.wpmP90), median: Double(m.medianWPM))
+                : .none
         )
 
         // 3 — The payoff, with its assumption printed. A "time saved" figure
@@ -186,7 +196,7 @@ public final class InsightsView: NSView {
 
         // Header.
         var y = padY
-        let eyebrowSize = eyebrow.fittingSize
+        let eyebrowSize = eyebrow.stringValue.isEmpty ? .zero : eyebrow.fittingSize
         eyebrow.frame = NSRect(x: padX, y: y, width: eyebrowSize.width, height: eyebrowSize.height)
 
         let segmentedWidth = segmented.intrinsicWidth
@@ -198,7 +208,7 @@ public final class InsightsView: NSView {
                                       width: sampleChip.frame.width, height: sampleChip.frame.height)
         }
 
-        y += eyebrowSize.height + 9
+        y += eyebrowSize.height + (eyebrowSize.height > 0 ? 9 : 0)
         let headingSize = heading.fittingSize
         heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 220), height: headingSize.height)
         y += headingSize.height + 5
@@ -206,13 +216,13 @@ public final class InsightsView: NSView {
         let blurbWidth = min(width - 260, 640)
         let blurbHeight = DashboardType.size(blurb, width: blurbWidth).height
         blurb.frame = NSRect(x: padX, y: y, width: blurbWidth, height: blurbHeight)
-        y += blurbHeight + 22
+        y += blurbHeight + 30
 
         // Three stat cards, then two panels, then the year band. Heights are
         // derived from what is left rather than fixed, so the page fills the
         // panel exactly at 850 and degrades gracefully when the window is
         // dragged shorter.
-        let gap = DashboardSpace.md
+        let gap = DashboardSpace.lg
         let remaining = bounds.height - padY - y
         let statHeight: CGFloat = 138
         let streakHeight = max(150, min(200, streakCard.preferredHeight))
@@ -741,8 +751,11 @@ public final class InsightsFixesCard: NSView {
         // the Dictionary screen existing, so that is what gets named.
         let named = m.topFixes.filter(\.isDictionary) + m.topFixes.filter { !$0.isDictionary }
         listTitle.removeFromSuperview()
-        listTitle = DashboardType.label(m.topFixes.contains(where: \.isDictionary)
-                                        ? "Caught by your dictionary" : "Most repeated",
+        // A heading with nothing under it is worse than no heading: it reads as a
+        // section that failed to load rather than one that has nothing to say.
+        listTitle = DashboardType.label(named.isEmpty ? ""
+                                        : (m.topFixes.contains(where: \.isDictionary)
+                                        ? "Caught by your dictionary" : "Most repeated"),
                                         font: DashboardType.micro,
                                         color: style.inkQuaternary)
         addSubview(listTitle)

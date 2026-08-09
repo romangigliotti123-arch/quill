@@ -344,6 +344,15 @@ public final class InsightsLatencyPlot: NSView {
     private func drawMarker(at ms: Double, label: String, baseline: CGFloat, top: CGFloat,
                             color: NSColor, emphasis: Bool) {
         let bound = upperBound
+
+        // A marker past the axis has nowhere honest to sit. The old code clamped
+        // it to the right edge, which drew it at a position that was not its
+        // value AND stacked both labels in the same place when two markers were
+        // out of range — "median" and "p90" printed on top of each other. The
+        // number is already stated in the card header; the plot simply does not
+        // claim to show it.
+        guard ms <= bound else { return }
+
         let tx = (CGFloat(ms / bound) * bounds.width).rounded()
 
         let line = NSBezierPath()
