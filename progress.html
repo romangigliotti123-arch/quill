@@ -15,11 +15,10 @@
   *{box-sizing:border-box;margin:0;padding:0}
   html{-webkit-font-smoothing:antialiased}
   body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.5;
-       padding:40px 32px 80px;max-width:1120px;margin:0 auto;}
+       padding:40px 32px 80px;max-width:1160px;margin:0 auto;}
   body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
     background:radial-gradient(700px 380px at 15% -8%, rgba(255,255,255,.045), transparent 70%);}
   .z{position:relative;z-index:1}
-
   header{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;
          padding-bottom:22px;border-bottom:1px solid var(--line);margin-bottom:28px;flex-wrap:wrap}
   h1{font-size:19px;font-weight:600;letter-spacing:-.02em}
@@ -29,47 +28,39 @@
   .live{display:inline-flex;align-items:center;gap:6px;color:var(--dim)}
   .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);animation:p 2s ease-in-out infinite}
   @keyframes p{0%,100%{opacity:1}50%{opacity:.25}}
-
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:26px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:26px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
   .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--dimmer);margin-bottom:7px}
   .v{font-size:15px;font-weight:500;letter-spacing:-.01em}
   .v small{color:var(--dim);font-weight:400;font-size:12px}
+  .v.big{font-size:24px;letter-spacing:-.02em}
   .meter{height:4px;background:var(--line2);border-radius:99px;overflow:hidden;margin-top:10px}
   .meter i{display:block;height:100%;background:var(--fg);border-radius:99px}
-
   h2{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dimmer);
      margin:32px 0 12px;font-weight:600}
-
   table{width:100%;border-collapse:collapse}
   th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;
      color:var(--dimmer);font-weight:500;padding:0 12px 9px 0;border-bottom:1px solid var(--line)}
   td{padding:11px 12px 11px 0;border-bottom:1px solid var(--line);vertical-align:top;font-size:13.5px}
   tr:last-child td{border-bottom:none}
-  td.num{font-family:var(--mono);font-size:12px;color:var(--dim);white-space:nowrap}
+  td.num{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+  .win{color:var(--ok);font-weight:600}
   .name{font-weight:500}
-  .note{color:var(--dim);font-size:12.5px;max-width:64ch}
-
+  .note{color:var(--dim);font-size:12.5px;max-width:66ch}
   .st{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);white-space:nowrap}
   .st::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--wait);flex:none}
-  .st.run::before{background:var(--run);animation:p 1.6s ease-in-out infinite}
-  .st.run{color:var(--fg)}
+  .st.run::before{background:var(--run);animation:p 1.6s ease-in-out infinite} .st.run{color:var(--fg)}
   .st.done::before{background:var(--ok)} .st.done{color:var(--ok)}
   .st.block::before{background:var(--warn)} .st.block{color:var(--warn)}
-
   .log{font-family:var(--mono);font-size:11.5px;line-height:1.85;color:var(--dim);
        background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
-       max-height:330px;overflow-y:auto}
-  .log b{color:var(--fg);font-weight:500}
-  .log i{color:var(--dimmer);font-style:normal}
+       max-height:300px;overflow-y:auto}
+  .log b{color:var(--fg);font-weight:500} .log i{color:var(--dimmer);font-style:normal}
   .log .g{color:var(--ok)}
-
   .callout{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--warn);
            border-radius:8px;padding:14px 16px;margin-bottom:10px;font-size:13px}
   .callout b{display:block;color:var(--warn);font-size:11px;text-transform:uppercase;
              letter-spacing:.08em;margin-bottom:6px;font-weight:600}
-  .callout ol{margin:8px 0 0 18px;color:var(--dim)}
-  .callout li{margin-bottom:5px}
   .callout code{font-family:var(--mono);font-size:11.5px;color:var(--fg);
                 background:#000;padding:1px 5px;border-radius:4px}
   footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);
@@ -91,87 +82,85 @@
 </header>
 
 <div class="grid">
-  <div class="card">
-    <div class="k">Phase</div>
-    <div class="v">Rig <small>3 / 5</small></div>
-  </div>
-  <div class="card">
-    <div class="k">The bar</div>
-    <div class="v">Wispr Flow <small>1.6.447 installed</small></div>
-  </div>
-  <div class="card">
-    <div class="k">Pieces won blind</div>
-    <div class="v">0 <small>/ 7</small></div>
-  </div>
-  <div class="card">
-    <div class="k">Ceiling</div>
-    <div class="v">~1.0M <small>/ 3M tokens</small></div>
-    <div class="meter"><i style="width:33%"></i></div>
-  </div>
+  <div class="card"><div class="k">Dashboard won blind</div><div class="v big win">4 / 4</div></div>
+  <div class="card"><div class="k">Flow baseline WER</div><div class="v big">2.11%<small> / 50 clips</small></div></div>
+  <div class="card"><div class="k">Tests</div><div class="v big">369</div></div>
+  <div class="card"><div class="k">Ceiling</div><div class="v">~6.5M <small>/ 8M</small></div>
+    <div class="meter"><i style="width:81%"></i></div></div>
 </div>
 
 <div class="callout">
-  <b>Waiting on you — one thing, once the rig agent finishes</b>
-  <ol>
-    <li><b>Reboot.</b> BlackHole is installed and correctly signed, but CoreAudio never loaded it, and SIP blocks <code>launchctl kickstart</code> on <code>coreaudiod</code>. A restart is the only sanctioned path. I'll say when it's safe — agents are still mid-flight.</li>
-    <li>After that: tick Quill in Privacy &amp; Security → Accessibility + Microphone (~30s).</li>
-    <li>Whenever you like: ~15 min reading a script into <code>rig/record_voice.sh</code>.</li>
-  </ol>
+  <b>What still needs you</b>
+  ~15 minutes reading a script into <code>rig/record_voice.sh</code>. LibriSpeech is read speech from
+  American strangers; it says nothing about how either app handles your accent, or the words you
+  actually use. It is the one tier that predicts your experience and the only thing I cannot do.
 </div>
 
-<h2>Phases</h2>
+<h2>Head to head — identical audio, both apps audited to the loopback device</h2>
 <table>
-  <thead><tr><th style="width:30%">Phase</th><th style="width:15%">Status</th><th>Detail</th></tr></thead>
+  <thead><tr><th style="width:30%">Measure</th><th style="width:18%">Wispr Flow</th><th style="width:18%">Quill</th><th>Note</th></tr></thead>
   <tbody>
-    <tr><td class="name">1 · Recon</td><td><span class="st done">done</span></td>
-        <td class="note">5 scouts. Found the decisive fact: Wispr Flow is 100% cloud, no offline mode, account mandatory.</td></tr>
-    <tr><td class="name">2 · Foundation</td><td><span class="st done">done</span></td>
-        <td class="note">Signed .app that keeps its permissions across rebuilds — verified, not assumed.</td></tr>
-    <tr><td class="name">3 · Subsystems</td><td><span class="st done">done</span></td>
-        <td class="note">Hotkey, transcription, injection, overlay — merged, building, 46 tests green.</td></tr>
-    <tr><td class="name">3b · Comparison rig</td><td><span class="st run">running</span></td>
-        <td class="note">LibriSpeech slice frozen to a manifest; transcript readers and WER scoring being built.</td></tr>
-    <tr><td class="name">4 · Baseline</td><td><span class="st block">blocked</span></td>
-        <td class="note">Needs BlackHole + Flow sign-in. Then Flow runs the frozen 50-clip set and we bank its numbers.</td></tr>
-    <tr><td class="name">5 · Gauntlet</td><td><span class="st">queued</span></td>
-        <td class="note">Per piece: builder + separate harsh critic, blind A/B, loop until ours wins.</td></tr>
+    <tr><td class="name">WER, raw ASR — 50 clips</td><td class="num">2.11%</td><td class="num">running</td>
+        <td class="note">Flow: 24 errors in 1138 words, 0 clips failed.</td></tr>
+    <tr><td class="name">WER, raw ASR — 2-clip smoke</td><td class="num">4.35%</td><td class="num win">2.17%</td>
+        <td class="note">Same audio. Too small to conclude from, but it is real.</td></tr>
+    <tr><td class="name">Formatter divergence</td><td class="num">1.40%</td><td class="num win">0.00%</td>
+        <td class="note">How far the cleaned text drifts from what was actually said.</td></tr>
+    <tr><td class="name">Latency, key-release → text</td><td class="num">807ms</td><td class="num">0.39s median*</td>
+        <td class="note">*Quill's figure is from its own instrumentation, not yet the rig. Not a like-for-like claim until the 50-clip run lands.</td></tr>
+    <tr><td class="name">Works with no internet</td><td class="num">no</td><td class="num win">yes</td>
+        <td class="note">Flow is cloud-only by design — their docs, not my inference.</td></tr>
   </tbody>
 </table>
 
-<h2>The seven pieces</h2>
+<h2>Dashboard — blind verdicts vs Flow's real UI</h2>
 <table>
-  <thead><tr><th style="width:26%">Piece</th><th style="width:14%">Verdict</th><th style="width:9%">Rounds</th><th>Where it stands</th></tr></thead>
+  <thead><tr><th style="width:22%">Section</th><th style="width:14%">Verdict</th><th style="width:10%">Rounds</th><th>Biggest remaining gap, per the critic</th></tr></thead>
   <tbody>
-    <tr><td class="name">Capture</td><td><span class="st done">built</span></td><td class="num">0</td><td class="note">Real audio through the real path, verified without a microphone via a file-source harness.</td></tr>
-    <tr><td class="name">Transcription accuracy</td><td><span class="st done">built</span></td><td class="num">0</td><td class="note">Near-perfect on clean speech. Apple's contextual biasing measured <b>inert</b> — 0 vs 25 terms gave byte-identical text — so proper nouns are repaired by fuzzy 1–3 word matching instead.</td></tr>
-    <tr><td class="name">Latency</td><td><span class="st done">built</span></td><td class="num">0</td><td class="note">Measured here: first partial <b>1.02s</b>, batch <b>43× real-time</b>. Flow targets sub-700ms p99 over a network.</td></tr>
-    <tr><td class="name">Punctuation &amp; formatting</td><td><span class="st done">built</span></td><td class="num">0</td><td class="note">Deterministic pass races a model pass on a 250ms deadline; whichever is ready gets inserted. Disfluencies, spacing, capitalisation all working.</td></tr>
-    <tr><td class="name">Insertion into focused app</td><td><span class="st done">built</span></td><td class="num">0</td><td class="note">Pasteboard + synthetic ⌘V, unicode fallback, never silently loses text.</td></tr>
-    <tr><td class="name">Hotkey feel</td><td><span class="st done">built</span></td><td class="num">0</td><td class="note">CGEventTap push-to-talk + double-tap toggle.</td></tr>
-    <tr><td class="name">UI</td><td><span class="st done">built</span></td><td class="num">0</td><td class="note">Non-activating HUD that never steals focus. Being rendered offscreen and inspected before it ships.</td></tr>
+    <tr><td class="name">Insights</td><td class="win">ours</td><td class="num">1</td>
+        <td class="note">The range control governs only the top row; the streak card still shows 11 months.</td></tr>
+    <tr><td class="name">Dictation history</td><td class="win">ours</td><td class="num">1</td>
+        <td class="note">Header reads like a landing page rather than an app chrome.</td></tr>
+    <tr><td class="name">Dictionary</td><td class="win">ours</td><td class="num">1</td>
+        <td class="note">Eleven all-caps mono micro-labels on one screen.</td></tr>
+    <tr><td class="name">Snippets</td><td class="win">ours</td><td class="num">1</td>
+        <td class="note">Editor is grey-on-grey and reads as disabled.</td></tr>
+  </tbody>
+</table>
+
+<h2>Phases</h2>
+<table>
+  <tbody>
+    <tr><td class="name" style="width:30%">Recon</td><td style="width:15%"><span class="st done">done</span></td>
+        <td class="note">Decisive find: Flow is 100% cloud, account mandatory, no offline mode.</td></tr>
+    <tr><td class="name">Dictation core</td><td><span class="st done">done</span></td>
+        <td class="note">On-device, offline, first partial ~1.0s, 43× real-time batch.</td></tr>
+    <tr><td class="name">Comparison rig</td><td><span class="st done">done</span></td>
+        <td class="note">Both apps driven through one virtual device; every transcript stamped with the mic it heard.</td></tr>
+    <tr><td class="name">Dashboard</td><td><span class="st done">done</span></td>
+        <td class="note">Shell + 4 sections, all won blind.</td></tr>
+    <tr><td class="name">AI layer (NIM)</td><td><span class="st done">done</span></td>
+        <td class="note">Self-correction, style, transforms, commands. Degrades to deterministic repair offline.</td></tr>
+    <tr><td class="name">Quill 50-clip run</td><td><span class="st run">running</span></td>
+        <td class="note">First attempt aborted — I was compiling during the eval and starved it.</td></tr>
+    <tr><td class="name">Notetaker · Scratchpad · Style UI</td><td><span class="st">not started</span></td>
+        <td class="note">Flow's remaining surface.</td></tr>
   </tbody>
 </table>
 
 <h2>Log</h2>
-<div class="log" id="log">
-<div><i>08:29</i> <b>Recon fan-out</b> — 5 scouts, current sources only.</div>
-<div><i>08:43</i> <b class="g">Wispr Flow is cloud-only.</b> Their docs: "Flow requires an internet connection." Account mandatory, 99.47% dictation uptime last quarter. Reshapes the bar — fair on latency and insertion, rigged on formatting unless ours gets its own cleanup pass.</div>
-<div><i>08:43</i> Correction: full Xcode 26.6 <b>is</b> installed. Earlier "CLT only" was wrong — <code>xcode-select</code> points at CLT, that's all.</div>
-<div><i>08:47</i> Wispr Flow 1.6.447 installed via Homebrew. No password needed.</div>
-<div><i>08:52</i> Ceiling raised to 3M. On-device cleanup chosen. Public corpus first, Roman's voice folded in later.</div>
-<div><i>08:58</i> <b>iCloud trap hit.</b> codesign rejected the bundle — <code>com.apple.fileprovider.fpfs#P</code> can't be stripped by <code>xattr -cr</code>. Build output moved to <code>~/Library/Application Support/Quill/build</code>.</div>
-<div><i>09:00</i> <b class="g">Foundation verified.</b> Designated requirement byte-identical across two rebuilds — TCC grants will survive. Diagnostics run under the app's own identity via <code>open --env</code>, correctly reporting Accessibility denied and <code>tapCreate</code> returning nil.</div>
-<div><i>09:04</i> <b>Subsystem fan-out</b> — 4 agents in isolated worktrees + 1 on the rig.</div>
-<div><i>09:12</i> BlackHole diagnosis: driver installed 4 Jul and signed by Existential Audio, but CoreAudio never loaded it. SIP blocks <code>kickstart</code>. <b>Reboot is the only path.</b></div>
-<div><i>09:40</i> Hotkey + injection merged. 37 tests green.</div>
-<div><i>09:50</i> Two more iCloud traps paid: SwiftPM scratch moved out of Documents; tests need CLT's plugin path + two rpaths (Xcode's 6.3.3 compiler flatly rejects the 6.4 SDK).</div>
-<div><i>09:59</i> <b class="g">Engine verified on real audio.</b> First partial 1.02s, batch 43x real-time. "Craigieburn" correct first try.</div>
-<div><i>10:02</i> <b class="g">Finding: Apple's contextual-string biasing does nothing.</b> Same audio, 0 terms vs 25 terms, byte-identical output. Accepted and ignored.</div>
-<div><i>10:14</i> Built fuzzy vocabulary repair over 1–3 word windows — recovers "graph if I"→graphify, "Craig Eburn"→Craigieburn, "neglify"→Netlify. Spell-checker guard stops it rewriting real English. 46 tests green.</div>
-
+<div class="log">
+<div><i>10:02</i> <b class="g">Apple's contextual-string biasing does nothing.</b> Same audio, 0 vs 25 terms, byte-identical output. Replaced with fuzzy repair over 1–3 word windows.</div>
+<div><i>11:00</i> <b>Dropped-words bug found.</b> The mic wasn't opening until 120ms after key-down plus engine spin-up. Capture now starts at key-down.</div>
+<div><i>17:36</i> <b class="g">Rig proven.</b> Quill transcribed a LibriSpeech clip through BlackHole, audited to the device.</div>
+<div><i>18:02</i> Flow's PTT is a chord (Ctrl+Shift+D) and the helper only spoke bare modifiers — extended it, so Flow can be measured at all.</div>
+<div><i>18:20</i> <b class="g">Dashboard 4/4 won blind.</b> Insights shows a latency distribution a cloud product structurally cannot publish.</div>
+<div><i>19:05</i> <b class="g">Self-correction working live.</b> "send it to Noah no wait send it to Carlo" → "Send it to Carlo", 291ms.</div>
+<div><i>19:05</i> Two bugs only the live run caught: a missed deadline was tripping the circuit breaker in a loop, and the vocabulary list in the prompt made the model inject a brand name that was never spoken.</div>
+<div><i>19:12</i> <b>Flow baseline banked:</b> 2.11% WER over 50 clips, 0 failures.</div>
 </div>
 
-<footer>Bar: Wispr Flow 1.6.447 (cloud) · Ceiling: 3M tokens · Exit: harsh critic picks ours blind, on every piece.</footer>
+<footer>Bar: Wispr Flow 1.6.447 (cloud) · Exit: harsh critic picks ours blind · Nothing here is claimed without a measurement behind it.</footer>
 
 </div>
 <script>
