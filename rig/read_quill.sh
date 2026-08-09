@@ -37,7 +37,7 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
-MODE=""; MARK_FILE=""; AS_JSON=0
+MODE=""; MARK_FILE=""; AS_JSON=0; EXPECT_DEVICE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mark)    MODE=mark;   MARK_FILE="${2:?--mark needs a file}"; shift 2 ;;
@@ -45,6 +45,11 @@ while [[ $# -gt 0 ]]; do
         --latest)  MODE=latest; shift ;;
         --probe)   MODE=probe;  shift ;;
         --json)    AS_JSON=1; shift ;;
+        # Mirrors read_flow.sh. Quill records the microphone it actually used, so
+        # a run through the loopback device can be audited the same way Flow's is:
+        # if this says Built-in when the rig was playing into BlackHole, the app
+        # never heard the test audio and the run is void.
+        --expect-device) EXPECT_DEVICE="${2-}"; shift 2 ;;
         -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
         *) die "unknown argument: $1" "see: rig/read_quill.sh --help" ;;
     esac
@@ -63,11 +68,12 @@ if [[ ! -f "$QUILL_HISTORY" ]]; then
 fi
 
 run_py() {
-    python3 - "$QUILL_HISTORY" "$MODE" "$MARK_FILE" <<'PY'
+    python3 - "$QUILL_HISTORY" "$MODE" "$MARK_FILE" "$EXPECT_DEVICE" <<'PY'
 import hashlib, json, sys
 from datetime import datetime
 
 path, mode, mark_file = sys.argv[1], sys.argv[2], sys.argv[3]
+expect_device = sys.argv[4] if len(sys.argv) > 4 else ""
 
 try:
     raw = open(path, encoding="utf-8").read()
@@ -166,9 +172,30 @@ def pick(key, a, b):
     v = timings.get(key)
     return v if v is not None else span(a, b)
 
+device = rec.get("inputDevice")
+
+# The audit gate. A transcript from an app that was listening to the room while
+# the rig played into a loopback device produces a perfectly plausible WER that
+# means nothing. Refuse it loudly rather than let it into a results table.
+if expect_device:
+    if device is None:
+        print(json.dumps({
+            "error": "no_input_device_field",
+            "detail": ("this Quill build does not record inputDevice, so the run "
+                       "cannot be audited — rebuild from a commit that includes it"),
+        })); sys.exit(3)
+    if expect_device.lower() not in device.lower():
+        print(json.dumps({
+            "error": "wrong_input_device",
+            "expected": expect_device, "actual": device,
+            "detail": ("Quill heard a different microphone than the rig played into, "
+                       "so this transcript is not evidence of anything"),
+        })); sys.exit(3)
+
 print(json.dumps({
     "text": raw,
     "text_inserted": rec.get("insertedText") or "",
+    "input_device": device,
     "latency_ms":            pick("endToEndMs",        "hotkeyDown",      "textInserted"),
     "time_to_first_word_ms": pick("timeToFirstWordMs", "hotkeyDown",      "firstPartial"),
     "final_to_inserted_ms":  pick("finalToInsertedMs", "finalTranscript", "textInserted"),

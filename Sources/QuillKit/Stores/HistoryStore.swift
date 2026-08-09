@@ -16,6 +16,11 @@ public struct DictationRecord: Codable, Sendable, Equatable {
     /// What was actually inserted. The formatting column.
     public let insertedText: String
     public let wordCount: Int
+    /// The microphone the system was actually using, e.g. "MacBook Air Microphone"
+    /// or "BlackHole 2ch". Mirrors Flow's micDevice column: without it a run
+    /// cannot be audited, and a word-error-rate from an app that never heard the
+    /// test audio looks exactly like a real one.
+    public let inputDevice: String?
     public let timings: Timings
 
     public struct Timings: Codable, Sendable, Equatable {

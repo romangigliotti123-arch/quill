@@ -30,6 +30,7 @@ public final class DictationCoordinator {
     /// resolved. Audio recorded in this window is kept if the gesture becomes a
     /// dictation and thrown away if it does not.
     private var isSpeculating = false
+    private var capturedInputDevice: String?
     /// Guards against a late result from a previous dictation landing in this
     /// one — it would paste stale text into whatever you are now typing in.
     private var sessionID = 0
@@ -79,6 +80,9 @@ public final class DictationCoordinator {
         timeline = DictationTimeline()
         // The honest start of the dictation, not the moment we worked out it was one.
         timeline.hotkeyDown = Date()
+        // Captured at the start, not the end: the default device can change
+        // mid-dictation, and what matters is what was heard.
+        capturedInputDevice = AudioDeviceInfo.currentInputName()
 
         Task { [transcriber] in
             await transcriber.prepare()
@@ -163,6 +167,7 @@ public final class DictationCoordinator {
                 rawText: raw,
                 insertedText: final,
                 wordCount: final.split(separator: " ").count,
+                inputDevice: self.capturedInputDevice,
                 timings: .init(
                     timeToFirstWordMs: self.timeline.timeToFirstWordMs,
                     finalToInsertedMs: self.timeline.finalToInsertedMs,
