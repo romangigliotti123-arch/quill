@@ -72,7 +72,7 @@ public final class DictationSectionView: NSView {
         heading = DashboardType.label("Everything you have said", font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label(records.isEmpty
                                     ? "Every dictation is kept on this Mac, with the raw transcript beside what was actually typed."
-                                    : "The raw transcript kept beside what was actually typed \u{2014} so you can see what Quill fixed, and put any line back with one click.",
+                                    : "Raw transcript beside what was actually typed.",
                                     font: DashboardType.body, color: style.inkSecondary,
                                     lines: 2, lineHeight: 20)
         action = DashboardButton(title: DashboardSection.dictation.primaryAction.title,

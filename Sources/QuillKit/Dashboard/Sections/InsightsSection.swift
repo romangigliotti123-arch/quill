@@ -965,7 +965,11 @@ public final class InsightsStreakCard: NSView {
         let start = m.heat.first?.date
         header.configure(
             title: m.currentStreak > 0 ? "\(m.currentStreak) day streak" : "Every day you dictated",
-            meta: start.map { "since \(InsightsFormat.shortDate($0))" } ?? "")
+            // "All time" is stated explicitly because the range control at the top
+            // of the page does NOT govern this card. Without it the heatmap silently
+            // contradicts the active filter and makes every number on the page look
+            // untrustworthy on first read.
+            meta: start.map { "All time · since \(InsightsFormat.shortDate($0))" } ?? "All time")
 
         heatmap.days = m.heat
 
