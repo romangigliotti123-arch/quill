@@ -199,11 +199,28 @@ run_clip() {
     "$PTT" down "$PTT_KEY"
     sleep "$LEAD"
 
+    # Re-resolve by NAME every clip. CoreAudio indices are positional, so a pair
+    # of Bluetooth earbuds connecting mid-run renumbers the list and playback
+    # silently goes to the wrong device. That killed a 50-clip run at clip 20
+    # after 17 good clips, and the cached index was the whole cause.
+    local index
+    index="$(at_output_index "$BLACKHOLE_MATCH")"
+    if [[ -z "$index" ]]; then
+        "$PTT" up "$PTT_KEY"
+        die "the loopback device disappeared from the audio device list" \
+            "Playing into the wrong device produces a plausible WER from silence." \
+            "fix: reconnect BlackHole, or disconnect whatever hardware displaced it."
+    fi
+    if [[ "$index" != "$AT_INDEX" ]]; then
+        warn "loopback device moved from index $AT_INDEX to $index — following it"
+        AT_INDEX="$index"
+    fi
+
     ffmpeg -hide_banner -nostdin -v error -i "$wav" \
-        -f audiotoolbox -audio_device_index "$AT_INDEX" - >/dev/null 2>&1 \
-        || { "$PTT" up "$PTT_KEY"; die "playback to device index $AT_INDEX failed" \
-                "The device list can change when hardware is plugged in." \
-                "fix: re-run; rig/run_eval.sh re-resolves the index each time."; }
+        -f audiotoolbox -audio_device_index "$index" - >/dev/null 2>&1 \
+        || { "$PTT" up "$PTT_KEY"; die "playback to device index $index failed" \
+                "The device exists but would not accept audio." \
+                "fix: check nothing else has exclusive use of it."; }
 
     sleep "$TAIL"
     "$PTT" up "$PTT_KEY"
