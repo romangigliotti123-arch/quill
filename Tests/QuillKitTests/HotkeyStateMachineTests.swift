@@ -21,7 +21,9 @@ private struct Driver {
     /// Hold long enough to arm, i.e. the ordinary push-to-talk start.
     mutating func beginHold(at t: Double) -> [SM.Effect] {
         let armed = at(t, .triggerDown(isolated: true))
-        guard case let .startArmTimer(token, _)? = armed.first else { return armed }
+        // Not `.first`: key-down now emits .beginPreroll ahead of the arm timer.
+        let timer = armed.first { if case .startArmTimer = $0 { return true }; return false }
+        guard case let .startArmTimer(token, _)? = timer else { return armed }
         return at(t + machine.timing.armDelay, .armTimerFired(token: token))
     }
 }
@@ -39,7 +41,7 @@ private struct Driver {
 @Test func armDelayIsNotPaidUntilItElapses() {
     var d = Driver()
     let effects = d.at(1, .triggerDown(isolated: true))
-    #expect(effects == [.startArmTimer(token: 1, delay: d.machine.timing.armDelay)])
+    #expect(effects == [.beginPreroll, .startArmTimer(token: 1, delay: d.machine.timing.armDelay)])
     #expect(!d.machine.isRecording)
 }
 
@@ -47,7 +49,7 @@ private struct Driver {
     var d = Driver()
     _ = d.at(1, .triggerDown(isolated: true))
     let effects = d.at(1.05, .triggerUp)
-    #expect(effects == [.cancelArmTimer])
+    #expect(effects == [.cancelArmTimer, .abortPreroll])
     #expect(d.machine.state == .idle)
 }
 
@@ -75,7 +77,7 @@ private struct Driver {
     _ = d.at(1, .triggerDown(isolated: true))
     _ = d.at(1.05, .triggerUp)
     _ = d.at(2.00, .triggerDown(isolated: true))
-    #expect(d.at(2.05, .triggerUp) == [.cancelArmTimer])
+    #expect(d.at(2.05, .triggerUp) == [.cancelArmTimer, .abortPreroll])
     #expect(d.machine.state == .idle)
 }
 
@@ -102,7 +104,7 @@ private struct Driver {
     _ = d.at(1.45, .triggerUp)          // hands-free off
 
     _ = d.at(1.60, .triggerDown(isolated: true))
-    #expect(d.at(1.65, .triggerUp) == [.cancelArmTimer])
+    #expect(d.at(1.65, .triggerUp) == [.cancelArmTimer, .abortPreroll])
     #expect(d.machine.state == .idle)
 }
 
@@ -111,7 +113,7 @@ private struct Driver {
     _ = d.beginHold(at: 1)
     _ = d.at(1.30, .triggerUp)           // a real hold, released
     _ = d.at(1.40, .triggerDown(isolated: true))
-    #expect(d.at(1.45, .triggerUp) == [.cancelArmTimer])
+    #expect(d.at(1.45, .triggerUp) == [.cancelArmTimer, .abortPreroll])
     #expect(d.machine.state == .idle)
 }
 
@@ -121,7 +123,7 @@ private struct Driver {
     _ = d.at(1.03, .keyDown(keyCode: 49, isBare: false))   // Option+Space
     _ = d.at(1.06, .triggerUp)
     _ = d.at(1.20, .triggerDown(isolated: true))
-    #expect(d.at(1.25, .triggerUp) == [.cancelArmTimer])
+    #expect(d.at(1.25, .triggerUp) == [.cancelArmTimer, .abortPreroll])
     #expect(d.machine.state == .idle)
 }
 
@@ -130,14 +132,14 @@ private struct Driver {
 @Test func typingWhileArmedAbandonsTheGestureSilently() {
     var d = Driver()
     _ = d.at(1, .triggerDown(isolated: true))
-    #expect(d.at(1.05, .keyDown(keyCode: 0, isBare: false)) == [.cancelArmTimer])
+    #expect(d.at(1.05, .keyDown(keyCode: 0, isBare: false)) == [.cancelArmTimer, .abortPreroll])
     #expect(d.machine.state == .idle)
 }
 
 @Test func anotherModifierWhileArmedAbandonsTheGesture() {
     var d = Driver()
     _ = d.at(1, .triggerDown(isolated: true))
-    #expect(d.at(1.05, .otherModifierChanged) == [.cancelArmTimer])
+    #expect(d.at(1.05, .otherModifierChanged) == [.cancelArmTimer, .abortPreroll])
     #expect(d.machine.state == .idle)
 }
 
@@ -186,7 +188,9 @@ private struct Driver {
 @Test func aStaleArmTimerCannotStartAPhantomRecording() {
     var d = Driver()
     let first = d.at(1, .triggerDown(isolated: true))
-    guard case let .startArmTimer(staleToken, _)? = first.first else {
+    guard case let .startArmTimer(staleToken, _)? = first.first(where: {
+        if case .startArmTimer = $0 { return true }; return false
+    }) else {
         Issue.record("expected an arm timer")
         return
     }
@@ -220,7 +224,7 @@ private struct Driver {
 @Test func aTapDisabledWhileArmedJustDropsTheGesture() {
     var d = Driver()
     _ = d.at(1, .triggerDown(isolated: true))
-    #expect(d.at(1.05, .tapInterrupted) == [.cancelArmTimer])
+    #expect(d.at(1.05, .tapInterrupted) == [.cancelArmTimer, .abortPreroll])
     #expect(d.machine.state == .idle)
 }
 
@@ -248,4 +252,53 @@ private struct Driver {
 @Test func chordMaskExcludesFnSoArrowAndReturnComparisonsStillMatch() {
     #expect(!HotkeyBinding.chordMask.contains(.maskSecondaryFn))
     #expect(HotkeyBinding.isolationMask.contains(.maskSecondaryFn))
+}
+
+
+// MARK: - Preroll
+
+// The bug these exist for: recording used to start only once the arm delay had
+// elapsed, so the first fraction of a second of speech was never captured. It
+// presented as "it drops words when I start talking straight away".
+
+@Test func audioStartsOnKeyDownNotAfterTheArmDelay() {
+    var d = Driver()
+    let effects = d.at(1, .triggerDown(isolated: true))
+    #expect(effects.first == .beginPreroll)
+    #expect(!d.machine.isRecording)  // capturing, but not yet committed
+}
+
+@Test func aChordBinsTheSpeculativeAudio() {
+    var d = Driver()
+    _ = d.at(1, .triggerDown(isolated: true))
+    #expect(d.at(1.05, .keyDown(keyCode: 0, isBare: false)).contains(.abortPreroll))
+}
+
+@Test func aChordThatNeverArmsNeverStartsTheMicrophone() {
+    // Option+Space must not open the microphone even briefly.
+    var d = Driver()
+    #expect(d.at(1, .triggerDown(isolated: false)).isEmpty)
+}
+
+@Test func aConfirmedHoldKeepsTheAudioItAlreadyCaptured() {
+    var d = Driver()
+    let down = d.at(1, .triggerDown(isolated: true))
+    #expect(down.contains(.beginPreroll))
+    guard case let .startArmTimer(token, _)? = down.first(where: { if case .startArmTimer = $0 { return true }; return false })
+    else { Issue.record("no arm timer"); return }
+    let armed = d.at(1.12, .armTimerFired(token: token))
+    #expect(armed == [.notifyPressed])
+    #expect(!armed.contains(.abortPreroll))
+}
+
+@Test func aDoubleTapKeepsTheAudioFromTheSecondTap() {
+    var d = Driver()
+    _ = d.at(1, .triggerDown(isolated: true))
+    _ = d.at(1.05, .triggerUp)
+    let second = d.at(1.2, .triggerDown(isolated: true))
+    #expect(second.contains(.beginPreroll))
+    let up = d.at(1.25, .triggerUp)
+    #expect(up.contains(.notifyPressed))
+    #expect(!up.contains(.abortPreroll))
+    #expect(d.machine.state == .handsFree)
 }

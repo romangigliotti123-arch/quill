@@ -53,6 +53,18 @@ public struct HotkeyStateMachine: Equatable, Sendable {
     }
 
     public enum Effect: Equatable, Sendable {
+        /// Start capturing audio the instant the key goes down, BEFORE we know
+        /// whether this is a hold, a tap or the start of a chord.
+        ///
+        /// Without this, the microphone does not open until the arm delay has
+        /// elapsed and the audio engine has spun up — measured together at a few
+        /// hundred milliseconds — and anything said in that window is gone. It is
+        /// the difference between "it dropped my first word" and not. The cost is
+        /// that a discarded gesture briefly opened the microphone; the recording
+        /// is thrown away and never transcribed.
+        case beginPreroll
+        /// The gesture turned out not to be dictation. Throw the audio away.
+        case abortPreroll
         case notifyPressed
         case notifyReleased
         case notifyCancelled
@@ -105,7 +117,7 @@ public struct HotkeyStateMachine: Equatable, Sendable {
             let token = nextToken
             nextToken += 1
             state = .armed(token: token)
-            return [.startArmTimer(token: token, delay: timing.armDelay)]
+            return [.beginPreroll, .startArmTimer(token: token, delay: timing.armDelay)]
 
         case let (.armed(token), .armTimerFired(fired)):
             guard fired == token else { return [] }
@@ -122,19 +134,19 @@ public struct HotkeyStateMachine: Equatable, Sendable {
             }
             lastTapAt = now
             state = .idle
-            return [.cancelArmTimer]
+            return [.cancelArmTimer, .abortPreroll]
 
         case (.armed, .keyDown), (.armed, .otherModifierChanged):
             // It was the beginning of a chord. Abandon it, and refuse to let it
             // count as the first half of a double-tap.
             lastTapAt = nil
             state = .idle
-            return [.cancelArmTimer]
+            return [.cancelArmTimer, .abortPreroll]
 
         case (.armed, .tapInterrupted):
             lastTapAt = nil
             state = .idle
-            return [.cancelArmTimer]
+            return [.cancelArmTimer, .abortPreroll]
 
         case (.holding, .triggerUp):
             // A hold is not a tap; it must not seed a double-tap.

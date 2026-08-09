@@ -26,6 +26,10 @@ public final class DictationCoordinator {
 
     private var timeline = DictationTimeline()
     private var isDictating = false
+    /// Capturing, but not yet committed: the key is down and the gesture has not
+    /// resolved. Audio recorded in this window is kept if the gesture becomes a
+    /// dictation and thrown away if it does not.
+    private var isSpeculating = false
     /// Guards against a late result from a previous dictation landing in this
     /// one — it would paste stale text into whatever you are now typing in.
     private var sessionID = 0
@@ -63,21 +67,22 @@ public final class DictationCoordinator {
 
     // MARK: - Lifecycle
 
-    private func beginDictation() {
-        guard !isDictating else { return }
-        isDictating = true
+    /// Called the instant the key goes down. Everything expensive happens here —
+    /// model warm-up and opening the microphone — because by the time the gesture
+    /// has been recognised, whatever was said in the meantime is already gone.
+    private func speculativelyBegin() {
+        guard !isDictating, !isSpeculating else { return }
+        isSpeculating = true
         sessionID += 1
         let session = sessionID
 
         timeline = DictationTimeline()
+        // The honest start of the dictation, not the moment we worked out it was one.
         timeline.hotkeyDown = Date()
-        overlay.show(.listening(level: 0))
 
         Task { [transcriber] in
-            // Warm the model on key-down rather than on first audio, so the
-            // first word is not paying for model load.
             await transcriber.prepare()
-            guard session == self.sessionID else { return }
+            guard session == self.sessionID, self.isSpeculating || self.isDictating else { return }
             do {
                 try await transcriber.start()
             } catch {
@@ -86,9 +91,34 @@ public final class DictationCoordinator {
         }
     }
 
+    /// The gesture was a chord or a stray tap. Bin the audio without a trace —
+    /// no overlay was ever shown, so nothing needs undoing on screen.
+    private func abandonSpeculation() {
+        guard isSpeculating, !isDictating else { return }
+        isSpeculating = false
+        sessionID += 1
+        Task { [transcriber] in await transcriber.cancel() }
+    }
+
+    /// The gesture is confirmed as dictation. Audio has been recording since
+    /// key-down, so there is nothing to start here — only something to show.
+    private func beginDictation() {
+        guard !isDictating else { return }
+        isDictating = true
+
+        if !isSpeculating {
+            // Defensive: a confirmation with no speculation behind it. Start now
+            // and accept the lost milliseconds rather than record nothing at all.
+            speculativelyBegin()
+        }
+        isSpeculating = false
+        overlay.show(.listening(level: 0))
+    }
+
     private func endDictation() {
         guard isDictating else { return }
         isDictating = false
+        isSpeculating = false
         let session = sessionID
         overlay.show(.transcribing)
 
@@ -152,6 +182,7 @@ public final class DictationCoordinator {
     private func cancelDictation() {
         guard isDictating else { return }
         isDictating = false
+        isSpeculating = false
         sessionID += 1
         Task { [transcriber, overlay] in
             await transcriber.cancel()
@@ -161,6 +192,7 @@ public final class DictationCoordinator {
 
     private func fail(_ message: String) {
         isDictating = false
+        isSpeculating = false
         overlay.show(.error(message))
     }
 
@@ -187,6 +219,8 @@ public final class DictationCoordinator {
 // MARK: - Hotkey
 
 extension DictationCoordinator: HotkeyEngineDelegate {
+    public func hotkeyMayBegin() { speculativelyBegin() }
+    public func hotkeyAborted() { abandonSpeculation() }
     public func hotkeyPressed() { beginDictation() }
     public func hotkeyReleased() { endDictation() }
     public func hotkeyCancelled() { cancelDictation() }

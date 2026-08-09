@@ -287,6 +287,10 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
         var swallow = false
         for effect in effects {
             switch effect {
+            case .beginPreroll:
+                deliver { $0.hotkeyMayBegin() }
+            case .abortPreroll:
+                deliver { $0.hotkeyAborted() }
             case .notifyPressed:
                 deliver { $0.hotkeyPressed() }
             case .notifyReleased:

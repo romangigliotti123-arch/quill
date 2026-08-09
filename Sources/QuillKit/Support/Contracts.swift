@@ -16,6 +16,14 @@ import Foundation
 /// as an intermittent bug later.
 @MainActor
 public protocol HotkeyEngineDelegate: AnyObject {
+    /// The trigger went down, but it is not yet known whether this is dictation.
+    /// Start capturing audio now and discard it later if this turns out to be a
+    /// chord or a stray tap — the alternative is losing whatever was said during
+    /// the arm delay and the audio engine's spin-up.
+    func hotkeyMayBegin()
+    /// The gesture resolved to something other than dictation. Throw the
+    /// speculative capture away.
+    func hotkeyAborted()
     func hotkeyPressed()
     func hotkeyReleased()
     /// Escape, or any keystroke that means "throw this dictation away".
