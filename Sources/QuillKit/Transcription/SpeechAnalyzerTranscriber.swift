@@ -388,6 +388,16 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
 
     // MARK: - Audio in
 
+    /// How far `earlier` precedes `later`, in seconds. Negative when it does not.
+    /// Host ticks are not nanoseconds on Apple silicon, hence the timebase.
+    private static func secondsBetween(_ earlier: UInt64, and later: UInt64) -> Double {
+        guard later > earlier else { return -1 }
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        let ticks = Double(later - earlier)
+        return ticks * Double(info.numer) / Double(info.denom) / 1_000_000_000
+    }
+
     private func ingest(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime?, session id: Int) {
         let live: Session? = withLock {
             guard let session = self.session, session.id == id else { return nil }
@@ -404,7 +414,14 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         // shows up as one transcript containing two utterances, and it inflated
         // a 50-clip eval from roughly 2% word error to 14.68%. On a person it
         // reads as "the start of my sentence has someone else's words in it".
-        if let time, time.isHostTimeValid, time.hostTime < session.openedAtHostTime {
+        // Audio recorded before this session opened belongs to the PREVIOUS
+        // dictation. The engine keeps buffers queued and hands them to whoever
+        // starts next, tagged with the NEW session id, so the id fence does not
+        // catch them. A tolerance rather than a hard boundary: the hardware
+        // buffer already holds audio from a moment before the session object
+        // exists, and rejecting that produced no transcript at all.
+        if let time, time.isHostTimeValid,
+           Self.secondsBetween(time.hostTime, and: session.openedAtHostTime) > 0.25 {
             return
         }
 

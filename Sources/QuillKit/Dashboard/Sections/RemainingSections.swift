@@ -56,33 +56,76 @@ public final class ScratchpadSectionView: NSView {
         wantsLayer = true
 
         let eyebrow = DashboardType.label("Scratchpad", font: DashboardType.eyebrow,
-                                           color: style.inkTertiary, uppercase: true)
+                                          color: style.inkTertiary, uppercase: true)
         let title = DashboardType.label("Somewhere for a thought to land",
-                                         font: DashboardType.display, color: style.ink)
-        let deck = DashboardType.label(
-            "Dictate with nothing focused and the text comes here instead of being dropped.",
-            font: DashboardType.body, color: style.inkSecondary, lines: 2)
-
-        let header = vstack([eyebrow, title, deck], spacing: DashboardSpace.xs)
+                                        font: DashboardType.display, color: style.ink)
+        let header = vstack([eyebrow, title], spacing: DashboardSpace.xxs)
         addSubview(header)
 
-        let list = vstack(notes.isEmpty
-                          ? [Self.emptyState(style: style)]
-                          : notes.map { Self.row($0, style: style) },
-                          spacing: DashboardSpace.xs)
-        list.setHuggingPriority(.defaultLow, for: .horizontal)
-        addSubview(list)
+        // The count and the action belong on one line with the title, not stacked
+        // under a paragraph. The deck that used to sit here repeated what the
+        // empty state already says.
+        let count = DashboardType.label(
+            notes.isEmpty ? "" : "\(notes.count) note\(notes.count == 1 ? "" : "s")",
+            font: DashboardType.caption, color: style.inkTertiary)
+        count.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(count)
+
+        let newNote = Self.primaryButton("New note", style: style)
+        addSubview(newNote)
 
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: leadingAnchor),
-            header.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            header.topAnchor.constraint(equalTo: topAnchor),
-            list.leadingAnchor.constraint(equalTo: leadingAnchor),
-            list.trailingAnchor.constraint(equalTo: trailingAnchor),
-            list.topAnchor.constraint(equalTo: header.bottomAnchor, constant: DashboardSpace.xl),
+            // Top inset, so the eyebrow is not clipped by the panel edge — the
+            // shell insets the panel, not the section inside it.
+            header.topAnchor.constraint(equalTo: topAnchor, constant: DashboardMetrics.contentPaddingY),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DashboardMetrics.contentPaddingX),
+            newNote.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -DashboardMetrics.contentPaddingX),
+            newNote.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            count.trailingAnchor.constraint(equalTo: newNote.leadingAnchor, constant: -DashboardSpace.sm),
+            count.centerYAnchor.constraint(equalTo: newNote.centerYAnchor),
         ])
+
+        if notes.isEmpty {
+            let empty = Self.emptyState(style: style)
+            addSubview(empty)
+            NSLayoutConstraint.activate([
+                empty.centerXAnchor.constraint(equalTo: centerXAnchor),
+                // Optically centred in the space BELOW the header rather than in
+                // the whole panel — a true centre reads as low once a header is
+                // above it.
+                empty.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -DashboardSpace.lg),
+                empty.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
+            ])
+        } else {
+            let list = vstack(notes.map { Self.row($0, style: style) }, spacing: DashboardSpace.xs)
+            addSubview(list)
+            NSLayoutConstraint.activate([
+                list.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DashboardMetrics.contentPaddingX),
+                list.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -DashboardMetrics.contentPaddingX),
+                list.topAnchor.constraint(equalTo: header.bottomAnchor, constant: DashboardSpace.lg),
+            ])
+        }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private static func primaryButton(_ text: String, style: DashboardStyle) -> NSView {
+        let box = NSView()
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.wantsLayer = true
+        box.layer?.cornerRadius = DashboardRadius.control
+        box.layer?.backgroundColor = style.ink.cgColor
+
+        let label = DashboardType.label(text, font: DashboardType.caption, color: style.panel)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: DashboardSpace.md),
+            label.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -DashboardSpace.md),
+            box.heightAnchor.constraint(equalToConstant: 32),
+        ])
+        return box
+    }
 
     private static func row(_ note: Note, style: DashboardStyle) -> NSView {
         let card = SectionCard(style: style, title: note.displayTitle,
@@ -90,43 +133,54 @@ public final class ScratchpadSectionView: NSView {
         card.translatesAutoresizingMaskIntoConstraints = false
 
         let preview = DashboardType.label(note.body, font: DashboardType.callout,
-                                           color: style.inkSecondary, lines: 2)
+                                          color: style.inkSecondary, lines: 2)
         preview.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(preview)
 
         let meta = DashboardType.label("\(note.wordCount) words", font: DashboardType.micro,
-                                        color: style.inkQuaternary, uppercase: true)
+                                       color: style.inkQuaternary, uppercase: true)
         meta.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(meta)
 
         NSLayoutConstraint.activate([
             preview.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: DashboardSpace.md),
             preview.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -DashboardSpace.md),
-            preview.topAnchor.constraint(equalTo: card.topAnchor, constant: 42),
+            preview.topAnchor.constraint(equalTo: card.topAnchor, constant: 44),
             meta.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: DashboardSpace.md),
             meta.topAnchor.constraint(equalTo: preview.bottomAnchor, constant: DashboardSpace.sm),
             meta.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -DashboardSpace.md),
-            card.heightAnchor.constraint(greaterThanOrEqualToConstant: 108),
+            card.heightAnchor.constraint(greaterThanOrEqualToConstant: 112),
         ])
         return card
     }
 
+    /// Centred, quiet, and it tells you the one thing you can do rather than
+    /// repeating the section deck.
     private static func emptyState(style: DashboardStyle) -> NSView {
-        let card = SectionCard(style: style, title: "No notes yet")
-        card.translatesAutoresizingMaskIntoConstraints = false
+        let box = NSView()
+        box.translatesAutoresizingMaskIntoConstraints = false
+
+        let glyph = NSImageView()
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+        glyph.image = NSImage(systemSymbolName: "text.append", accessibilityDescription: nil)
+        glyph.symbolConfiguration = .init(pointSize: 26, weight: .regular)
+        glyph.contentTintColor = style.inkQuaternary
+
+        let head = DashboardType.label("Nothing here yet", font: DashboardType.headline,
+                                       color: style.inkSecondary, alignment: .center)
         let body = DashboardType.label(
-            "Hold the dictation key with no text field focused. Whatever you say lands here.",
-            font: DashboardType.callout, color: style.inkSecondary, lines: 2)
-        body.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(body)
+            "Hold the dictation key with no text field focused, and whatever you say lands here.",
+            font: DashboardType.callout, color: style.inkTertiary, lines: 2, alignment: .center)
+
+        let stack = vstack([glyph, head, body], spacing: DashboardSpace.sm, alignment: .centerX)
+        box.addSubview(stack)
         NSLayoutConstraint.activate([
-            body.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: DashboardSpace.md),
-            body.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -DashboardSpace.md),
-            body.topAnchor.constraint(equalTo: card.topAnchor, constant: 42),
-            body.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -DashboardSpace.md),
-            card.heightAnchor.constraint(greaterThanOrEqualToConstant: 104),
+            stack.topAnchor.constraint(equalTo: box.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: box.trailingAnchor),
         ])
-        return card
+        return box
     }
 
     static func relative(_ date: Date, from now: Date = Date()) -> String {
@@ -227,12 +281,12 @@ public final class StyleSectionView: NSView {
         addSubview(presets)
 
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: leadingAnchor),
-            header.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            header.topAnchor.constraint(equalTo: topAnchor, constant: DashboardSpace.xs),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DashboardMetrics.contentPaddingX),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -DashboardMetrics.contentPaddingX),
+            header.topAnchor.constraint(equalTo: topAnchor, constant: DashboardMetrics.contentPaddingY),
 
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DashboardMetrics.contentPaddingX),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -DashboardMetrics.contentPaddingX),
             row.topAnchor.constraint(equalTo: header.bottomAnchor, constant: DashboardSpace.xl),
             row.heightAnchor.constraint(equalToConstant: 210),
 
@@ -244,8 +298,8 @@ public final class StyleSectionView: NSView {
             trustBody.trailingAnchor.constraint(equalTo: trust.trailingAnchor, constant: -DashboardSpace.md),
             trustBody.topAnchor.constraint(equalTo: trust.topAnchor, constant: 46),
 
-            presets.leadingAnchor.constraint(equalTo: leadingAnchor),
-            presets.trailingAnchor.constraint(equalTo: trailingAnchor),
+            presets.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DashboardMetrics.contentPaddingX),
+            presets.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -DashboardMetrics.contentPaddingX),
             presets.topAnchor.constraint(equalTo: row.bottomAnchor, constant: DashboardSpace.sm),
             presets.heightAnchor.constraint(equalToConstant: 108),
             chips.leadingAnchor.constraint(equalTo: presets.leadingAnchor, constant: DashboardSpace.md),
@@ -335,11 +389,11 @@ public final class NotetakerSectionView: NSView {
         addSubview(card)
 
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: leadingAnchor),
-            header.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -120),
-            header.topAnchor.constraint(equalTo: topAnchor),
-            card.leadingAnchor.constraint(equalTo: leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DashboardMetrics.contentPaddingX),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -(DashboardMetrics.contentPaddingX + 120)),
+            header.topAnchor.constraint(equalTo: topAnchor, constant: DashboardMetrics.contentPaddingY),
+            card.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DashboardMetrics.contentPaddingX),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -DashboardMetrics.contentPaddingX),
             card.topAnchor.constraint(equalTo: header.bottomAnchor, constant: DashboardSpace.xl),
             list.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: DashboardSpace.md),
             list.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -DashboardSpace.md),
