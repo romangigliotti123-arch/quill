@@ -2,18 +2,26 @@
 #
 # rig/read_quill.sh — pull one transcript out of Quill's history.
 #
-# ASSUMED CONTRACT (Quill is being written in parallel with this rig)
+# CONTRACT — verified against a real history.json on 2026-08-09
 #
 #   ~/Library/Application Support/Quill/history.json
-#   a JSON array, NEWEST FIRST, each record having at least:
-#     .text      the transcript string
-#     .timeline  an object of moments (hotkeyDown, audioFirstBuffer,
-#                firstPartial, finalTranscript, textInserted) matching
-#                DictationTimeline in Sources/QuillKit/Support/Contracts.swift
+#   a JSON array, NEWEST FIRST, each record:
+#     .id            UUID string — used to prove a transcript is new
+#     .date          ISO-8601 (e.g. "2026-08-09T00:14:25Z")
+#     .rawText       transcript as recognised      → the ACCURACY field
+#     .insertedText  transcript as actually typed  → the post-cleanup field
+#     .wordCount     int
+#     .timings       { endToEndMs, timeToFirstWordMs, finalToInsertedMs,
+#                      usedThoroughCleanup }
 #
-# Nothing here guesses. If the file is missing, or is not an array, or record 0
-# has no .text, the script says exactly what it found and exits non-zero. If
-# Quill ships a different shape, THIS FILE is the one place to change.
+# rawText pairs with Flow's asrText and insertedText pairs with Flow's
+# formattedText, so the accuracy column compares raw against raw and the
+# formatting column compares cleaned against cleaned. Mixing those two is the
+# easiest way to accidentally publish a number that measures text cleanup.
+#
+# The earlier assumed shape (.text / .timeline) is still accepted, because this
+# rig was written before Quill existed and nothing is gained by breaking if it
+# reverts. Anything else fails loudly with the keys it actually found.
 #
 # Flow records which mic it used; Quill has no equivalent column, so the
 # device proof for a Quill run comes from run_eval.sh asserting the system
@@ -90,22 +98,27 @@ elif isinstance(doc, list):
 else:
     print(json.dumps({"error": "unexpected_shape", "found": type(doc).__name__})); sys.exit(0)
 
-def top_hash(recs):
-    if not recs:
-        return ""
+def ident(rec):
+    """A stable identity for a record: its id if it has one, else a hash."""
+    if isinstance(rec.get("id"), str):
+        return rec["id"]
     return hashlib.sha256(
-        json.dumps(recs[0], sort_keys=True, default=str).encode()).hexdigest()[:16]
+        json.dumps(rec, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 if mode == "probe":
+    r0 = records[0] if records else {}
     print(json.dumps({
         "container": container, "records": len(records),
-        "record0_keys": sorted(records[0]) if records else [],
-        "timeline_keys": sorted(records[0].get("timeline", {}))
-                         if records and isinstance(records[0].get("timeline"), dict) else [],
+        "record0_keys": sorted(r0),
+        "timings_keys": sorted(r0.get("timings", {})) if isinstance(r0.get("timings"), dict) else [],
+        "timeline_keys": sorted(r0.get("timeline", {})) if isinstance(r0.get("timeline"), dict) else [],
+        "newest_date": r0.get("date"),
+        "oldest_date": records[-1].get("date") if records else None,
     }, indent=2)); sys.exit(0)
 
 if mode == "mark":
-    open(mark_file, "w").write(json.dumps({"count": len(records), "top": top_hash(records)}))
+    open(mark_file, "w").write(json.dumps(
+        {"count": len(records), "ids": [ident(r) for r in records]}))
     print(json.dumps({"marked": len(records)})); sys.exit(0)
 
 if not records:
@@ -116,18 +129,22 @@ if mode == "since":
         prev = json.load(open(mark_file))
     except Exception as e:
         sys.exit(f"marker {mark_file} unreadable: {e}")
-    # Either a record was appended, or the newest one changed. A capped history
-    # can keep the count identical, so the hash is what actually proves freshness.
-    if len(records) == prev.get("count") and top_hash(records) == prev.get("top"):
+    known = set(prev.get("ids") or [])
+    fresh = [r for r in records if ident(r) not in known]
+    if not fresh:
         print(json.dumps({"error": "no_new_record", "count": len(records)})); sys.exit(0)
+    # Records are newest-first, so the first unseen one is the newest unseen one.
+    rec = fresh[0]
+else:
+    rec = records[0]
 
-rec = records[0]
-if "text" not in rec:
+# rawText is the accuracy field. `.text` is the older assumed name.
+raw = rec.get("rawText") if rec.get("rawText") is not None else rec.get("text")
+if raw is None:
     print(json.dumps({"error": "no_text_field", "record0_keys": sorted(rec)})); sys.exit(0)
 
-# Timeline moments may be epoch seconds, epoch millis, or ISO-8601 strings
-# depending on how Swift encoded Date. Handle all three rather than guessing.
 def to_ms(v):
+    """Timeline moments may be epoch seconds, epoch millis, or ISO-8601."""
     if isinstance(v, (int, float)):
         return v * 1000.0 if v < 1e11 else float(v)
     if isinstance(v, str):
@@ -137,6 +154,7 @@ def to_ms(v):
             return None
     return None
 
+timings = rec.get("timings") if isinstance(rec.get("timings"), dict) else {}
 tl = rec.get("timeline") if isinstance(rec.get("timeline"), dict) else {}
 moments = {k: to_ms(v) for k, v in tl.items()}
 
@@ -144,14 +162,21 @@ def span(a, b):
     x, y = moments.get(a), moments.get(b)
     return round(y - x) if x is not None and y is not None else None
 
-latency = rec.get("endToEndMs") or span("hotkeyDown", "textInserted")
+def pick(key, a, b):
+    v = timings.get(key)
+    return v if v is not None else span(a, b)
 
 print(json.dumps({
-    "text": rec.get("text"),
-    "latency_ms": latency,
-    "time_to_first_word_ms": rec.get("timeToFirstWordMs") or span("hotkeyDown", "firstPartial"),
-    "final_to_inserted_ms": rec.get("finalToInsertedMs") or span("finalTranscript", "textInserted"),
-    "timeline": tl,
+    "text": raw,
+    "text_inserted": rec.get("insertedText") or "",
+    "latency_ms":            pick("endToEndMs",        "hotkeyDown",      "textInserted"),
+    "time_to_first_word_ms": pick("timeToFirstWordMs", "hotkeyDown",      "firstPartial"),
+    "final_to_inserted_ms":  pick("finalToInsertedMs", "finalTranscript", "textInserted"),
+    "used_thorough_cleanup": timings.get("usedThoroughCleanup"),
+    "word_count": rec.get("wordCount"),
+    "id": rec.get("id"),
+    "date": rec.get("date"),
+    "timings": timings or tl,
     "records_total": len(records),
     "container": container,
 }))
@@ -194,8 +219,11 @@ else
     printf '%s' "$RESULT" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-print("  text        : %r"   % (d.get("text"),))
+print("  rawText     : %r"   % (d.get("text"),))
+if (d.get("text_inserted") or "") and d.get("text_inserted") != d.get("text"):
+    print("  inserted    : %r" % (d.get("text_inserted"),))
 print("  e2e latency : %s ms" % (d.get("latency_ms"),))
 print("  ttfw        : %s ms" % (d.get("time_to_first_word_ms"),))
+print("  date        : %s"    % (d.get("date"),))
 print("  records     : %s"    % (d.get("records_total"),))'
 fi

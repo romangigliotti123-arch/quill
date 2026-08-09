@@ -233,9 +233,28 @@ comparison. If it cannot be imported, `score.py` exits non-zero rather than
 silently using something weaker. Dependencies are version-pinned; an instrument
 whose metric moves when a package publishes a release is not an instrument.
 
-Accuracy is scored on Flow's **`asrText`** (raw). `formattedText` is reported
-separately, so you can see whether the formatter changed the *words* rather than
-just the punctuation.
+Accuracy is scored on Flow's **`asrText`** (raw) against Quill's **`rawText`**.
+The post-cleanup fields — Flow's `formattedText`, Quill's `insertedText` — are
+reported in a separate column, so you can see whether cleanup changed the
+*words* rather than just the punctuation.
+
+Pairing those the other way round (one app's cleaned output against the other's
+raw) is the easiest way to publish a number that measures text cleanup and call
+it accuracy.
+
+### Quill's history contract
+
+Verified against a real `history.json` on 2026-08-09 — newest-first array of:
+
+```
+id, date, rawText, insertedText, wordCount,
+timings { endToEndMs, timeToFirstWordMs, finalToInsertedMs, usedThoroughCleanup }
+```
+
+`read_quill.sh` adapts this to the shape the rest of the rig consumes, so if
+Quill's format moves again that file is the only one to change. Check it with
+`rig/read_quill.sh --probe`, which prints the real shape rather than the assumed
+one.
 
 ---
 

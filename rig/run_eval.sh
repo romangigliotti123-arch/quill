@@ -266,10 +266,15 @@ if app == "flow":
     extra = {"mic_device": d.get("micDevice"), "flow_duration": d.get("duration"),
              "num_words": d.get("numWords")}
 else:
-    raw, formatted = d.get("text") or "", ""
+    # rawText ↔ Flow's asrText (accuracy), insertedText ↔ formattedText
+    # (post-cleanup). Pairing them the other way round would put a cleaned
+    # transcript in the accuracy column for one app and a raw one for the other.
+    raw, formatted = d.get("text") or "", d.get("text_inserted") or ""
     latency = d.get("latency_ms")
     extra = {"time_to_first_word_ms": d.get("time_to_first_word_ms"),
-             "final_to_inserted_ms": d.get("final_to_inserted_ms")}
+             "final_to_inserted_ms": d.get("final_to_inserted_ms"),
+             "used_thorough_cleanup": d.get("used_thorough_cleanup"),
+             "quill_record_id": d.get("id"), "quill_date": d.get("date")}
 try:
     extra["tap"] = json.loads(fp) if fp.strip() else None
 except Exception:
