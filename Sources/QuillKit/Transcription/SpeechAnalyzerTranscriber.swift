@@ -269,6 +269,10 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         /// Guarded by the transcriber's lock, not this object's.
         var settled = ""
         var volatile = ""
+        /// Host time this session opened. Audio that predates it belongs to the
+        /// PREVIOUS dictation and must not be transcribed into this one — see
+        /// the check in ingest().
+        let openedAtHostTime: UInt64 = mach_absolute_time()
 
         init(
             id: Int,
@@ -391,6 +395,18 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
             return session
         }
         guard let session = live else { return }
+
+        // Reject audio recorded before this session opened.
+        //
+        // The engine keeps buffers queued, and a dictation that starts promptly
+        // after the last one gets handed the tail of the previous utterance —
+        // tagged with the NEW session id, so the id fence does not catch it. It
+        // shows up as one transcript containing two utterances, and it inflated
+        // a 50-clip eval from roughly 2% word error to 14.68%. On a person it
+        // reads as "the start of my sentence has someone else's words in it".
+        if let time, time.isHostTimeValid, time.hostTime < session.openedAtHostTime {
+            return
+        }
 
         do {
             for input in try session.feed.inputs(from: buffer, at: time) {
