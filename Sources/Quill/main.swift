@@ -38,6 +38,14 @@ if ProcessInfo.processInfo.environment["QUILL_TRANSCRIBE_FILE"] != nil {
     exit(0)
 }
 
+// Dashboard shots: QUILL_DASHBOARD_SHOTS=/dir renders every section to PNG at
+// Flow's exact window size and exits. Same reasoning as the overlay renderer —
+// a UI that can only be reviewed by launching the app is a UI nobody reviews,
+// and this one is 1350x850 of surface area to get wrong.
+if DashboardPreviewRenderer.runIfRequested() {
+    exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

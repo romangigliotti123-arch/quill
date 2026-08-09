@@ -5,6 +5,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var coordinator: DictationCoordinator?
     private var permissionPoll: Timer?
+    /// Held for the app's lifetime: the window is closed, not destroyed, so
+    /// reopening it keeps the selected section and the frame the user left it at.
+    private var dashboard: DashboardWindowController?
 
     public override init() { super.init() }
 
@@ -49,6 +52,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(hint)
         menu.addItem(.separator())
 
+        let dash = NSMenuItem(title: "Open Quill…", action: #selector(openDashboard), keyEquivalent: "0")
+        dash.target = self
+        menu.addItem(dash)
+        menu.addItem(.separator())
+
         for p in Permissions.missing {
             let mi = NSMenuItem(title: "Grant \(p.rawValue)…", action: #selector(grant(_:)), keyEquivalent: "")
             mi.target = self
@@ -80,6 +88,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func grant(_ sender: NSMenuItem) {
         guard let p = sender.representedObject as? Permission else { return }
         Permissions.request(p)
+    }
+
+    @objc private func openDashboard() {
+        if dashboard == nil { dashboard = DashboardWindowController() }
+        dashboard?.present()
     }
 
     @objc private func editVocabulary() {
