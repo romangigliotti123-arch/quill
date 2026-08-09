@@ -85,7 +85,7 @@ require_blackhole() {
 # Exact CoreAudio name of the BlackHole input, as SwitchAudioSource spells it.
 blackhole_input_name() {
     local n
-    n="$(SwitchAudioSource -a -t input 2>/dev/null | grep -i "$BLACKHOLE_MATCH" | head -1)"
+    n="$(SwitchAudioSource -a -t input 2>/dev/null | grep -i "$BLACKHOLE_MATCH" | head -1 || true)"
     [[ -n "$n" ]] || die "No input device matching '$BLACKHOLE_MATCH'." "run: rig/setup.sh"
     printf '%s' "$n"
 }
@@ -102,9 +102,13 @@ at_output_index() {
     listing="$(ffmpeg -hide_banner -loglevel info \
                  -f lavfi -i "anullsrc=r=48000:cl=stereo" -t 0.05 \
                  -f audiotoolbox -list_devices true - 2>&1 || true)"
+    # `|| true` is load-bearing. Under `set -euo pipefail` a grep that matches
+    # nothing makes this assignment non-zero, which aborts the script INSTANTLY
+    # — before the die() below can explain what went wrong. Silent exit is the
+    # one failure mode this rig must never have.
     idx="$(printf '%s\n' "$listing" \
             | sed -n 's/^\[AudioToolbox @ [^]]*\] *\[\([0-9]\{1,\}\)\] *\(.*\)$/\1|\2/p' \
-            | grep -i "$match" | head -1 | cut -d'|' -f1)"
+            | grep -i "$match" | head -1 | cut -d'|' -f1 || true)"
     if [[ -z "$idx" ]]; then
         die "ffmpeg's audiotoolbox muxer cannot see a device matching '$match'." \
             "devices ffmpeg can see:" \
@@ -122,7 +126,7 @@ av_input_index() {
     idx="$(printf '%s\n' "$listing" \
             | sed -n '/AVFoundation audio devices/,$p' \
             | sed -n 's/^\[AVFoundation indev @ [^]]*\] *\[\([0-9]\{1,\}\)\] *\(.*\)$/\1|\2/p' \
-            | grep -i "$match" | head -1 | cut -d'|' -f1)"
+            | grep -i "$match" | head -1 | cut -d'|' -f1 || true)"   # see note in at_output_index
     [[ -n "$idx" ]] || die "avfoundation cannot see an audio input matching '$match'." \
                            "fix: install BlackHole (see rig/setup.sh) and re-run."
     printf '%s' "$idx"

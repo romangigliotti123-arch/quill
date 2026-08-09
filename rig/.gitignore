@@ -1,0 +1,8 @@
+# Build artefacts and data. The frozen corpus_manifest.tsv is NOT ignored —
+# it is the eval set, and it has to travel with the code for any result to be
+# reproducible.
+bin/
+__pycache__/
+*.pyc
+audio/
+out/

@@ -219,11 +219,17 @@ run_clip() {
         if ! fp_json="$(python3 "$RIG_DIR/tools/fingerprint.py" "$tap_wav" --json 2>/dev/null)"; then
             fp_ok=0
         fi
-        printf '%s\n' "$(python3 -c "
-import json,sys
-d = json.loads('''$fp_json''') if '''$fp_json'''.strip() else {}
-d['clip_id'] = '$clip_id'
-print(json.dumps(d))" 2>/dev/null || echo "{\"clip_id\":\"$clip_id\",\"ok\":false}")" >> "$FPRINTS"
+        # Values go in as argv, never interpolated into the program text — a
+        # transcript containing a quote should not be able to rewrite this script.
+        python3 -c '
+import json, sys
+raw, clip = sys.argv[1], sys.argv[2]
+try:
+    d = json.loads(raw) if raw.strip() else {}
+except Exception:
+    d = {"ok": False, "reason": "unparsable_fingerprint"}
+d["clip_id"] = clip
+print(json.dumps(d))' "$fp_json" "$clip_id" >> "$FPRINTS"
 
         if (( ! fp_ok )); then
             die "the verification tap for $clip_id contains no audio." \
@@ -245,10 +251,15 @@ print(json.dumps({'clip_id':'$clip_id','app':'$APP','ok':False,
         return 1
     fi
 
-    python3 - "$clip_id" "$APP" "$t0" "$t1" "$fp_json" <<'PY' >> "$RESULTS"
+    # `python3 - <<PY` takes the PROGRAM from stdin, so sys.stdin is already
+    # consumed by the time the program runs — the transcript has to arrive as an
+    # argument, not on a pipe.
+    python3 - "$clip_id" "$APP" "$t0" "$t1" "$fp_json" "$rec" <<'PY' >> "$RESULTS"
 import json, sys
-clip_id, app, t0, t1, fp = sys.argv[1], sys.argv[2], float(sys.argv[3]), float(sys.argv[4]), sys.argv[5]
-d = json.load(sys.stdin)
+clip_id, app = sys.argv[1], sys.argv[2]
+t0, t1 = float(sys.argv[3]), float(sys.argv[4])
+fp, rec = sys.argv[5], sys.argv[6]
+d = json.loads(rec)
 if app == "flow":
     raw, formatted = d.get("asrText") or "", d.get("formattedText") or ""
     latency = d.get("e2eLatency")

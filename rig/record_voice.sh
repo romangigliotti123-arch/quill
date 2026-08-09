@@ -102,10 +102,12 @@ if printf '%s' "$CUR_IN" | grep -qi "$BLACKHOLE_MATCH"; then
         "     or: SwitchAudioSource -t input -s 'MacBook Air Microphone'"
 fi
 
+# `|| true`: ffmpeg always exits non-zero when listing devices, and under
+# `set -euo pipefail` that would kill the script here with no message at all.
 AV_IDX="$(ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 \
            | sed -n '/AVFoundation audio devices/,$p' \
            | sed -n 's/^\[AVFoundation indev @ [^]]*\] *\[\([0-9]\{1,\}\)\] *\(.*\)$/\1|\2/p' \
-           | head -1 | cut -d'|' -f1)"
+           | head -1 | cut -d'|' -f1 || true)"
 [[ -n "$AV_IDX" ]] || die "ffmpeg cannot see any audio input device"
 
 BYTES_PER_SEC=96000      # 48000 Hz × 1 channel × 2 bytes, the raw capture format
