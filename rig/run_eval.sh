@@ -146,7 +146,9 @@ def ver(cmd):
     except Exception: return "unknown"
 json.dump({
     "meta_path": p[1], "app": p[2], "run_id": p[3], "input_device": p[4],
-    "playback_device_index": int(p[5]), "ptt_keycode": int(p[6]),
+    "playback_device_index": int(p[5]),
+    # A chord like "control+shift+d" is a valid trigger, not just a bare keycode.
+    "ptt_keycode": int(p[6]) if p[6].isdigit() else p[6],
     "lead_sec": float(p[7]), "tail_sec": float(p[8]), "settle_sec": float(p[9]),
     "started_utc": datetime.datetime.now(datetime.UTC).isoformat(),
     "host": platform.node(), "macos": platform.mac_ver()[0], "arch": platform.machine(),

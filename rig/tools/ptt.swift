@@ -77,6 +77,84 @@ func postModifier(_ key: ModKey, down: Bool) {
     ev.post(tap: .cghidEventTap)
 }
 
+// ── chords ────────────────────────────────────────────────────────────────────
+//
+// Wispr Flow's push-to-talk is Ctrl+Shift+D — a chord, not a bare modifier — and
+// a chord is a different animal: the modifiers arrive as flagsChanged, but the
+// letter is a real keyDown that must carry the accumulated flags, and it has to
+// STAY down for the whole utterance. Posting the letter without the flags, or
+// releasing it early, gets you an app that never starts listening and a run of
+// empty transcripts that looks exactly like a broken microphone.
+
+let letterCodes: [String: UInt16] = [
+    "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
+    "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32,
+    "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46,
+]
+
+let modAliases: [String: UInt16] = [
+    "control": 59, "ctrl": 59, "lcontrol": 59, "rcontrol": 62,
+    "shift": 56, "lshift": 56, "rshift": 60,
+    "option": 58, "alt": 58, "loption": 58, "roption": 61,
+    "command": 55, "cmd": 55, "lcommand": 55, "rcommand": 54,
+    "fn": 63,
+]
+
+/// "control+shift+d" -> ([ctrl, shift], keycode for d). A bare keycode still works.
+func parseSpec(_ spec: String) -> ([ModKey], UInt16?) {
+    var mods: [ModKey] = []
+    var plain: UInt16?
+    for rawPart in spec.lowercased().split(separator: "+") {
+        let part = String(rawPart)
+        if let code = modAliases[part], let k = lookup(code) { mods.append(k); continue }
+        if let code = UInt16(part), let k = lookup(code) { mods.append(k); continue }
+        if let code = letterCodes[part] { plain = code; continue }
+        if let code = UInt16(part) { plain = code; continue }
+        fail("could not understand '\(part)' in '\(spec)'",
+             ["expected something like: control+shift+d, or a bare modifier keycode",
+              "see: ptt keycodes"])
+    }
+    return (mods, plain)
+}
+
+func postChord(_ mods: [ModKey], _ plain: UInt16?, down: Bool) {
+    let src = CGEventSource(stateID: .hidSystemState)
+    if down {
+        var flags = CGEventFlags(rawValue: 0)
+        for m in mods {
+            flags = flags.union(m.generic).union(m.presence)
+            if let ev = CGEvent(keyboardEventSource: src, virtualKey: m.code, keyDown: true) {
+                ev.type = .flagsChanged
+                ev.flags = flags
+                ev.post(tap: .cghidEventTap)
+            }
+            usleep(8_000)
+        }
+        if let plain, let ev = CGEvent(keyboardEventSource: src, virtualKey: plain, keyDown: true) {
+            ev.flags = flags
+            ev.post(tap: .cghidEventTap)
+        }
+    } else {
+        var flags = CGEventFlags(rawValue: 0)
+        for m in mods { flags = flags.union(m.generic).union(m.presence) }
+        if let plain, let ev = CGEvent(keyboardEventSource: src, virtualKey: plain, keyDown: false) {
+            ev.flags = flags
+            ev.post(tap: .cghidEventTap)
+            usleep(8_000)
+        }
+        // Release in reverse so the flag set stays coherent on the way down.
+        for m in mods.reversed() {
+            flags = flags.subtracting(m.generic).subtracting(m.presence)
+            if let ev = CGEvent(keyboardEventSource: src, virtualKey: m.code, keyDown: false) {
+                ev.type = .flagsChanged
+                ev.flags = flags
+                ev.post(tap: .cghidEventTap)
+            }
+            usleep(8_000)
+        }
+    }
+}
+
 // ── selftest ──────────────────────────────────────────────────────────────────
 //
 // Proves the whole mechanism at the OS level without needing either app: install
@@ -149,7 +227,7 @@ func selftest() -> Never {
 
 let args = Array(CommandLine.arguments.dropFirst())
 guard let cmd = args.first else {
-    print("usage: ptt hold <keycode> <seconds> | down <keycode> | up <keycode> | check | selftest | keycodes")
+    print("usage: ptt hold <keycode|chord> <seconds> | down <spec> | up <spec> | check | selftest | keycodes\n       chord example: control+shift+d")
     exit(2)
 }
 
@@ -171,16 +249,31 @@ case "selftest":
 
 case "down", "up":
     requireAccessibility()
-    guard args.count >= 2, let code = UInt16(args[1]), let key = lookup(code) else {
-        fail("need a supported modifier keycode (see: ptt keycodes)")
+    guard args.count >= 2 else { fail("need a keycode or chord (see: ptt keycodes)") }
+    if args[1].contains("+") {
+        let (mods, plain) = parseSpec(args[1])
+        postChord(mods, plain, down: cmd == "down")
+    } else {
+        guard let code = UInt16(args[1]), let key = lookup(code) else {
+            fail("need a supported modifier keycode (see: ptt keycodes)")
+        }
+        postModifier(key, down: cmd == "down")
     }
-    postModifier(key, down: cmd == "down")
 
 case "hold":
     requireAccessibility()
-    guard args.count >= 3, let code = UInt16(args[1]), let key = lookup(code),
-          let secs = Double(args[2]) else {
-        fail("usage: ptt hold <keycode> <seconds>")
+    guard args.count >= 3, let secs = Double(args[2]) else {
+        fail("usage: ptt hold <keycode|chord> <seconds>")
+    }
+    if args[1].contains("+") {
+        let (mods, plain) = parseSpec(args[1])
+        postChord(mods, plain, down: true)
+        Thread.sleep(forTimeInterval: secs)
+        postChord(mods, plain, down: false)
+        exit(0)
+    }
+    guard let code = UInt16(args[1]), let key = lookup(code) else {
+        fail("need a supported modifier keycode (see: ptt keycodes)")
     }
     postModifier(key, down: true)
     // A modifier held by a human is re-asserted by the hardware; some apps arm
