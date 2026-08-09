@@ -632,7 +632,7 @@ final class DictionaryDetailView: NSView {
         let forms = entry?.mishearings.count ?? 0
         heardHead = DashboardType.label(forms > 0 ? "Heard instead · \(forms) form\(forms == 1 ? "" : "s")"
                                             : (entry?.replacement != nil ? "Expands to" : "Nothing caught yet"),
-                                        font: DashboardType.micro, color: style.inkQuaternary, uppercase: true)
+                                        font: DashboardType.caption, color: style.inkTertiary)
         footRule = DashboardRule(color: style.hairline)
         foot = DashboardType.label(
             "Matched on 1–3 word spans by edit distance, after the transcript — biasing never fires on this Mac.",
@@ -687,8 +687,8 @@ final class DictionaryDetailView: NSView {
 
             if entry.hasFired {
                 addSubview(rule())
-                let head = DashboardType.label("Repairs, last 8 weeks", font: DashboardType.micro,
-                                               color: style.inkQuaternary, uppercase: true)
+                let head = DashboardType.label("Repairs, last 8 weeks", font: DashboardType.caption,
+                                               color: style.inkTertiary)
                 addSubview(head)
                 sparkHead = head
                 // Beside its own label rather than beneath it. Eight numbers do
@@ -702,7 +702,7 @@ final class DictionaryDetailView: NSView {
             if let raw = entry.caughtRaw, let clean = entry.caughtClean {
                 addSubview(rule())
                 let head = DashboardType.label("Last caught · \(entry.lastFired ?? "a dictation")",
-                                               font: DashboardType.micro, color: style.inkQuaternary, uppercase: true)
+                                               font: DashboardType.caption, color: style.inkTertiary)
                 addSubview(head)
                 caughtHead = head
 
