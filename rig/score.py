@@ -123,11 +123,13 @@ def punct_density(text: str) -> float:
 
 # ── data loading ──────────────────────────────────────────────────────────────
 
-def load_manifest() -> dict[str, str]:
-    if not MANIFEST.exists():
-        sys.exit(f"FAIL  no manifest at {MANIFEST}\n      fix: rig/fetch_corpus.sh")
+def load_manifest(path: Path | None = None) -> dict[str, str]:
+    p = path or MANIFEST
+    if not p.exists():
+        sys.exit(f"FAIL  no manifest at {p}\n"
+                 f"      fix: rig/fetch_corpus.sh   (or rig/record_voice.sh for the spoken corpus)")
     refs = {}
-    with MANIFEST.open(encoding="utf-8") as fh:
+    with p.open(encoding="utf-8") as fh:
         for line in fh:
             if line.startswith("#") or line.startswith("clip_id"):
                 continue
@@ -300,6 +302,9 @@ def main() -> int:
                     help="a run directory under rig/out (repeat for a comparison)")
     ap.add_argument("--ref", help="ad-hoc reference text")
     ap.add_argument("--hyp", help="ad-hoc hypothesis text")
+    ap.add_argument("--manifest", metavar="FILE",
+                    help="ground-truth manifest (default rig/corpus_manifest.tsv). "
+                         "Use the spoken corpus's manifest for a voice run.")
     ap.add_argument("--json", metavar="FILE", help="also write full results as JSON")
     args = ap.parse_args()
 
@@ -317,7 +322,7 @@ def main() -> int:
     if not args.run:
         ap.error("give --run DIR (once or twice), or --ref/--hyp, or `selftest`")
 
-    refs = load_manifest()
+    refs = load_manifest(Path(args.manifest) if args.manifest else None)
     results = []
     for d in args.run:
         p = Path(d)

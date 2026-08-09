@@ -46,6 +46,16 @@ public final class DictationCoordinator {
         self.history = history
         self.hotkey.delegate = self
         self.transcriber.delegate = self
+        // Drive the waveform from real input. The callback arrives on the audio
+        // thread, so it hops to main before touching any UI.
+        self.transcriber.onLevel = { [weak self] level in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.isDictating else { return }
+                    self.overlay.show(.listening(level: level))
+                }
+            }
+        }
     }
 
     @discardableResult

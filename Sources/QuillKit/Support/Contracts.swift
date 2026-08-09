@@ -55,6 +55,10 @@ public protocol TranscriberDelegate: AnyObject {
 
 public protocol Transcriber: AnyObject {
     var delegate: TranscriberDelegate? { get set }
+    /// Live input level, 0...1, for the overlay's waveform. In the protocol
+    /// rather than on the concrete type because a HUD animating to nothing is
+    /// the difference between an instrument and a decoration.
+    var onLevel: ((Float) -> Void)? { get set }
     /// Warm the model. Called on hotkey-down, before audio, so the first word
     /// is not paying for model load.
     func prepare() async
