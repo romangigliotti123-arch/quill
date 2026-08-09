@@ -28,6 +28,9 @@ public final class DashboardSectionRegistry: DashboardSectionProvider {
         register(.dictation) { DictationSectionProvider().dashboardView(for: .dictation, style: $0) }
         register(.dictionary) { DictionarySectionView(style: $0, entries: DictionaryEntry.entries()) }
         register(.snippets) { SnippetsSectionProvider().dashboardView(for: .snippets, style: $0) }
+        register(.scratchpad) { ScratchpadSectionView(style: $0, notes: NoteStore.shared.all) }
+        register(.style) { StyleSectionView(style: $0, profile: StyleStore.shared.profile) }
+        register(.notetaker) { NotetakerSectionView(style: $0) }
     }
 
     public func register(_ section: DashboardSection, _ builder: @escaping (DashboardStyle) -> NSView?) {
