@@ -17,6 +17,7 @@ public final class DictationCoordinator {
     private let overlay: OverlayPresenting
     private let cleaner: TranscriptCleaning
     private let history: HistoryStore
+    private let snippets: SnippetStore
 
     /// How long the thorough cleanup is allowed to take before we give up on it
     /// and insert the fast version. Past roughly a quarter second the pause
@@ -41,7 +42,8 @@ public final class DictationCoordinator {
         inserter: TextInserting,
         overlay: OverlayPresenting,
         cleaner: TranscriptCleaning = FastCleaner(),
-        history: HistoryStore = HistoryStore()
+        history: HistoryStore = HistoryStore(),
+        snippets: SnippetStore = .shared
     ) {
         self.hotkey = hotkey
         self.transcriber = transcriber
@@ -49,6 +51,7 @@ public final class DictationCoordinator {
         self.overlay = overlay
         self.cleaner = cleaner
         self.history = history
+        self.snippets = snippets
         self.hotkey.delegate = self
         self.transcriber.delegate = self
         // Drive the waveform from real input. The callback arrives on the audio
@@ -126,7 +129,7 @@ public final class DictationCoordinator {
         let session = sessionID
         overlay.show(.transcribing)
 
-        Task { [transcriber, cleaner, inserter, overlay, history, cleanupDeadline] in
+        Task { [transcriber, cleaner, inserter, overlay, history, snippets, cleanupDeadline] in
             let raw = await transcriber.stop()
             guard session == self.sessionID else { return }
 
@@ -148,6 +151,13 @@ public final class DictationCoordinator {
                 final = better
                 usedThorough = true
             }
+
+            // Snippet expansion goes here and nowhere else: after cleanup, so the
+            // cleaner never sentence-cases an email address or "repairs" a URL,
+            // and before insertion, so nothing is typed and then rewritten inside
+            // an app we do not control. Returns the text unchanged when nothing
+            // matched, which is the overwhelmingly common case.
+            final = snippets.expand(final)
 
             let result = inserter.insert(final)
             self.timeline.textInserted = Date()

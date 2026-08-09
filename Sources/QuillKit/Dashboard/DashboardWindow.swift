@@ -500,7 +500,8 @@ public final class DashboardWindowController: NSWindowController, NSWindowDelega
 
     public let rootView: DashboardRootView
 
-    public init(provider: DashboardSectionProvider? = nil, selection: DashboardSection = .dictation) {
+    public init(provider: DashboardSectionProvider? = DashboardSectionRegistry.shared,
+                selection: DashboardSection = .dictation) {
         let style = DashboardStyle.resolve(nil)
         rootView = DashboardRootView(style: style, selection: selection, provider: provider)
 

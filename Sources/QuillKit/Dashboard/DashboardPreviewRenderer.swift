@@ -62,7 +62,8 @@ public enum DashboardPreviewRenderer {
             .compactMap { DashboardSection(rawValue: $0.trimmingCharacters(in: .whitespaces)) }
         do {
             let urls = try renderAll(into: directory,
-                                     sections: (only?.isEmpty == false ? only! : DashboardSection.allCases))
+                                     sections: (only?.isEmpty == false ? only! : DashboardSection.allCases),
+                                     provider: DashboardSectionRegistry.shared)
             urls.forEach { print($0.path) }
         } catch {
             FileHandle.standardError.write(Data("dashboard render failed: \(error)\n".utf8))
