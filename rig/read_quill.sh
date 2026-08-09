@@ -194,8 +194,8 @@ else
     printf '%s' "$RESULT" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-print(f"  text        : {d.get(\"text\")!r}")
-print(f"  e2e latency : {d.get(\"latency_ms\")} ms")
-print(f"  ttfw        : {d.get(\"time_to_first_word_ms\")} ms")
-print(f"  records     : {d.get(\"records_total\")}")'
+print("  text        : %r"   % (d.get("text"),))
+print("  e2e latency : %s ms" % (d.get("latency_ms"),))
+print("  ttfw        : %s ms" % (d.get("time_to_first_word_ms"),))
+print("  records     : %s"    % (d.get("records_total"),))'
 fi

@@ -12,6 +12,32 @@ if ProcessInfo.processInfo.environment["QUILL_DIAGNOSE"] == "1" {
     Diagnostics.runAndExit()
 }
 
+// Cleanup probe: QUILL_CLEAN_TEXT="..." prints the cleaned form and exits, so
+// the full pass chain can be checked against real recogniser output rather than
+// against strings someone imagined it would produce.
+if let raw = ProcessInfo.processInfo.environment["QUILL_CLEAN_TEXT"] {
+    print(FastCleaner().cleanFast(raw))
+    exit(0)
+}
+
+// Transcription harness: QUILL_TRANSCRIBE_FILE=/path/to.wav runs the real
+// transcription path against a file and prints what it measured. Needs no
+// microphone and no TCC grant, which is what makes "the engine works, and here
+// is how fast" a checkable claim rather than an assertion.
+if ProcessInfo.processInfo.environment["QUILL_TRANSCRIBE_FILE"] != nil {
+    let done = DispatchSemaphore(value: 0)
+    Task { @MainActor in
+        await TranscriptionHarness.runIfRequested()
+        done.signal()
+    }
+    // The harness hops to the main actor, so this thread has to keep the runloop
+    // alive rather than block on the semaphore.
+    while done.wait(timeout: .now()) == .timedOut {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

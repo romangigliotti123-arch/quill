@@ -182,9 +182,10 @@ else
     printf '%s' "$RESULT" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-print(f"  timestamp   : {d.get(\"timestamp\")}")
-print(f"  micDevice   : {d.get(\"micDevice\")}")
-print(f"  words       : {d.get(\"numWords\")}   duration: {d.get(\"duration\")}s   e2e: {d.get(\"e2eLatency\")}ms")
-print(f"  asrText     : {d.get(\"asrText\")!r}")
-print(f"  formatted   : {d.get(\"formattedText\")!r}")'
+print("  timestamp   : %s" % (d.get("timestamp"),))
+print("  micDevice   : %s" % (d.get("micDevice"),))
+print("  words       : %s   duration: %ss   e2e: %sms"
+      % (d.get("numWords"), d.get("duration"), d.get("e2eLatency")))
+print("  asrText     : %r" % (d.get("asrText"),))
+print("  formatted   : %r" % (d.get("formattedText"),))'
 fi

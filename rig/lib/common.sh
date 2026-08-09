@@ -18,9 +18,12 @@ BIN_DIR="$RIG_DIR/bin"
 MANIFEST="$RIG_DIR/corpus_manifest.tsv"
 
 FLOW_APP="/Applications/Wispr Flow.app"
-FLOW_DB="$HOME/Library/Application Support/Wispr Flow/flow.sqlite"
 QUILL_APP="$REPO_DIR/build/Quill.app"
-QUILL_HISTORY="$HOME/Library/Application Support/Quill/history.json"
+
+# Overridable so the rig's own tests can run against fixtures. A harness must
+# never write into a real app's data directory, not even for a "safe" read test.
+FLOW_DB="${FLOW_DB:-$HOME/Library/Application Support/Wispr Flow/flow.sqlite}"
+QUILL_HISTORY="${QUILL_HISTORY:-$HOME/Library/Application Support/Quill/history.json}"
 
 # The loopback device. BlackHole 2ch is the default install; 16ch also works.
 BLACKHOLE_MATCH="${BLACKHOLE_MATCH:-BlackHole}"

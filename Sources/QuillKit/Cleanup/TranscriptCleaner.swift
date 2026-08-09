@@ -47,13 +47,20 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         "i os": "iOS",
     ]
 
-    public init() {}
+    private let vocabulary: VocabularyCorrector
+
+    public init(vocabulary: VocabularyCorrector = VocabularyCorrector()) {
+        self.vocabulary = vocabulary
+    }
 
     public func cleanFast(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return text }
 
         text = Self.applyCorrections(to: text)
+        // Fuzzy pass second: the literal table above handles known phrasings
+        // cheaply, this catches the ones where the recogniser split a word.
+        text = vocabulary.correct(text)
         text = Self.stripStandaloneDisfluencies(from: text)
         text = Self.collapseWhitespace(in: text)
         text = Self.tightenPunctuationSpacing(in: text)
