@@ -145,8 +145,21 @@ public final class DictationCoordinator {
             let fast = cleaner.cleanFast(raw)
             var final = fast
             var usedThorough = false
-            if let better = await Self.withDeadline(cleanupDeadline, operation: {
-                await cleaner.cleanThorough(raw, deadline: cleanupDeadline)
+
+            // How long the race gets depends on whether there is anything to race
+            // for. Almost every dictation is already right after the fast pass,
+            // and waiting to be told so is latency spent on nothing — but a
+            // transcript carrying a spoken self-correction is the one case where a
+            // model earns its round trip, and 250ms cannot finish one. Measured
+            // from Melbourne on a warm connection, share of calls landing inside a
+            // deadline: 250ms -> 11%, 350ms -> 78%, 450ms -> 97%. The limit is the
+            // network, not the GPU, so no model choice fixes it.
+            let budget = SelfCorrection.needsModelPass(fast)
+                ? AIConfig.recommendedCleanupDeadline
+                : cleanupDeadline
+
+            if let better = await Self.withDeadline(budget, operation: {
+                await cleaner.cleanThorough(raw, deadline: budget)
             }), better != fast {
                 final = better
                 usedThorough = true

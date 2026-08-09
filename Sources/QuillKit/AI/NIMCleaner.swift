@@ -1,0 +1,455 @@
+import Foundation
+
+// The AI cleanup pass, wired as `cleanThorough` and racing inside
+// DictationCoordinator's existing deadline. Nothing in this file is allowed to
+// make a dictation slower than it already is, and nothing in it is allowed to
+// paste a sentence Roman did not say.
+
+// MARK: - Seam
+
+/// The one thing the cleaner needs from a language-model client.
+///
+/// A protocol rather than a direct dependency on NIMClient because the
+/// interesting tests are the miserable ones — the model hangs, the model returns
+/// an essay, the model quietly rewrites a sentence to the same length — and none
+/// of those can be provoked against a real endpoint on demand.
+public protocol AICompleting: Sendable {
+    var isConfigured: Bool { get }
+    /// False when the client has already decided the network is gone. Checking
+    /// costs nothing and saves the whole deadline on every dictation in a tunnel.
+    var isReadyToTry: Bool { get }
+    func complete(system: String, user: String, model: String?, deadline: Duration) async throws -> String
+}
+
+public extension AICompleting {
+    var isReadyToTry: Bool { true }
+}
+
+extension NIMClient: AICompleting {
+    public var isReadyToTry: Bool { !isBreakerOpen }
+}
+
+// MARK: - Cleaner
+
+/// `cleanThorough` for the real app: FastCleaner, then spoken self-correction.
+///
+/// The order of operations is the design, and each step exists because the one
+/// before it cannot do the job:
+///
+///   1. **FastCleaner** — punctuation, disfluency, Roman's vocabulary. Under 2ms,
+///      offline, and better at proper nouns than any model measured. Its output,
+///      not the raw transcript, is what everything downstream sees.
+///   2. **The gate** — no retraction cue and no stutter means there is nothing a
+///      model can add, so no request is made. Most dictations stop here and pay
+///      nothing. This is also a safety property: a sentence that was already
+///      right is never handed to something that might improve it.
+///   3. **The offline resolver** — repairs the unambiguous corrections with no
+///      network, in microseconds. Roman dictates on trains. It is also the answer
+///      whenever the model misses its deadline, and how often that is depends
+///      entirely on the budget the caller passes: measured, 95% of calls land
+///      inside 450ms and 23% inside 250ms.
+///   4. **The model** — the general case, on the remaining budget minus a safety
+///      margin, so this method always answers before the coordinator stops
+///      waiting. Its answer is checked, not trusted.
+///
+/// Every failure at every step falls through to the step before it. There is no
+/// path out of `cleanThorough` that throws, blocks past the deadline, or returns
+/// text that is not either the model's checked output or a deterministic result.
+public struct NIMCleaner: TranscriptCleaning, Sendable {
+
+    private let fast: FastCleaner
+    private let client: AICompleting
+    private let prompt: CleanupPrompt
+    private let vocabulary: [String]
+    private let safetyMargin: Duration
+    private let minimumBudget: Duration
+
+    /// - Parameters:
+    ///   - safetyMargin: taken off the caller's deadline before the request is
+    ///     made, so the deterministic answer is returned *inside* the race rather
+    ///     than arriving after the coordinator has already given up and shipped
+    ///     the fast text. 30ms covers response decoding, the guard, and the hop
+    ///     back to the main actor, measured at 3–8ms in practice.
+    ///   - minimumBudget: below this there is no point asking. The floor for a
+    ///     completion on this endpoint is a measured 195–223ms of pure network on
+    ///     a warm connection, so anything under 120ms is guaranteed to be a wasted
+    ///     wait, and the deterministic answer should just ship.
+    public init(
+        client: AICompleting = NIMClient(),
+        fast: FastCleaner = FastCleaner(),
+        prompt: CleanupPrompt = .current,
+        vocabulary: [String] = Vocabulary.load().contextualStrings,
+        safetyMargin: Duration = .milliseconds(30),
+        minimumBudget: Duration = .milliseconds(120)
+    ) {
+        self.client = client
+        self.fast = fast
+        self.prompt = prompt
+        self.vocabulary = vocabulary
+        self.safetyMargin = safetyMargin
+        self.minimumBudget = minimumBudget
+    }
+
+    public func cleanFast(_ raw: String) -> String { fast.cleanFast(raw) }
+
+    public func cleanThorough(_ raw: String, deadline: Duration) async -> String? {
+        let tidy = fast.cleanFast(raw)
+        guard !tidy.isEmpty else { return nil }
+
+        // Computed before anything can go wrong, so there is always an answer to
+        // fall back to — including the case where the model returns garbage after
+        // 200ms and there is no budget left to think about it.
+        let offline = SelfCorrection.resolve(tidy, protecting: vocabulary)
+
+        guard SelfCorrection.needsModelPass(tidy) else { return offline }
+        guard client.isConfigured, client.isReadyToTry else { return offline }
+
+        let budget = deadline - safetyMargin
+        guard budget >= minimumBudget else { return offline }
+
+        do {
+            let completion = try await Self.withDeadline(budget) {
+                try await client.complete(
+                    system: prompt.system, user: tidy, model: nil, deadline: budget
+                )
+            }
+            guard let checked = CleanupProjection.project(completion, onto: tidy, protecting: vocabulary),
+                  checked != tidy
+            else { return offline }
+            return checked
+        } catch {
+            // Every NIMError ends here: no key, no network, rate limited, the
+            // model 404ing, the deadline expiring. The caller asked for cleaner
+            // text and gets the best available, never an error.
+            return offline
+        }
+    }
+
+    /// The deadline is enforced here as well as inside the client.
+    ///
+    /// Belt and braces on purpose. `AICompleting` is a protocol, so the thing on
+    /// the other side of it is whatever was injected — and "never blocks, never
+    /// hangs" is a promise this type makes to DictationCoordinator, not one it
+    /// gets to pass on to a dependency. The loser is cancelled rather than left
+    /// running: it holds a socket and a rate-limit slot against a key that is
+    /// already 429-prone.
+    private static func withDeadline<T: Sendable>(
+        _ duration: Duration, _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T?.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try? await Task.sleep(for: duration)
+                return nil
+            }
+            defer { group.cancelAll() }
+            while let result = try await group.next() {
+                if let result { return result }
+                throw NIMError.deadlineExceeded(milliseconds: duration.milliseconds)
+            }
+            throw NIMError.deadlineExceeded(milliseconds: duration.milliseconds)
+        }
+    }
+}
+
+// MARK: - Output check
+
+/// What comes back from the model, checked against what went in.
+///
+/// `AIOutputGuard` already does the shape checks — fences, labels, quotes,
+/// runaway essays — and this uses them. What it adds is the check that matters
+/// for self-correction and that a length ratio cannot express: the output must be
+/// the *input with words deleted*, and every deletion must have a reason.
+///
+/// `AIOutputGuard`'s own 0.5 length floor is deliberately not applied. It was
+/// sized for a long transcript, and the headline case of this feature breaks it:
+/// "Send it to Noah no wait send it to Carlo" → "Send it to Carlo" keeps 40% of
+/// its characters, which is a correct answer the guard would reject. Deletion is
+/// the point here, so the ratio is replaced with a rule about *what* may be
+/// deleted rather than *how much*.
+public enum CleanupProjection {
+
+    /// How far past a retraction cue a deletion may reach: three words.
+    ///
+    /// A retraction may eat unlimited material *before* the cue — that is the
+    /// whole point, and "send it to Noah and tell him the frames are ready and
+    /// the invoice is paid, no wait, send it to Carlo" correctly reduces to five
+    /// words out of twenty-one. What it may not do is eat the version the speaker
+    /// settled on. That asymmetry is the guard; a percentage of the whole
+    /// sentence cannot express it, which is what an earlier 35% floor got wrong.
+    ///
+    /// It is not zero because a restart overlaps. Measured 5 times out of 5,
+    /// "Send the nxt invoice to Noah no wait send it to Carlo" comes back as
+    /// "Send the next invoice to Carlo" — the model merges, keeping the noun
+    /// phrase from before the cue and the recipient from after it, and drops the
+    /// redundant "send it". That is the right answer and it costs two words of
+    /// the tail.
+    ///
+    /// Three separates it from the failure it is aimed at with room to spare. The
+    /// worst summary in the corpus — "the bed frames are ready" out of "Send it
+    /// to Noah no wait send it to Carlo and tell him the bed frames are ready" —
+    /// reaches seven words past the cue.
+    static let maximumTailOverreach = 3
+
+    /// Returns the checked text, or nil to mean "use the deterministic answer".
+    /// Never an error: the caller has something good already.
+    public static func project(_ raw: String, onto input: String, protecting terms: [String]) -> String? {
+        var out = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !out.isEmpty else { return nil }
+
+        // Shape first, and reuse rather than reimplement: these three were all
+        // observed from real models on this endpoint.
+        out = AIOutputGuard.stripCodeFence(out)
+        out = AIOutputGuard.stripLeadingLabel(out)
+        out = AIOutputGuard.stripWrappingQuotes(out)
+        out = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !out.isEmpty else { return nil }
+
+        // A model that starts explaining has stopped editing.
+        if out.contains("\n\n"), !input.contains("\n\n") { return nil }
+        // Deleting words cannot make the text longer. The slack is for
+        // punctuation and apostrophes, which it is allowed to add.
+        guard out.count <= input.count + 24 else { return nil }
+
+        let inTokens = SpeechToken.tokenise(input)
+        let outTokens = SpeechToken.tokenise(out)
+        guard !inTokens.isEmpty, !outTokens.isEmpty else { return nil }
+
+        let protectedWords = Set(terms.flatMap { $0.split(separator: " ").map { String($0).lowercased() } })
+
+        guard let mapping = align(outTokens, to: inTokens, protectedWords: protectedWords) else { return nil }
+        guard deletionsAreJustified(mapping: mapping, inTokens: inTokens) else { return nil }
+
+        // Over-deletion is the one failure the alignment cannot see: a summary is
+        // still a subsequence of what it summarises.
+        guard mapping.count >= min(2, inTokens.count) else { return nil }
+        let start = settledStart(mapping: mapping, inTokens: inTokens)
+        let kept = Set(mapping)
+        let overreach = (start ..< inTokens.count).filter { !kept.contains($0) }.count
+        guard overreach <= maximumTailOverreach else { return nil }
+
+        return rebuild(outTokens, mapping: mapping, inTokens: inTokens, protectedWords: protectedWords, verbatim: out)
+    }
+
+    // MARK: Alignment
+
+    /// Maps each output token to the input token it came from, or nil if some
+    /// output token came from nowhere.
+    ///
+    /// This is the whole "cleanup, not rewriting" contract expressed as a check.
+    /// A model that adds a pleasantry, invents a detail, reorders a clause or
+    /// swaps a word for a nicer one produces an output that is not a subsequence
+    /// of its input, and lands here rather than in Roman's editor. Measured: it
+    /// is what catches "For the barber site I'd like the booking form to be on
+    /// the home page..." — same length, same meaning, not his words.
+    ///
+    /// Matched from the right. Either direction answers "is this a subsequence"
+    /// identically, but the direction decides *which* copy a repeated phrase is
+    /// credited to, and that changes what the guards downstream see. "Send it to
+    /// Noah no wait send it to Carlo" → "Send it to Carlo" credits the surviving
+    /// words to the second "send it to" going right-to-left and to the first one
+    /// going left-to-right — and only the first reading matches what the speaker
+    /// did, which is finish the sentence the second time. Left-to-right made the
+    /// deletion straddle the cue and every positional rule below meaningless.
+    static func align(
+        _ outTokens: [SpeechToken], to inTokens: [SpeechToken], protectedWords: Set<String>
+    ) -> [Int]? {
+        var reversed: [Int] = []
+        var cursor = inTokens.count - 1
+        for out in outTokens.reversed() {
+            var matched: Int?
+            var index = cursor
+            while index >= 0 {
+                if matches(out, inTokens[index], protectedWords: protectedWords) {
+                    matched = index
+                    break
+                }
+                index -= 1
+            }
+            guard let matched else { return nil }
+            reversed.append(matched)
+            cursor = matched - 1
+        }
+        return reversed.reversed()
+    }
+
+    /// Where the version the speaker settled on begins: just past the last
+    /// retraction cue that licensed a deletion. Zero when nothing was retracted,
+    /// which makes the floor above a whole-sentence one — correct, because
+    /// without a retraction the only licensed deletions are stutters and opening
+    /// preamble, and those are small by construction.
+    static func settledStart(mapping: [Int], inTokens: [SpeechToken]) -> Int {
+        let kept = Set(mapping)
+        let deleted = (0 ..< inTokens.count).filter { !kept.contains($0) }
+        guard !deleted.isEmpty else { return 0 }
+        let cues = SelfCorrection.cues(in: inTokens).filter(\.isRetraction)
+        return cues.filter { cue in deleted.contains(where: cue.range.contains) }
+            .map(\.range.upperBound)
+            .max() ?? 0
+    }
+
+    /// Equal ignoring case, punctuation and apostrophes — so the model is free to
+    /// turn "lets" into "Let's", which is a spelling repair, and not free to turn
+    /// "want" into "would like", which is a rewrite.
+    ///
+    /// The second clause is the vocabulary escape hatch. Measured 10 times out of
+    /// 10: the model turns "nxt" into "next". Rejecting the whole response for it
+    /// would mean self-correction never works in a sentence containing one of
+    /// Roman's words, which is most of them. Instead the near-miss is allowed to
+    /// align and `rebuild` puts his spelling back — and because the substitution
+    /// only ever reads from the input, this cannot introduce a word he did not
+    /// say. The 0.6 bar admits nxt→next (0.75) and rejects unrelated words.
+    static func matches(_ out: SpeechToken, _ input: SpeechToken, protectedWords: Set<String>) -> Bool {
+        if out.normalised == input.normalised { return true }
+        guard protectedWords.contains(input.normalised) else { return false }
+        return VocabularyCorrector.similarity(out.normalised, input.normalised) >= 0.6
+    }
+
+    // MARK: Deletions
+
+    /// Every run of deleted input tokens has to be one of three things. Anything
+    /// else and the response is discarded.
+    ///
+    /// This is what stops the model acting on a retraction phrase that was
+    /// literal content. The gate in `SelfCorrection` already refuses to send a
+    /// transcript whose only cues are literal; this catches the mixed case, where
+    /// one real correction gets the transcript sent and the model then also eats
+    /// the quoted one.
+    static func deletionsAreJustified(mapping: [Int], inTokens: [SpeechToken]) -> Bool {
+        let kept = Set(mapping)
+        let cues = SelfCorrection.cues(in: inTokens).filter(\.isRetraction)
+
+        var start = 0
+        while start < inTokens.count {
+            guard !kept.contains(start) else { start += 1; continue }
+            var end = start
+            while end < inTokens.count, !kept.contains(end) { end += 1 }
+            let run = start ..< end
+
+            if let cue = cues.first(where: { $0.range.overlaps(run) }) {
+                guard retractionIsFullyApplied(run: run, cue: cue, inTokens: inTokens) else { return false }
+            } else if !isRepetition(run, in: inTokens),
+                      !isAllFiller(run, in: inTokens),
+                      !isOpeningPreamble(run, in: inTokens) {
+                return false
+            }
+            start = end
+        }
+        return true
+    }
+
+    /// A correction has to actually be applied, in the right direction.
+    ///
+    /// Both halves of this came from the live suite, and both are the user's
+    /// original complaint wearing a disguise — the model touched the sentence and
+    /// still left the wrong words in it.
+    ///
+    ///   "call the plumber no wait ring the electrician instead"
+    ///     → "Call the plumber ring the electrician instead"
+    ///   The model deleted the cue and nothing else, so both versions survive and
+    ///   the signal that one of them was wrong is gone. Worse than untouched.
+    ///
+    ///   "push the nxt build to Netlify no wait push it to Firestore"
+    ///     → "Push the nxt build to Netlify."
+    ///   The model applied the correction backwards: it kept what he retracted
+    ///   and deleted what he settled on.
+    ///
+    /// The rule that catches both: a *replacement* cue ("no wait", "actually",
+    /// "I mean") retracts what came before it, so the deletion must reach back
+    /// past the cue. Only an *abandonment* ("never mind", "forget it") retracts
+    /// forwards, and only at the very end of the utterance, because there is
+    /// nothing after it to keep.
+    static func retractionIsFullyApplied(
+        run: Range<Int>, cue: SelfCorrection.Cue, inTokens: [SpeechToken]
+    ) -> Bool {
+        if run.lowerBound < cue.range.lowerBound { return true }
+        return run.upperBound == inTokens.count
+            && SelfCorrection.isAbandonment(cue.range, in: inTokens)
+    }
+
+    /// The deleted run is a stutter or a false start: the same words appear
+    /// immediately before or immediately after it. "The the build", "we should we
+    /// should probably ship it".
+    static func isRepetition(_ run: Range<Int>, in tokens: [SpeechToken]) -> Bool {
+        let length = run.count
+        let deleted = tokens[run].map(\.normalised)
+        if run.lowerBound >= length {
+            let before = tokens[run.lowerBound - length ..< run.lowerBound].map(\.normalised)
+            if before == deleted { return true }
+        }
+        if run.upperBound + length <= tokens.count {
+            let after = tokens[run.upperBound ..< run.upperBound + length].map(\.normalised)
+            if after == deleted { return true }
+        }
+        return false
+    }
+
+    /// The deleted run is nothing but discourse noise — "um", "like", "so".
+    /// Measured: the model drops these and the result reads better for it, which
+    /// is the one kind of unprompted deletion worth allowing.
+    static func isAllFiller(_ run: Range<Int>, in tokens: [SpeechToken]) -> Bool {
+        !run.isEmpty && tokens[run].allSatisfy { SelfCorrection.fillers.contains($0.normalised) }
+    }
+
+    /// Words that only mean "I am starting to talk now" when they are the first
+    /// thing said. "Right", "now", "like" and "so" are ordinary content
+    /// everywhere else, which is why this is anchored to position zero rather
+    /// than added to `SelfCorrection.fillers`.
+    static let openers: Set<String> = [
+        "ok", "okay", "right", "now", "alright", "anyway", "yeah", "so", "well", "like", "basically",
+    ]
+
+    /// The deleted run is the throat-clearing at the very start of a dictation.
+    ///
+    /// Measured: "Ok so for the barber site I want the booking form on the home
+    /// page no wait on its own page" comes back without the "Ok so", 5 times out
+    /// of 5. Refusing that response means refusing the correction with it, which
+    /// trades the headline feature for two words of preamble — the wrong way
+    /// round.
+    ///
+    /// Confined to the run of opener words the utterance actually starts with,
+    /// rather than to index 0, because the model may drop "Ok so" or just the
+    /// "so". Either way the licence stops at the first real word, so "do it right
+    /// now" cannot lose its ending and "I like the blue one" cannot lose its verb.
+    ///
+    /// Note that "yeah" is in `openers` but the gate usually settles that case
+    /// first: a transcript with no retraction and no stutter never reaches the
+    /// model at all, so "yeah just push it and we'll see what breaks" is never
+    /// at risk in the first place.
+    static func isOpeningPreamble(_ run: Range<Int>, in tokens: [SpeechToken]) -> Bool {
+        guard !run.isEmpty else { return false }
+        var preamble = 0
+        while preamble < min(3, tokens.count),
+              openers.contains(tokens[preamble].normalised)
+                  || SelfCorrection.fillers.contains(tokens[preamble].normalised) {
+            preamble += 1
+        }
+        return run.upperBound <= preamble
+    }
+
+    // MARK: Rebuild
+
+    /// Emits the model's text, with Roman's spelling restored wherever the model
+    /// normalised one of his words.
+    ///
+    /// When nothing needed restoring — the overwhelmingly common case — the
+    /// model's own string is returned byte for byte, so the join below can never
+    /// introduce a spacing artefact into text that was already fine.
+    static func rebuild(
+        _ outTokens: [SpeechToken], mapping: [Int], inTokens: [SpeechToken],
+        protectedWords: Set<String>, verbatim: String
+    ) -> String {
+        var restored = false
+        var pieces: [String] = []
+        pieces.reserveCapacity(outTokens.count)
+
+        for (position, out) in outTokens.enumerated() {
+            let input = inTokens[mapping[position]]
+            let useInputSpelling = protectedWords.contains(input.normalised) && input.word != out.word
+            if useInputSpelling { restored = true }
+            pieces.append(out.lead + (useInputSpelling ? input.word : out.word) + out.trail)
+        }
+
+        return restored ? pieces.joined(separator: " ") : verbatim
+    }
+}

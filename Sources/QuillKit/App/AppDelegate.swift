@@ -21,7 +21,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             hotkey: EventTapHotkeyEngine(),
             transcriber: SpeechAnalyzerTranscriber(),
             inserter: TextInserter(),
-            overlay: OverlayController()
+            overlay: OverlayController(),
+            // NIMCleaner *contains* FastCleaner rather than replacing it: the fast
+            // path is byte-identical and the thorough path adds spoken
+            // self-correction. With no key and no network it degrades to the
+            // deterministic repair, so this needs no setting behind it — there is
+            // no configuration in which it is worse.
+            cleaner: NIMCleaner()
         )
         self.coordinator = coordinator
         coordinator.start()
