@@ -192,7 +192,7 @@ public final class SnippetsSectionView: NSView {
         }
         emptyFilterLabel.isHidden = !visible.isEmpty
         countLabel.attributedStringValue = NSAttributedString(
-            string: (visible.count == 1 ? "1 phrase" : "\(visible.count) phrases").uppercased(),
+            string: visible.count == 1 ? "1 phrase" : "\(visible.count) phrases",
             attributes: [.font: DashboardType.micro,
                          .foregroundColor: style.inkQuaternary,
                          .kern: DashboardType.tracking(for: DashboardType.micro)])

@@ -309,23 +309,23 @@ public struct DashboardStyle {
     /// nothing to fall on and every surface collapses into one plane.
     public static let dark = DashboardStyle(
         isDark: true,
-        canvasTop: c(0x0B0B0D),
-        canvasBottom: c(0x121215),
+        canvasTop: c(0x0D0C0A),
+        canvasBottom: c(0x161513),
         windowEdge: w(1, 0.13),
 
-        panel: c(0x18191C),
-        card: c(0x1E1F23),
-        cardAlt: c(0x1B1C20),
-        raised: c(0x2A2C31),
-        raisedTop: c(0x303238),
+        panel: c(0x1B1A17),
+        card: c(0x22211D),
+        cardAlt: c(0x1E1D1A),
+        raised: c(0x2E2C27),
+        raisedTop: c(0x35322C),
 
         hairline: w(1, 0.075),
         hairlineStrong: w(1, 0.14),
         innerHighlight: w(1, 0.07),
 
-        ink: c(0xF3F4F7),
-        inkSecondary: c(0x9CA0A9),
-        inkTertiary: c(0x71757E),
+        ink: c(0xF6F4EF),
+        inkSecondary: c(0xA6A29A),
+        inkTertiary: c(0x7B776F),
         inkQuaternary: c(0x53565E),
 
         accent: c(0x6FB3A8),
