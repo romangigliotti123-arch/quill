@@ -42,6 +42,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Clicking the Dock icon — or double-clicking the app when it is already
+    /// running — opens the window rather than doing nothing.
+    ///
+    /// LSUIElement apps get no Dock tile of their own, but a user who drags Quill
+    /// to the Dock has made one, and a launcher that appears to do nothing when
+    /// clicked is indistinguishable from a broken app. The window controller
+    /// flips the activation policy to .regular while a window is open, so the
+    /// tile behaves normally from then on.
+    public func applicationShouldHandleReopen(_ sender: NSApplication,
+                                              hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { openDashboard() }
+        return true
+    }
+
     public func applicationWillTerminate(_ notification: Notification) {
         permissionPoll?.invalidate()
     }
