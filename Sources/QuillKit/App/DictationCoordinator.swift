@@ -224,23 +224,64 @@ public final class DictationCoordinator {
         overlay.show(.error(message))
     }
 
-    /// Returns nil if the operation did not finish in time. The operation is
-    /// left running rather than cancelled — it is harmless, and cancelling a
-    /// model inference mid-flight is not reliably cheap.
+    /// Returns nil if the operation did not finish in time.
+    ///
+    /// This deliberately does NOT use withTaskGroup. A task group awaits every
+    /// child at scope exit, so `cancelAll()` only *requests* cancellation — if
+    /// the operation does not honour it (a URLSession call has its own ~60s
+    /// timeout), the group blocks until the slow child finishes and the deadline
+    /// bounds nothing at all. That is not theoretical: it stalled a dictation for
+    /// 59 seconds during an eval run, which presents as "it just didn't paste".
+    ///
+    /// So the loser is abandoned rather than awaited. The orphaned task finishes
+    /// into a continuation that has already been resumed, which is harmless, and
+    /// the caller is never held hostage by a network it cannot cancel.
+    static func withDeadlineForTesting<T: Sendable>(
+        _ duration: Duration, _ operation: @escaping @Sendable () async -> T?
+    ) async -> T? {
+        await withDeadline(duration, operation: operation)
+    }
+
     private static func withDeadline<T: Sendable>(
         _ duration: Duration,
         operation: @escaping @Sendable () async -> T?
     ) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await operation() }
-            group.addTask {
-                try? await Task.sleep(for: duration)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+        let box = ResumeOnce<T>()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<T?, Never>) in
+            box.attach(continuation)
+            Task { let value = await operation(); box.finish(value) }
+            Task { try? await Task.sleep(for: duration); box.finish(nil) }
         }
+    }
+}
+
+/// Test seam. The race is the part that broke, so it has to be reachable from a
+/// test without booting an NSApplication and a microphone.
+public enum DictationCoordinatorTestHooks {
+    public static func withDeadline<T: Sendable>(
+        _ duration: Duration, _ operation: @escaping @Sendable () async -> T?
+    ) async -> T? {
+        await DictationCoordinator.withDeadlineForTesting(duration, operation)
+    }
+}
+
+/// Guarantees a continuation is resumed exactly once, whichever racer arrives
+/// first. Resuming a checked continuation twice is a crash, not a warning.
+private final class ResumeOnce<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T?, Never>?
+
+    func attach(_ c: CheckedContinuation<T?, Never>) {
+        lock.lock(); defer { lock.unlock() }
+        continuation = c
+    }
+
+    func finish(_ value: T?) {
+        lock.lock()
+        let c = continuation
+        continuation = nil
+        lock.unlock()
+        c?.resume(returning: value)
     }
 }
 

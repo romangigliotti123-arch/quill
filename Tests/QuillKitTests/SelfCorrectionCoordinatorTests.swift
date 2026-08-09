@@ -152,3 +152,38 @@ private func dictate(_ coordinator: DictationCoordinator, _ inserter: RecordingI
     _ = await dictate(coordinator, inserter)
     #expect(inserter.inserted == nil)
 }
+
+// MARK: - The deadline must actually bound the wait
+
+// Regression for a stall that cost 59 seconds in a real eval run. The old
+// implementation used withTaskGroup, which awaits every child at scope exit, so
+// a slow operation that ignored cancellation held the dictation hostage until
+// its own network timeout expired. It presented as "it just didn't paste".
+
+@Test func aSlowOperationThatIgnoresCancellationCannotHoldUpInsertion() async {
+    // The property under test is "bounded by the deadline, not by the operation".
+    // The threshold is generous on purpose: this suite runs while the machine may
+    // be saturated, and scheduler jitter under load is on the order of a second.
+    // A tighter bound would be measuring the CI box, not the code. The failure
+    // this guards against overshot by 59 SECONDS, so a 4x margin still catches it.
+    let deadline = Duration.milliseconds(500)
+    let operationLength = Duration.seconds(8)
+
+    let start = ContinuousClock.now
+    let result: String? = await DictationCoordinatorTestHooks.withDeadline(deadline) {
+        // Deliberately ignores cancellation, exactly like a URLSession call.
+        try? await Task.sleep(for: operationLength)
+        return "too late"
+    }
+    let elapsed = ContinuousClock.now - start
+
+    #expect(result == nil)
+    #expect(elapsed < .seconds(4), "deadline did not bound the wait: \(elapsed)")
+}
+
+@Test func aFastOperationStillWins() async {
+    let result: String? = await DictationCoordinatorTestHooks.withDeadline(.seconds(2)) {
+        "in time"
+    }
+    #expect(result == "in time")
+}
