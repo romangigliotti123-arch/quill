@@ -71,7 +71,10 @@ public final class ScratchpadSectionView: NSView {
         count.translatesAutoresizingMaskIntoConstraints = false
         addSubview(count)
 
-        let newNote = Self.primaryButton("New note", style: style)
+        let newNote = Self.primaryButton("New note", style: style) {
+            NoteStore.shared.upsert(Note())
+            NotificationCenter.default.post(name: .quillDashboardNeedsReload, object: nil)
+        }
         addSubview(newNote)
 
         NSLayoutConstraint.activate([
@@ -108,12 +111,11 @@ public final class ScratchpadSectionView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private static func primaryButton(_ text: String, style: DashboardStyle) -> NSView {
-        let box = NSView()
-        box.translatesAutoresizingMaskIntoConstraints = false
-        box.wantsLayer = true
-        box.layer?.cornerRadius = DashboardRadius.control
-        box.layer?.backgroundColor = style.ink.cgColor
+    private static func primaryButton(_ text: String, style: DashboardStyle,
+                                      action: @escaping () -> Void) -> NSView {
+        let box = HoverControl(base: style.ink, hover: style.ink,
+                               cornerRadius: DashboardRadius.control,
+                               feedback: .dim, onClick: action)
 
         let label = DashboardType.label(text, font: DashboardType.caption, color: style.panel)
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -271,8 +273,11 @@ public final class StyleSectionView: NSView {
         let presets = SectionCard(style: style, title: "Tone",
                                   trailing: "applies before anything is learned")
         presets.translatesAutoresizingMaskIntoConstraints = false
-        let chips = NSStackView(views: StylePreset.allCases.map {
-            Self.chip($0, selected: $0 == profile.preset, style: style)
+        let chips = NSStackView(views: StylePreset.allCases.map { preset in
+            Self.chip(preset, selected: preset == profile.preset, style: style) { picked in
+                StyleStore.shared.setPreset(picked)
+                NotificationCenter.default.post(name: .quillDashboardNeedsReload, object: nil)
+            }
         })
         chips.orientation = .horizontal
         chips.spacing = DashboardSpace.xs
@@ -308,12 +313,11 @@ public final class StyleSectionView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private static func chip(_ preset: StylePreset, selected: Bool, style: DashboardStyle) -> NSView {
-        let box = NSView()
-        box.translatesAutoresizingMaskIntoConstraints = false
-        box.wantsLayer = true
-        box.layer?.cornerRadius = DashboardRadius.chip
-        box.layer?.backgroundColor = (selected ? style.accentSoft : style.cardAlt).cgColor
+    private static func chip(_ preset: StylePreset, selected: Bool, style: DashboardStyle,
+                             onPick: @escaping (StylePreset) -> Void) -> NSView {
+        let box = HoverControl(base: selected ? style.accentSoft : style.cardAlt,
+                               hover: selected ? style.accentSoft : style.fill,
+                               cornerRadius: DashboardRadius.chip) { onPick(preset) }
         box.layer?.borderWidth = 1
         box.layer?.borderColor = (selected ? style.accent : style.hairline).cgColor
 

@@ -51,10 +51,13 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         addSubview(statusPill)
         sidebar.delegate = self
         showSection(selection)
+        observeReloads()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     public var selection: DashboardSection { sidebar.selection }
 
@@ -67,16 +70,52 @@ public final class DashboardRootView: NSView, SidebarDelegate {
     }
 
     public func showSection(_ section: DashboardSection) {
-        sectionView?.removeFromSuperview()
+        let outgoing = sectionView
         let view = provider?.dashboardView(for: section, style: style)
             ?? DashboardPlaceholderView(section: section, style: style)
+
+        // Cross-fade with a slight rise. A hard cut between two dense screens
+        // reads as a glitch; a slow one reads as waiting. 0.18s with a small
+        // upward offset is the range where the eye registers "this replaced that"
+        // without being asked to sit through it.
+        view.alphaValue = 0
         panel.addSubview(view)
         sectionView = view
+        layoutSubtreeIfNeeded()
+
+        let rise: CGFloat = 6
+        view.setFrameOrigin(NSPoint(x: view.frame.origin.x, y: view.frame.origin.y - rise))
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            view.animator().alphaValue = 1
+            view.animator().setFrameOrigin(NSPoint(x: view.frame.origin.x,
+                                                   y: view.frame.origin.y + rise))
+            outgoing?.animator().alphaValue = 0
+        } completionHandler: {
+            outgoing?.removeFromSuperview()
+        }
+
         needsLayout = true
     }
 
     public func sidebar(_ sidebar: SidebarView, didSelect section: DashboardSection) {
         showSection(section)
+    }
+
+    /// Rebuild the visible section after it mutated something it displays —
+    /// picking a tone, adding a note. Only the section on screen is rebuilt: a
+    /// screen that refreshes everything is how two views end up disagreeing about
+    /// the same data, and a screen that refreshes nothing is how a click appears
+    /// to do nothing at all.
+    private func observeReloads() {
+        NotificationCenter.default.addObserver(
+            forName: .quillDashboardNeedsReload, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            MainActor.assumeIsolated { self.showSection(self.sidebar.selection) }
+        }
     }
 
     // Layers keep the colours they were handed, and `draw(_:)` here resolves the
@@ -153,6 +192,8 @@ public final class DashboardStatusPill: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     private func rebuild() {
         dot.color = style.accent
@@ -268,6 +309,8 @@ public final class DashboardPlaceholderView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     /// Never the section's own name — the sidebar and the eyebrow have already
     /// said that twice, and a page whose title repeats its tab teaches nothing.
@@ -414,6 +457,8 @@ public final class DashboardMetricTile: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit { NotificationCenter.default.removeObserver(self) }
+
     public override func layout() {
         super.layout()
         let valueSize = value.fittingSize
@@ -459,6 +504,8 @@ public final class DashboardSampleRow: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     public func height(for width: CGFloat) -> CGFloat {
         DashboardType.size(text, width: width - 130).height + 28
@@ -534,6 +581,8 @@ public final class DashboardWindowController: NSWindowController, NSWindowDelega
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     public func present() {
         guard let window else { return }

@@ -46,6 +46,18 @@ if DashboardPreviewRenderer.runIfRequested() {
     exit(0)
 }
 
+// QUILL_OVERLAY_SHOTS=/dir renders every overlay state to PNG. The HUD is the
+// surface a user sees most and the one hardest to inspect while it is on screen,
+// which is exactly why it needs to be reviewable offline.
+if let dir = ProcessInfo.processInfo.environment["QUILL_OVERLAY_SHOTS"] {
+    let url = URL(fileURLWithPath: (dir as NSString).expandingTildeInPath)
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    if let written = try? OverlayPreviewRenderer.renderAll(into: url) {
+        written.forEach { print($0.lastPathComponent) }
+    }
+    exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
