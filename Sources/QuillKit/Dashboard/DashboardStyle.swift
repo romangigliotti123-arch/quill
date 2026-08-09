@@ -268,34 +268,34 @@ public struct DashboardStyle {
     /// notebook, and grey lets one warm accent do all the talking.
     public static let light = DashboardStyle(
         isDark: false,
-        canvasTop: c(0xEEEEF2),
-        canvasBottom: c(0xE0E1E6),
-        windowEdge: w(0, 0.16),
+        canvasTop: c(0xF0EEE9),
+        canvasBottom: c(0xE6E3DC),
+        windowEdge: w(0, 0.14),
 
-        panel: c(0xFFFFFF),
-        card: c(0xF7F7F9),
-        cardAlt: c(0xFBFBFC),
+        panel: c(0xFDFDFC),
+        card: c(0xF7F6F3),
+        cardAlt: c(0xFAF9F6),
         raised: c(0xFFFFFF),
         raisedTop: c(0xFFFFFF),
 
-        hairline: c(0x0B0D14, 0.085),
-        hairlineStrong: c(0x0B0D14, 0.14),
+        hairline: c(0x1A1712, 0.075),
+        hairlineStrong: c(0x1A1712, 0.13),
         innerHighlight: w(1, 0.9),
 
-        ink: c(0x0E0F13),
-        inkSecondary: c(0x53565E),
-        inkTertiary: c(0x83868F),
-        inkQuaternary: c(0xAFB2BA),
+        ink: c(0x14120E),
+        inkSecondary: c(0x57544D),
+        inkTertiary: c(0x8A867E),
+        inkQuaternary: c(0xB5B1A8),
 
-        accent: c(0xD2492A),
-        accentSoft: c(0xD2492A, 0.10),
-        accentInk: c(0xB03D22),
+        accent: c(0x3B6D6E),
+        accentSoft: c(0x3B6D6E, 0.10),
+        accentInk: c(0x2F5859),
 
-        fill: c(0x14151A),
-        fillHover: c(0x24262E),
-        onFill: c(0xFFFFFF),
+        fill: c(0x1A1712),
+        fillHover: c(0x2B2721),
+        onFill: c(0xFDFDFC),
 
-        hover: c(0x0B0D14, 0.045),
+        hover: c(0x1A1712, 0.042),
         pressed: c(0x0B0D14, 0.085),
 
         shadowCard: DashboardShadow(color: c(0x0A0C14, 0.07), radius: 14, dy: 5),
@@ -328,9 +328,9 @@ public struct DashboardStyle {
         inkTertiary: c(0x71757E),
         inkQuaternary: c(0x53565E),
 
-        accent: c(0xFF6B45),
-        accentSoft: c(0xFF6B45, 0.16),
-        accentInk: c(0xFF8564),
+        accent: c(0x6FB3A8),
+        accentSoft: c(0x6FB3A8, 0.16),
+        accentInk: c(0x8ECFC3),
 
         fill: c(0xF2F3F6),
         fillHover: c(0xFFFFFF),

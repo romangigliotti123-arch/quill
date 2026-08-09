@@ -52,7 +52,7 @@ public final class DictionarySectionView: NSView {
         }
         self.entries = sorted
 
-        eyebrow = DashboardType.label(DashboardSection.dictionary.title, font: DashboardType.eyebrow,
+        eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
                                       color: style.inkTertiary)
         heading = DashboardType.label("Dictionary", font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label(

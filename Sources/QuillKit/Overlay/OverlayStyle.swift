@@ -72,7 +72,7 @@ struct OverlayPalette {
         primary: srgb(1, 1, 1, 0.95),
         secondary: srgb(1, 1, 1, 0.50),
         wave: srgb(1, 1, 1, 0.78),
-        accent: srgb(1.00, 0.42, 0.27, 1),   // #FF6B45 — matches DashboardStyle.dark
+        accent: srgb(0.44, 0.70, 0.66, 1),   // #6FB3A8 — matches DashboardStyle.dark
         warn: srgb(1.00, 0.76, 0.42, 1),
         shadow: srgb(0, 0, 0, 1).cgColor,
         shadowNearOpacity: 0.34,
@@ -92,7 +92,7 @@ struct OverlayPalette {
         primary: srgb(0.07, 0.07, 0.08, 0.94),
         secondary: srgb(0.07, 0.07, 0.08, 0.46),
         wave: srgb(0.10, 0.10, 0.12, 0.66),
-        accent: srgb(0.82, 0.29, 0.16, 1),   // #D2492A — matches DashboardStyle.light
+        accent: srgb(0.23, 0.43, 0.43, 1),   // #3B6D6E — matches DashboardStyle.light
         warn: srgb(0.72, 0.42, 0.03, 1),
         shadow: srgb(0, 0, 0, 1).cgColor,
         shadowNearOpacity: 0.14,

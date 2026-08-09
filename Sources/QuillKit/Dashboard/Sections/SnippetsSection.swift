@@ -75,7 +75,7 @@ public final class SnippetsSectionView: NSView {
         self.store = store
         self.style = style
 
-        eyebrow = DashboardType.label(DashboardSection.snippets.title, font: DashboardType.eyebrow,
+        eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
                                       color: style.inkTertiary)
         heading = DashboardType.label("Snippets", font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label("Say a phrase mid-sentence and Quill types the whole block.",
