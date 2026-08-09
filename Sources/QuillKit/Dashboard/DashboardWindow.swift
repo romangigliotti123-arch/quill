@@ -267,7 +267,7 @@ public final class DashboardPlaceholderView: NSView {
         self.section = section
         self.style = style
         eyebrow = DashboardType.label(section.title, font: DashboardType.eyebrow,
-                                      color: style.inkTertiary, uppercase: true)
+                                      color: style.inkTertiary)
         heading = DashboardType.label(DashboardPlaceholderView.heading(for: section),
                                       font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label(section.blurb, font: DashboardType.body,

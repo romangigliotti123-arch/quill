@@ -12,6 +12,15 @@ import Testing
 
 // MARK: - Helpers
 
+private extension DictationRecord {
+    /// Midday on the day `daysAgo` days before `now`, in the current calendar.
+    static func midday(daysAgo: Int, from now: Date) -> Date {
+        let calendar = Calendar.current
+        let day = calendar.date(byAdding: .day, value: -daysAgo, to: now)!
+        return calendar.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
+    }
+}
+
 private func record(daysAgo: Int,
                     words: Int = 10,
                     raw: String = "hello there",
@@ -22,7 +31,13 @@ private func record(daysAgo: Int,
                     now: Date = Date()) -> DictationRecord {
     DictationRecord(
         id: UUID(),
-        date: Calendar.current.date(byAdding: .day, value: -daysAgo, to: now)!.addingTimeInterval(-3_600),
+        // Anchored to midday of the target day, not "now minus an hour".
+        //
+        // The old form subtracted a day and then an hour, so between midnight and
+        // 1am every record landed on the calendar day BEFORE the one intended and
+        // the streak assertions failed. A test that passes 23 hours out of 24 is
+        // worse than one that fails, because it teaches you to re-run it.
+        date: DictationRecord.midday(daysAgo: daysAgo, from: now),
         rawText: raw,
         insertedText: inserted,
         wordCount: words,

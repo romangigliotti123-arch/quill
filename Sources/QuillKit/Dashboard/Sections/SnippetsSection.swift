@@ -76,8 +76,8 @@ public final class SnippetsSectionView: NSView {
         self.style = style
 
         eyebrow = DashboardType.label(DashboardSection.snippets.title, font: DashboardType.eyebrow,
-                                      color: style.inkTertiary, uppercase: true)
-        heading = DashboardType.label("Say less, insert more", font: DashboardType.display, color: style.ink)
+                                      color: style.inkTertiary)
+        heading = DashboardType.label("Snippets", font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label("Say a phrase mid-sentence and Quill types the whole block.",
                                     font: DashboardType.body, color: style.inkSecondary)
         stat = NSTextField(labelWithString: "")
@@ -87,7 +87,7 @@ public final class SnippetsSectionView: NSView {
         filterField = SnippetsField(style: style, placeholder: "Filter phrases",
                                     font: DashboardType.callout, badgeSymbol: nil)
         countLabel = DashboardType.label("", font: DashboardType.micro,
-                                         color: style.inkQuaternary, uppercase: true,
+                                         color: style.inkQuaternary,
                                          alignment: .right)
         listRule = DashboardRule(color: style.hairline)
         fade = SnippetsFadeView(color: style.card)
@@ -195,7 +195,7 @@ public final class SnippetsSectionView: NSView {
             string: (visible.count == 1 ? "1 phrase" : "\(visible.count) phrases").uppercased(),
             attributes: [.font: DashboardType.micro,
                          .foregroundColor: style.inkQuaternary,
-                         .kern: DashboardType.tracking(for: DashboardType.micro, uppercase: true)])
+                         .kern: DashboardType.tracking(for: DashboardType.micro)])
         needsLayout = true
     }
 
@@ -488,7 +488,7 @@ final class SnippetEditorView: NSView {
         self.style = style
         card = DashboardCardView(style: style, elevation: .sunken, radius: DashboardRadius.card)
         phraseCaption = DashboardType.label("Trigger phrase", font: DashboardType.micro,
-                                            color: style.inkTertiary, uppercase: true)
+                                            color: style.inkTertiary)
         phraseField = SnippetsField(style: style, placeholder: "what you say",
                                     font: .systemFont(ofSize: 14, weight: .medium),
                                     badgeSymbol: "waveform")
@@ -496,13 +496,13 @@ final class SnippetEditorView: NSView {
         enabledToggle = SnippetsToggle(isOn: true, style: style)
 
         replacementCaption = DashboardType.label("What it types", font: DashboardType.micro,
-                                                 color: style.inkTertiary, uppercase: true)
+                                                 color: style.inkTertiary)
         lengthLabel = DashboardType.label("", font: DashboardType.micro, color: style.inkQuaternary,
-                                          uppercase: true, alignment: .right)
+                                          alignment: .right)
         replacementArea = SnippetsTextArea(style: style, placeholder: "the block of text that replaces it")
 
         matchCaption = DashboardType.label("Matching", font: DashboardType.micro,
-                                           color: style.inkTertiary, uppercase: true)
+                                           color: style.inkTertiary)
         modeControl = SnippetsSegmented(titles: Snippet.Mode.allCases.map(\.title),
                                         selectedIndex: 0, style: style)
         // The guarantee, said out loud. It is the difference between a feature
@@ -593,7 +593,7 @@ final class SnippetEditorView: NSView {
         lengthLabel.attributedStringValue = NSAttributedString(
             string: characters == 1 ? "1 character" : "\(characters) characters",
             attributes: [.font: DashboardType.micro, .foregroundColor: style.inkQuaternary,
-                         .kern: DashboardType.tracking(for: DashboardType.micro, uppercase: true)])
+                         .kern: DashboardType.tracking(for: DashboardType.micro)])
         previewPanel.show(edited)
         updateFooter()
     }
@@ -716,9 +716,9 @@ final class SnippetsPreviewPanel: NSView {
     init(style: DashboardStyle) {
         self.style = style
         spokenTag = DashboardType.label("You say", font: DashboardType.micro,
-                                        color: style.inkQuaternary, uppercase: true)
+                                        color: style.inkQuaternary)
         typedTag = DashboardType.label("Quill types", font: DashboardType.micro,
-                                       color: style.inkQuaternary, uppercase: true)
+                                       color: style.inkQuaternary)
         spokenLine = SnippetsHighlightLine(font: .systemFont(ofSize: 12.5, weight: .regular),
                                           tint: style.accentSoft)
         // The output line is the payload, so it is the heavier of the two — and
@@ -870,7 +870,7 @@ final class SnippetsEmptyStateView: NSView {
                                    font: DashboardType.body, color: style.inkSecondary,
                                    lines: 2, lineHeight: 21, alignment: .center)
         caption = DashboardType.label("Start with one of these", font: DashboardType.micro,
-                                      color: style.inkQuaternary, uppercase: true, alignment: .center)
+                                      color: style.inkQuaternary, alignment: .center)
         writeOwn = DashboardButton(title: "Write your own", symbol: "plus", kind: .ghost, style: style)
         super.init(frame: .zero)
         addSubview(card)

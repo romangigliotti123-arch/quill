@@ -195,7 +195,12 @@ public final class DictationCoordinator {
                     timeToFirstWordMs: self.timeline.timeToFirstWordMs,
                     finalToInsertedMs: self.timeline.finalToInsertedMs,
                     endToEndMs: self.timeline.endToEndMs,
-                    audioDurationMs: nil,
+                    // How long speech actually ran. Left nil until now, which is
+                    // why Insights showed "0 wpm" and "usual range 0-0" against
+                    // real history: every rate derived from it divided by nothing.
+                    audioDurationMs: self.timeline.audioFirstBuffer.flatMap { first in
+                        self.timeline.finalTranscript.map { Int($0.timeIntervalSince(first) * 1000) }
+                    },
                     usedThoroughCleanup: usedThorough
                 )
             ))

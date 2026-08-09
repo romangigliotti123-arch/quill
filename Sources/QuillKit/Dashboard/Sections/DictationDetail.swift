@@ -117,7 +117,7 @@ public final class DictationDetailView: NSView {
         headerRule = DashboardRule(color: style.hairline)
 
         eyebrow = DashboardType.label("Heard vs inserted", font: DashboardType.eyebrow,
-                                      color: style.inkTertiary, uppercase: true)
+                                      color: style.inkTertiary)
         legend = DictationDetailView.legendLabel(style: style)
 
         well = DashboardCardView(style: style, elevation: .sunken, radius: DashboardRadius.card)
@@ -125,7 +125,7 @@ public final class DictationDetailView: NSView {
         wellRule = DashboardRule(color: style.hairline)
         notesEyebrow = DashboardType.label(diff.isClean ? "Nothing to fix" : "\(diff.editCount) edits",
                                            font: DashboardType.eyebrow,
-                                           color: style.inkTertiary, uppercase: true)
+                                           color: style.inkTertiary)
         footerRule = DashboardRule(color: style.hairline)
 
         super.init(frame: .zero)

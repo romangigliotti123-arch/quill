@@ -67,9 +67,9 @@ public final class DictationSectionView: NSView {
         self.records = records
         self.query = query
 
-        eyebrow = DashboardType.label(DashboardSection.dictation.title, font: DashboardType.eyebrow,
-                                      color: style.inkTertiary, uppercase: true)
-        heading = DashboardType.label("Everything you have said", font: DashboardType.display, color: style.ink)
+        eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
+                                      color: style.inkTertiary)
+        heading = DashboardType.label("Dictation", font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label(records.isEmpty
                                     ? "Every dictation is kept on this Mac, with the raw transcript beside what was actually typed."
                                     : "Raw transcript beside what was actually typed.",
@@ -241,7 +241,7 @@ public final class DictationSectionView: NSView {
                 let group = DictationFormat.dayTitle(record.date)
                 if group != lastGroup {
                     let label = DashboardType.label(group, font: DashboardType.micro,
-                                                    color: style.inkQuaternary, uppercase: true)
+                                                    color: style.inkQuaternary)
                     listBody.addSubview(label)
                     listItems.append(.group(label))
                     lastGroup = group

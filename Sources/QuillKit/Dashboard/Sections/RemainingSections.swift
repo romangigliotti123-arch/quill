@@ -55,9 +55,9 @@ public final class ScratchpadSectionView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
 
-        let eyebrow = DashboardType.label("Scratchpad", font: DashboardType.eyebrow,
-                                          color: style.inkTertiary, uppercase: true)
-        let title = DashboardType.label("Somewhere for a thought to land",
+        let eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
+                                          color: style.inkTertiary)
+        let title = DashboardType.label("Scratchpad",
                                         font: DashboardType.display, color: style.ink)
         let header = vstack([eyebrow, title], spacing: DashboardSpace.xxs)
         addSubview(header)
@@ -140,7 +140,7 @@ public final class ScratchpadSectionView: NSView {
         card.addSubview(preview)
 
         let meta = DashboardType.label("\(note.wordCount) words", font: DashboardType.micro,
-                                       color: style.inkQuaternary, uppercase: true)
+                                       color: style.inkQuaternary)
         meta.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(meta)
 
@@ -207,9 +207,9 @@ public final class StyleSectionView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
 
-        let eyebrow = DashboardType.label("Style", font: DashboardType.eyebrow,
-                                           color: style.inkTertiary, uppercase: true)
-        let title = DashboardType.label("Sound like you, not like a model",
+        let eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
+                                           color: style.inkTertiary)
+        let title = DashboardType.label("Style",
                                          font: DashboardType.display, color: style.ink)
         let deck = DashboardType.label(
             "Learned from how you edit what Quill writes. Nothing is inferred from a profile you did not create.",
@@ -369,9 +369,9 @@ public final class NotetakerSectionView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
 
-        let eyebrow = DashboardType.label("Notetaker", font: DashboardType.eyebrow,
-                                           color: style.inkTertiary, uppercase: true)
-        let title = DashboardType.label("Not built yet",
+        let eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
+                                           color: style.inkTertiary)
+        let title = DashboardType.label("Notetaker",
                                          font: DashboardType.display, color: style.ink)
         let deck = DashboardType.label(
             "Meeting capture needs three things Quill does not have: system-audio recording, calendar access, and a way to tell the other people in the room. Rather than ship a screen that looks finished and records nothing, this says so.",

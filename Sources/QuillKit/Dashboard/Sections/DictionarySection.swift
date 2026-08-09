@@ -53,8 +53,8 @@ public final class DictionarySectionView: NSView {
         self.entries = sorted
 
         eyebrow = DashboardType.label(DashboardSection.dictionary.title, font: DashboardType.eyebrow,
-                                      color: style.inkTertiary, uppercase: true)
-        heading = DashboardType.label("Words only you use", font: DashboardType.display, color: style.ink)
+                                      color: style.inkTertiary)
+        heading = DashboardType.label("Dictionary", font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label(
             "Apple’s recogniser takes these terms as a bias and ignores them — measured on this Mac. So Quill repairs them after the transcript, and every entry here shows what it has actually caught.",
             font: DashboardType.body, color: style.inkSecondary, lines: 2, lineHeight: 20)
@@ -232,10 +232,10 @@ final class DictionaryListView: NSView {
         sortLabel = DashboardType.label("Most repaired", font: DashboardType.caption, color: style.inkTertiary)
         sortIcon = DashboardIconView(image: DashboardIcon.image("chevron.up.chevron.down", pointSize: 9,
                                                                 weight: .semibold, color: style.inkQuaternary))
-        headTerm = DashboardType.label("Term", font: DashboardType.micro, color: style.inkQuaternary, uppercase: true)
-        headHeard = DashboardType.label("Heard instead", font: DashboardType.micro, color: style.inkQuaternary, uppercase: true)
+        headTerm = DashboardType.label("Term", font: DashboardType.micro, color: style.inkQuaternary)
+        headHeard = DashboardType.label("Heard instead", font: DashboardType.micro, color: style.inkQuaternary)
         headCount = DashboardType.label("Repairs", font: DashboardType.micro, color: style.inkQuaternary,
-                                        uppercase: true, alignment: .right)
+                                        alignment: .right)
         headRule = DashboardRule(color: style.hairline)
         footRule = DashboardRule(color: style.hairline)
         footLabel = DashboardType.label("", font: DashboardType.caption, color: style.inkTertiary)

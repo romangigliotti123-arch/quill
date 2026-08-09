@@ -77,19 +77,31 @@ public enum DashboardMetrics {
 
 public enum DashboardType {
 
-    public static var eyebrow: NSFont { .monospacedSystemFont(ofSize: 10, weight: .semibold) }
-    public static var display: NSFont { .systemFont(ofSize: 27, weight: .semibold) }
-    public static var title: NSFont { .systemFont(ofSize: 19, weight: .semibold) }
-    public static var headline: NSFont { .systemFont(ofSize: 14.5, weight: .semibold) }
-    public static var body: NSFont { .systemFont(ofSize: 13.5, weight: .regular) }
-    public static var bodyMedium: NSFont { .systemFont(ofSize: 13.5, weight: .medium) }
-    public static var callout: NSFont { .systemFont(ofSize: 12.5, weight: .regular) }
-    public static var caption: NSFont { .systemFont(ofSize: 11.5, weight: .medium) }
-    public static var micro: NSFont { .monospacedSystemFont(ofSize: 9.5, weight: .semibold) }
-    public static var metric: NSFont { .systemFont(ofSize: 30, weight: .medium) }
-    public static var metricSmall: NSFont { .systemFont(ofSize: 20, weight: .medium) }
-    public static var mono: NSFont { .monospacedSystemFont(ofSize: 11.5, weight: .medium) }
-    public static var control: NSFont { .systemFont(ofSize: 13, weight: .semibold) }
+    // A macOS type scale, not a marketing one.
+    //
+    // The previous scale ran to a 27pt semibold display with an editorial title
+    // under it, and set every secondary label in tracked mono caps. That reads as
+    // a landing page wearing a window frame. Apple's own apps top out far lower —
+    // System Settings sets a page title at 15-17pt — and reserve size for data,
+    // not for headings. Everything below is a step on one 4pt-ish rhythm, and
+    // there is exactly one monospaced face, used only where digits must align.
+    public static var display: NSFont { .systemFont(ofSize: 20, weight: .semibold) }
+    public static var title: NSFont { .systemFont(ofSize: 15, weight: .semibold) }
+    public static var headline: NSFont { .systemFont(ofSize: 13, weight: .semibold) }
+    public static var body: NSFont { .systemFont(ofSize: 13, weight: .regular) }
+    public static var bodyMedium: NSFont { .systemFont(ofSize: 13, weight: .medium) }
+    public static var callout: NSFont { .systemFont(ofSize: 12, weight: .regular) }
+    public static var caption: NSFont { .systemFont(ofSize: 11.5, weight: .regular) }
+    /// Kept for source compatibility. No longer monospaced or capitalised — the
+    /// call sites that used it as a shouty label now read as quiet captions.
+    public static var micro: NSFont { .systemFont(ofSize: 11, weight: .medium) }
+    public static var eyebrow: NSFont { .systemFont(ofSize: 11, weight: .medium) }
+    /// Metrics stay large. Size belongs to the number, not the heading above it.
+    public static var metric: NSFont { .systemFont(ofSize: 28, weight: .regular) }
+    public static var metricSmall: NSFont { .systemFont(ofSize: 19, weight: .regular) }
+    /// The only monospaced face, and only where digits must line up in a column.
+    public static var mono: NSFont { .monospacedDigitSystemFont(ofSize: 12, weight: .regular) }
+    public static var control: NSFont { .systemFont(ofSize: 12.5, weight: .medium) }
 
     /// Swaps a label's colour without rebuilding its string. Labels here are set
     /// with `attributedStringValue`, which makes `textColor` a no-op — the trap
@@ -105,7 +117,9 @@ public enum DashboardType {
     /// Optical tracking. SF sets large sizes too loose and small caps too tight;
     /// these are the corrections, expressed once.
     public static func tracking(for font: NSFont, uppercase: Bool = false) -> CGFloat {
-        if uppercase { return font.pointSize * 0.085 }
+        // Uppercase tracking is a correction for a treatment this design no
+        // longer uses. Kept small for the few places caps still appear.
+        if uppercase { return font.pointSize * 0.05 }
         switch font.pointSize {
         case 24...: return -0.55
         case 18..<24: return -0.35

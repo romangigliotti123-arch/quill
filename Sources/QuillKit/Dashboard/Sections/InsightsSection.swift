@@ -73,9 +73,9 @@ public final class InsightsView: NSView {
         self.range = range
         metrics = InsightsMetrics.compute(records: records, vocabulary: vocabulary, range: range)
 
-        eyebrow = DashboardType.label(DashboardSection.insights.title,
-                                      font: DashboardType.eyebrow, color: style.inkTertiary, uppercase: true)
-        heading = DashboardType.label("How you actually speak",
+        eyebrow = DashboardType.label("",
+                                      font: DashboardType.eyebrow, color: style.inkTertiary)
+        heading = DashboardType.label("Insights",
                                       font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label("Measured on this Mac, from your own audio — no estimates, no ranking against strangers.",
                                     font: DashboardType.body, color: style.inkSecondary,
@@ -688,7 +688,7 @@ public final class InsightsFixesCard: NSView {
         header = InsightsCardHeader(style: style)
         bar = InsightsStackedBar(style: style)
         inlineLegend = InsightsInlineLegend(items: [], style: style)
-        listTitle = DashboardType.label("", font: DashboardType.micro, color: style.inkQuaternary, uppercase: true)
+        listTitle = DashboardType.label("", font: DashboardType.micro, color: style.inkQuaternary)
         rule = DashboardRule(color: style.hairline)
         super.init(frame: .zero)
         total.isBezeled = false
@@ -744,7 +744,7 @@ public final class InsightsFixesCard: NSView {
         listTitle = DashboardType.label(m.topFixes.contains(where: \.isDictionary)
                                         ? "Caught by your dictionary" : "Most repeated",
                                         font: DashboardType.micro,
-                                        color: style.inkQuaternary, uppercase: true)
+                                        color: style.inkQuaternary)
         addSubview(listTitle)
 
         rows.forEach { $0.removeFromSuperview() }
@@ -814,8 +814,18 @@ final class InsightsStackedBar: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func draw(_ dirtyRect: NSRect) {
-        let total = max(1, left + right)
         let radius = bounds.height / 2
+
+        // Nothing has happened yet. `max(1, ...)` used to keep the maths safe and
+        // in doing so drew a full-width accent bar for a count of zero — the same
+        // defect we criticised in Flow, where six saturated 0% chips read as
+        // populated at a glance. An empty track is the honest picture.
+        guard left + right > 0 else {
+            DashboardDraw.fill(bounds, radius: radius, color: style.hairline)
+            return
+        }
+
+        let total = left + right
         let gap: CGFloat = 3
         let leftWidth = ((bounds.width - gap) * CGFloat(left) / CGFloat(total)).rounded()
 
