@@ -19,7 +19,17 @@ import AppKit
 /// vibrant surface would render as a hole here and the preview would be a lie.
 public enum DashboardPreviewRenderer {
 
-    public static let size = DashboardMetrics.windowSize
+    /// QUILL_SHOT_SIZE=1120x760 renders at that size instead of the default.
+    /// Layout bugs only appear at sizes nobody renders, which is how a window
+    /// that is fine at 1350 ships broken at 1120.
+    public static var size: NSSize {
+        guard let spec = ProcessInfo.processInfo.environment["QUILL_SHOT_SIZE"] else {
+            return DashboardMetrics.windowSize
+        }
+        let parts = spec.lowercased().split(separator: "x").compactMap { Double($0) }
+        guard parts.count == 2 else { return DashboardMetrics.windowSize }
+        return NSSize(width: parts[0], height: parts[1])
+    }
     public static let scale: CGFloat = 2
 
     // MARK: - Public

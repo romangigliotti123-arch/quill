@@ -396,7 +396,19 @@ public final class InsightsHeatmap: NSView {
     public var days: [InsightsMetrics.Day] { didSet { needsDisplay = true } }
     public var style: DashboardStyle { didSet { needsDisplay = true } }
 
+    /// The size a square would like to be.
     public var cell: CGFloat = 11
+
+    /// The size it actually gets. The grid draws a fixed square per column, so a
+    /// frame narrower than intrinsicWidth used to overflow — at 1120pt the year
+    /// band ran straight under the stats column beside it. Squares shrink to fit
+    /// instead, which is what a calendar does when the window does.
+    private var fittedCell: CGFloat {
+        guard bounds.width > 0 else { return cell }
+        let available = bounds.width - labelColumn
+        let fit = (available + gap) / CGFloat(columns) - gap
+        return max(4, min(cell, fit.rounded(.down)))
+    }
     public var gap: CGFloat = 3
     /// Which square the cursor is over, or nil. Drives the ring and the tooltip.
     private var hovered: Int? { didSet { if oldValue != hovered { needsDisplay = true } } }
@@ -469,7 +481,7 @@ public final class InsightsHeatmap: NSView {
         var calendar = Calendar.current
         calendar.firstWeekday = 1
 
-        let pitch = cell + gap
+        let pitch = fittedCell + gap
         let gridTop = monthRow
 
         // Squares. Index 0 is a Sunday by construction — the dense series is cut
@@ -480,7 +492,7 @@ public final class InsightsHeatmap: NSView {
             let row = index % 7
             let rect = NSRect(x: labelColumn + CGFloat(column) * pitch,
                               y: gridTop + CGFloat(row) * pitch,
-                              width: cell, height: cell)
+                              width: fittedCell, height: fittedCell)
             DashboardDraw.fill(rect, radius: 3.5, color: color(for: day.words, thresholds: thresholds))
         }
 
@@ -516,7 +528,7 @@ public final class InsightsHeatmap: NSView {
             let text = name as NSString
             let size = text.size(withAttributes: dayAttributes)
             text.draw(at: NSPoint(x: labelColumn - 8 - size.width,
-                                  y: (gridTop + CGFloat(row) * pitch + (cell - size.height) / 2).rounded()),
+                                  y: (gridTop + CGFloat(row) * pitch + (fittedCell - size.height) / 2).rounded()),
                       withAttributes: dayAttributes)
         }
 
@@ -553,19 +565,19 @@ public final class InsightsHeatmap: NSView {
     private func rect(forIndex index: Int, pitch: CGFloat, gridTop: CGFloat) -> NSRect {
         NSRect(x: labelColumn + CGFloat(index / 7) * pitch,
                y: gridTop + CGFloat(index % 7) * pitch,
-               width: cell, height: cell)
+               width: fittedCell, height: fittedCell)
     }
 
     /// Nil in the gutters between squares as well as outside the grid. A
     /// heatmap that keeps the tooltip up while the cursor is on the gap makes
     /// the reading feel approximate, which is the opposite of the point.
     public func index(at point: NSPoint) -> Int? {
-        let pitch = cell + gap
+        let pitch = fittedCell + gap
         let column = Int(((point.x - labelColumn) / pitch).rounded(.down))
         let row = Int(((point.y - monthRow) / pitch).rounded(.down))
         guard column >= 0, row >= 0, row < 7 else { return nil }
         let origin = NSPoint(x: labelColumn + CGFloat(column) * pitch, y: monthRow + CGFloat(row) * pitch)
-        guard point.x <= origin.x + cell, point.y <= origin.y + cell else { return nil }
+        guard point.x <= origin.x + fittedCell, point.y <= origin.y + fittedCell else { return nil }
         let index = column * 7 + row
         return index >= 0 && index < days.count ? index : nil
     }

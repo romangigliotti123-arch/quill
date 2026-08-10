@@ -294,6 +294,13 @@ final class DictionaryListView: NSView {
         // Filter strip.
         segmented.frame = NSRect(x: inset, y: 15, width: segmented.intrinsicWidth, height: 26)
         let sortSize = sortLabel.fittingSize
+        // The sort control is secondary; the filter tabs are how you navigate. When
+        // there is not room for both, the sort goes rather than printing through
+        // "Learned".
+        let sortNeeds = sortSize.width + 12 + 5
+        let sortFits = inset + segmented.intrinsicWidth + 16 + sortNeeds <= bounds.width - inset
+        sortIcon.isHidden = !sortFits
+        sortLabel.isHidden = !sortFits
         sortIcon.frame = NSRect(x: bounds.width - inset - 12, y: 22, width: 12, height: 12)
         sortLabel.frame = NSRect(x: sortIcon.frame.minX - 5 - sortSize.width,
                                  y: (28 - sortSize.height / 2).rounded(),
@@ -338,9 +345,12 @@ final class DictionaryListView: NSView {
             string: "Showing \(shown) of \(rows.count) · sorted by repairs",
             attributes: [.font: DashboardType.caption, .foregroundColor: style.inkTertiary])
         let footSize = footLabel.fittingSize
-        footLabel.frame = NSRect(x: inset, y: (footTop + (footerHeight - footSize.height) / 2 + 0.5).rounded(),
-                                 width: footSize.width, height: footSize.height)
         let actionSize = footAction.fittingSize
+        // "Review 6 unused" is a control and keeps its width; the count beside it
+        // is prose and gives way. They used to overlap and both became unreadable.
+        let roomForCount = max(0, bounds.width - inset * 2 - actionSize.width - 16)
+        footLabel.frame = NSRect(x: inset, y: (footTop + (footerHeight - footSize.height) / 2 + 0.5).rounded(),
+                                 width: min(footSize.width, roomForCount), height: footSize.height)
         footAction.frame = NSRect(x: bounds.width - inset - actionSize.width,
                                   y: footLabel.frame.minY, width: actionSize.width, height: actionSize.height)
     }

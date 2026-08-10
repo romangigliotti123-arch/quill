@@ -589,17 +589,28 @@ public final class InsightsLatencyCard: NSView {
         // continuation of the first rather than a different measurement.
         let secondX = pad + max(primarySize.width, primaryCaptionSize.width) + 37
         let secondarySize = secondary.fittingSize
+        let secondaryCaptionSize = secondaryCaption.fittingSize
         // Baselines, not boxes. Bottom-aligning a 22pt field against a 30pt one
         // leaves the smaller number sitting two points low, which is exactly far
         // enough to look like a bug and not far enough to spot straight away.
         let baselineDrop = primary.firstBaselineOffsetFromTop - secondary.firstBaselineOffsetFromTop
         secondary.frame = NSRect(x: secondX, y: (y + baselineDrop).rounded(),
                                  width: secondarySize.width, height: secondarySize.height)
-        let secondaryCaptionSize = secondaryCaption.fittingSize
         secondaryCaption.frame = NSRect(x: secondX, y: y + primarySize.height + 1,
                                         width: secondaryCaptionSize.width, height: secondaryCaptionSize.height)
 
         // Legend rides on the same line as the numbers, hard right.
+        // The legend owns the right edge. Work out where it starts BEFORE placing
+        // the secondary column, so the two cannot occupy the same pixels — at
+        // 1120pt wide they did, and "3.07 s" printed straight through "first word".
+        var legendLeftEdge = bounds.width - pad
+        for dot in legend { legendLeftEdge -= dot.intrinsicWidth + 14 }
+
+        let secondaryFits = secondX + max(secondarySize.width, secondaryCaptionSize.width) < legendLeftEdge - 12
+        secondary.isHidden = !secondaryFits
+        secondaryCaption.isHidden = !secondaryFits
+        numbersDivider.isHidden = !secondaryFits
+
         var legendX = bounds.width - pad
         for dot in legend.reversed() {
             let width = dot.intrinsicWidth
@@ -617,9 +628,13 @@ public final class InsightsLatencyCard: NSView {
         let plotHeight = max(70, bounds.height - y - footnoteHeight - 18 - 8)
         plot.frame = NSRect(x: pad, y: y, width: inner, height: plotHeight)
         let footnoteSize = footnote.fittingSize
-        footnote.frame = NSRect(x: pad, y: y + plotHeight + 8,
-                                width: min(footnoteSize.width, inner), height: footnoteHeight)
         let metaSize = footnoteMeta.fittingSize
+        // The meta is the harder number to lose, so it keeps its width and the
+        // prose gives way. Overlapping them made both unreadable.
+        let availableForProse = max(0, inner - metaSize.width - 16)
+        footnote.frame = NSRect(x: pad, y: y + plotHeight + 8,
+                                width: min(footnoteSize.width, availableForProse), height: footnoteHeight)
+        footnote.isHidden = availableForProse < 120
         footnoteMeta.frame = NSRect(x: bounds.width - pad - metaSize.width,
                                     y: (y + plotHeight + 8 + (footnoteHeight - metaSize.height) / 2).rounded(),
                                     width: metaSize.width, height: metaSize.height)
@@ -1028,7 +1043,13 @@ public final class InsightsStreakCard: NSView {
         // The grid takes its natural width; the stats column takes the rest,
         // with a hairline between them so the two halves read as one card rather
         // than two crammed together.
-        let gridWidth = min(heatmap.intrinsicWidth, inner - 200)
+        // The stats column needs 200pt of TEXT width, and there are 54pt of gaps
+        // between it and the grid. Reserving only 200 total left it 146, which
+        // wrapped every caption to three lines and pushed the last two stats out
+        // through the bottom of the card.
+        let statsColumn: CGFloat = 200
+        let gapsToStats: CGFloat = 28 + 26
+        let gridWidth = max(120, min(heatmap.intrinsicWidth, inner - statsColumn - gapsToStats))
         heatmap.frame = NSRect(x: pad, y: gridTop, width: gridWidth,
                                height: max(0, bounds.height - gridTop - 14))
 
