@@ -48,14 +48,17 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
     /// Only ever advances. A callback tagged with an older id is a ghost.
     private var liveSessionID = 0
     private var lastFinalText = ""
-    /// The stop currently unwinding, if any. start() waits on it.
+    /// Which session is entitled to touch the shared audio source.
     ///
-    /// Without this, a dictation begun while the previous one is still finalising
-    /// races it over the SHARED audio source: the old stop() sets onBuffer = nil
-    /// and calls audio.stop(), silencing the session that just started, and the
-    /// two sessions' text runs together. Measured at 1.5s between dictations:
-    /// 10 of 40 clips produced no transcript at all and 7 of the 30 that survived
-    /// opened with the previous utterance.
+    /// A dictation begun while the previous one is still finalising races it over
+    /// the SHARED audio source: the old stop() sets onBuffer = nil and calls
+    /// audio.stop(), silencing the session that just started. Measured at 1.5s
+    /// between dictations: 10 of 40 clips produced no transcript at all.
+    ///
+    /// Making start() wait for stop() fixes the race and breaks the app — stop can
+    /// take 4s and a user's next keypress will not wait. So ownership is tracked
+    /// instead: a stop only tears down the audio if it still owns it.
+    private var audioOwner = 0
     private var stopInFlight: Task<String, Never>?
 
     public init(
@@ -143,9 +146,6 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
     }
 
     public func start() async throws {
-        // A start must never overtake a stop. Both own the audio source.
-        if let pending = withLock({ stopInFlight }) { _ = await pending.value }
-
         await teardown(current: nil)
         await prepare()
 
@@ -172,6 +172,7 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         let session: Session = withLock {
             sessionCounter += 1
             liveSessionID = sessionCounter
+            audioOwner = sessionCounter
             let new = Session(
                 id: sessionCounter,
                 module: engine.module,
@@ -230,8 +231,13 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         let live: Session? = withLock { session }
         guard let session = live else { return withLock { lastFinalText } }
 
-        audio.onBuffer = nil
-        audio.stop()
+        // Only if this session still owns the microphone. A newer dictation may
+        // have claimed it while this one was finalising, and pulling the tap out
+        // from under it is what produced the silent failures.
+        if withLock({ audioOwner == session.id }) {
+            audio.onBuffer = nil
+            audio.stop()
+        }
 
         // The converter is holding a partial frame of the last word. Dropping it
         // clips the final syllable, which reads as a typo rather than a bug.
