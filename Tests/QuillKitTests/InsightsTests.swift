@@ -251,7 +251,7 @@ private func record(daysAgo: Int,
     check(view, path: "InsightsView")
 }
 
-@Test @MainActor func changingTheRangeChangesTheNumbers() {
+@Test @MainActor func changingTheRangeChangesTheNumbers() throws {
     let view = InsightsView(records: InsightsFixture.sample,
                             vocabulary: .seed, isSample: true, style: .dark)
     view.frame = NSRect(origin: .zero, size: DashboardMetrics.panelFrame(in: DashboardMetrics.windowSize).size)
@@ -265,8 +265,19 @@ private func record(daysAgo: Int,
     }
 
     let month = headlineWords()
-    let segmented = view.subviews.compactMap { $0 as? InsightsSegmented }.first
-    segmented?.selectedIndex = 0        // 7 days
+    // Recursive, like `headlineWords` above. A direct-subview search silently
+    // returned nil the moment the page gained a scroll view, and a nil optional
+    // chained into `?.selectedIndex` changes nothing and reports nothing — the
+    // test went on to compare the month figure against itself.
+    func findSegmented(_ view: NSView) -> InsightsSegmented? {
+        for child in view.subviews {
+            if let hit = child as? InsightsSegmented { return hit }
+            if let hit = findSegmented(child) { return hit }
+        }
+        return nil
+    }
+    let segmented = try #require(findSegmented(view))
+    segmented.selectedIndex = 0        // 7 days
     view.layoutSubtreeIfNeeded()
     let week = headlineWords()
 

@@ -132,6 +132,11 @@ public final class SidebarView: NSView {
     private let mark: DashboardMark
     private let wordmark: NSTextField
     private let rule: DashboardRule
+    /// One pill for the whole rail, moved between rows, rather than a pill drawn
+    /// by whichever row happens to be selected. Nine rows each drawing their own
+    /// means selection can only ever appear and disappear; one that travels is
+    /// the difference between a list that responds and a list that redraws.
+    private let selectionPill: SidebarSelectionPill
 
     public override var isFlipped: Bool { true }
 
@@ -142,10 +147,14 @@ public final class SidebarView: NSView {
         wordmark = DashboardType.label("Quill", font: .systemFont(ofSize: 17, weight: .semibold),
                                        color: style.ink, tracking: -0.3)
         rule = DashboardRule(color: style.hairline)
+        selectionPill = SidebarSelectionPill(style: style)
         super.init(frame: .zero)
 
         addSubview(mark)
         addSubview(wordmark)
+        // Below every row, so the pill is a surface the icon and label sit on
+        // rather than a rectangle covering them.
+        addSubview(selectionPill)
         for section in DashboardSection.allCases {
             let row = SidebarRowView(section: section, style: style)
             row.onClick = { [weak self] in self?.select(section) }
@@ -165,7 +174,25 @@ public final class SidebarView: NSView {
         rows[selection]?.isSelected = false
         selection = section
         rows[section]?.isSelected = true
+        movePill(animated: true)
         delegate?.sidebar(self, didSelect: section)
+    }
+
+    /// The pill crosses the gap between the primary group and the footer when
+    /// selection jumps from Scratchpad to Settings — which is a long way and,
+    /// travelled at the same speed as a one-row hop, looks like a bug. Distance
+    /// buys a little more time, capped so it never becomes something to wait for.
+    private func movePill(animated: Bool) {
+        guard let target = rows[selection]?.frame else { return }
+        guard animated, !DashboardMotion.isReduced else {
+            selectionPill.frame = target
+            return
+        }
+        let distance = abs(target.midY - selectionPill.frame.midY)
+        let duration = min(0.34, DashboardMotion.standard + Double(distance) / 3200)
+        DashboardMotion.run(duration, timing: DashboardMotion.snap) { _ in
+            self.selectionPill.animator().frame = target
+        }
     }
 
     /// Every colour the rail drew with, re-resolved. Missing one here is not a
@@ -175,6 +202,7 @@ public final class SidebarView: NSView {
         mark.apply(style)
         DashboardType.recolor(wordmark, style.ink)
         rows.values.forEach { $0.style = style }
+        selectionPill.style = style
         rule.color = style.hairline
         needsLayout = true
         needsDisplay = true
@@ -217,6 +245,10 @@ public final class SidebarView: NSView {
         rule.frame = NSRect(x: inset + 3, y: bottom, width: width - (inset + 3) * 2, height: 1)
         bottom -= 20
 
+        // Follows the rows on a resize without animating — a window being dragged
+        // has enough moving already.
+        movePill(animated: false)
+
         // The card belongs with the nav, not floating above the footer. Anchored
     }
 }
@@ -236,9 +268,15 @@ public final class SidebarRowView: NSView {
     public var isSelected: Bool = false { didSet { rebuild() } }
     public var onClick: (() -> Void)?
 
-    private var isHovered = false { didSet { needsDisplay = true } }
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hover.animate(to: isHovered ? 1 : 0)
+        }
+    }
     private var icon: DashboardIconView
     private var label: NSTextField
+    private lazy var hover = DashboardTween(view: self)
 
     public override var isFlipped: Bool { true }
 
@@ -285,15 +323,12 @@ public final class SidebarRowView: NSView {
                              width: min(size.width, bounds.width - 48), height: size.height)
     }
 
+    /// Hover only. The selected pill is drawn once by the rail and moved between
+    /// rows, so a row that drew its own would produce two of them mid-travel.
     public override func draw(_ dirtyRect: NSRect) {
-        let radius = DashboardRadius.row
-        if isSelected {
-            DashboardDraw.raisedSurface(bounds, radius: radius,
-                                        fillColor: style.raised, topColor: style.raisedTop,
-                                        style: style, shadow: style.shadowRaised, flipped: true)
-        } else if isHovered {
-            DashboardDraw.fill(bounds, radius: radius, color: style.hover)
-        }
+        guard !isSelected, hover.value > 0.001 else { return }
+        DashboardDraw.fill(bounds, radius: DashboardRadius.row,
+                           color: style.hover.faded(hover.value))
     }
 
     public override func updateTrackingAreas() {
@@ -304,9 +339,50 @@ public final class SidebarRowView: NSView {
                                        owner: self))
     }
 
-    public override func mouseEntered(with event: NSEvent) { isHovered = true }
-    public override func mouseExited(with event: NSEvent) { isHovered = false }
+    public override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        NSCursor.pointingHand.set()
+    }
+    public override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        NSCursor.arrow.set()
+    }
+    public override func mouseDown(with event: NSEvent) {
+        // Nudges in under the pointer. Without it the only feedback on press is
+        // the section changing, which arrives a frame later and reads as lag.
+        DashboardMotion.run(DashboardMotion.press) { _ in self.animator().alphaValue = 0.68 }
+    }
     public override func mouseUp(with event: NSEvent) {
+        DashboardMotion.run(DashboardMotion.quick) { _ in self.animator().alphaValue = 1 }
         if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
+    }
+}
+
+// MARK: - Selection pill
+
+/// The raised surface under the selected row, owned by the rail so it can travel.
+public final class SidebarSelectionPill: NSView {
+
+    public var style: DashboardStyle { didSet { needsDisplay = true } }
+
+    public override var isFlipped: Bool { true }
+
+    public init(style: DashboardStyle) {
+        self.style = style
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Nothing in the pill responds to the pointer — the row above it does. A
+    /// pill that swallowed clicks would make the currently-selected row the one
+    /// item in the list you cannot click.
+    public override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    public override func draw(_ dirtyRect: NSRect) {
+        DashboardDraw.raisedSurface(bounds, radius: DashboardRadius.row,
+                                    fillColor: style.raised, topColor: style.raisedTop,
+                                    style: style, shadow: style.shadowRaised, flipped: true)
     }
 }

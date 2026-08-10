@@ -353,7 +353,13 @@ final class SnippetRowView: NSView {
     private let preview: NSTextField
     private let count: NSTextField
     private let offChip: DashboardChip?
-    private var isHovered = false { didSet { needsDisplay = true } }
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hover.animate(to: isHovered ? 1 : 0)
+        }
+    }
+    private lazy var hover = DashboardTween(view: self)
 
     override var isFlipped: Bool { true }
 
@@ -420,14 +426,17 @@ final class SnippetRowView: NSView {
             // grey" is most of the palette.
             DashboardDraw.fill(NSRect(x: 12, y: (bounds.height - 22) / 2, width: 2.5, height: 22),
                                radius: 1.25, color: style.accent)
-        } else if isHovered {
+        } else if hover.value > 0.001 {
             DashboardDraw.fill(NSRect(x: 6, y: 4, width: bounds.width - 12, height: bounds.height - 8),
-                               radius: DashboardRadius.row, color: style.hover)
+                               radius: DashboardRadius.row, color: style.hover.faded(hover.value))
         }
-        guard !isSelected, !isLastVisible, !followedBySelection, !isHovered else { return }
-        style.hairline.setFill()
+        // The separator fades out as the hover fill comes in, so the two never
+        // both appear during the crossover.
+        guard !isSelected, !isLastVisible, !followedBySelection, hover.value < 1 else { return }
+        style.hairline.faded(1 - hover.value).setFill()
         NSRect(x: 20, y: bounds.height - 1, width: bounds.width - 40, height: 1).fill()
     }
+
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -942,7 +951,13 @@ final class SnippetsStarterRow: NSView {
     private let arrow: DashboardIconView
     private let replacement: NSTextField
     private let plus: DashboardIconView
-    private var isHovered = false { didSet { needsDisplay = true } }
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hover.animate(to: isHovered ? 1 : 0)
+        }
+    }
+    private lazy var hover = DashboardTween(view: self)
 
     override var isFlipped: Bool { true }
 
@@ -987,14 +1002,20 @@ final class SnippetsStarterRow: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isHovered {
-            DashboardDraw.raisedSurface(bounds, radius: DashboardRadius.control,
-                                        fillColor: style.raised, topColor: style.raisedTop,
-                                        style: style, shadow: style.shadowContact, flipped: true)
-        } else {
-            DashboardDraw.fill(bounds, radius: DashboardRadius.control, color: style.panel)
-            DashboardDraw.stroke(bounds, radius: DashboardRadius.control, color: style.hairline)
-        }
+        // Flat state always, raised state faded over the top. Crossfading two
+        // whole surfaces is the only way to animate between them — a raised
+        // surface is a gradient, a shadow and a lit edge, none of which
+        // interpolate from a single colour.
+        DashboardDraw.fill(bounds, radius: DashboardRadius.control, color: style.panel)
+        DashboardDraw.stroke(bounds, radius: DashboardRadius.control,
+                             color: style.hairline.faded(1 - hover.value))
+        guard hover.value > 0.001 else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current?.cgContext.setAlpha(hover.value)
+        DashboardDraw.raisedSurface(bounds, radius: DashboardRadius.control,
+                                    fillColor: style.raised, topColor: style.raisedTop,
+                                    style: style, shadow: style.shadowContact, flipped: true)
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     override func updateTrackingAreas() {

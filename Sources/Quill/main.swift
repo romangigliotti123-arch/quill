@@ -46,6 +46,19 @@ if DashboardPreviewRenderer.runIfRequested() {
     exit(0)
 }
 
+// QUILL_RESIZE_SWEEP=/dir drives the REAL window through a range of sizes and
+// captures each one. The renderer above builds a fresh tree at a fixed size, so
+// it can only ever say a layout is right at that size — a control left lit by a
+// stale tracking area, or a frame that survives a shrink, needs the window to
+// actually change size. This needs an NSApplication, hence the ordering.
+if ProcessInfo.processInfo.environment["QUILL_RESIZE_SWEEP"] != nil {
+    let sweepApp = NSApplication.shared
+    sweepApp.setActivationPolicy(.accessory)
+    sweepApp.finishLaunching()
+    MainActor.assumeIsolated { _ = DashboardResizeSweep.runIfRequested() }
+    exit(0)
+}
+
 // QUILL_OVERLAY_SHOTS=/dir renders every overlay state to PNG. The HUD is the
 // surface a user sees most and the one hardest to inspect while it is on screen,
 // which is exactly why it needs to be reviewable offline.

@@ -651,12 +651,27 @@ public final class InsightsHeatmap: NSView {
 public final class InsightsSegmented: NSView {
 
     public var titles: [String]
-    public var selectedIndex: Int { didSet { rebuild(); onChange?(selectedIndex) } }
+    public var selectedIndex: Int {
+        didSet {
+            rebuild()
+            thumb.animate(to: CGFloat(selectedIndex), duration: DashboardMotion.standard)
+            onChange?(selectedIndex)
+        }
+    }
     public var style: DashboardStyle { didSet { rebuild() } }
     public var onChange: ((Int) -> Void)?
 
     private var labels: [NSTextField] = []
-    private var hoveredIndex: Int? { didSet { needsDisplay = true } }
+    private var hoveredIndex: Int? {
+        didSet {
+            guard hoveredIndex != oldValue else { return }
+            hover.animate(to: hoveredIndex == nil ? 0 : 1)
+        }
+    }
+    /// Segment index as a continuous number: the thumb slides to what was
+    /// clicked rather than reappearing there.
+    private lazy var thumb = DashboardTween(view: self, initial: CGFloat(selectedIndex))
+    private lazy var hover = DashboardTween(view: self)
 
     public override var isFlipped: Bool { true }
 
@@ -716,10 +731,16 @@ public final class InsightsSegmented: NSView {
 
         let rects = segmentRects()
         if let hoveredIndex, hoveredIndex != selectedIndex, hoveredIndex < rects.count {
-            DashboardDraw.fill(rects[hoveredIndex], radius: rects[hoveredIndex].height / 2, color: style.hover)
+            DashboardDraw.fill(rects[hoveredIndex], radius: rects[hoveredIndex].height / 2,
+                               color: style.hover.faded(hover.value))
         }
-        guard selectedIndex < rects.count else { return }
-        let rect = rects[selectedIndex]
+        guard !rects.isEmpty else { return }
+        // Between two segments while it travels. Clamped because the tween can be
+        // mid-flight when a rebuild shortens the list.
+        let position = max(0, min(CGFloat(rects.count - 1), thumb.value))
+        let low = rects[Int(position.rounded(.down))]
+        let high = rects[Int(position.rounded(.up))]
+        let rect = low.lerp(to: high, position - position.rounded(.down))
         DashboardDraw.raisedSurface(rect, radius: rect.height / 2,
                                     fillColor: style.raised, topColor: style.raisedTop,
                                     style: style, shadow: style.shadowRaised, flipped: true)

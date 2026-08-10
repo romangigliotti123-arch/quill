@@ -83,19 +83,16 @@ public final class HoverControl: NSView {
     }
 
     private func reflectState() {
-        NSAnimationContext.runAnimationGroup { context in
-            // Fast enough to feel attached to the pointer. Anything past ~0.15s
-            // reads as lag rather than as animation.
-            context.duration = isPressed ? 0.04 : 0.12
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            context.allowsImplicitAnimation = true
-
-            switch feedback {
+        // Fast enough to feel attached to the pointer. Anything past ~0.15s reads
+        // as lag rather than as animation — and a press has to be quicker again,
+        // because the finger is already there when the frame lands.
+        DashboardMotion.run(isPressed ? DashboardMotion.press : DashboardMotion.quick) { _ in
+            switch self.feedback {
             case .fill:
-                layer?.backgroundColor = (isHovered ? hoverColor : baseColor).cgColor
-                animator().alphaValue = isPressed ? 0.75 : 1
+                self.layer?.backgroundColor = (self.isHovered ? self.hoverColor : self.baseColor).cgColor
+                self.animator().alphaValue = self.isPressed ? 0.75 : 1
             case .dim:
-                animator().alphaValue = isPressed ? 0.7 : (isHovered ? 0.88 : 1)
+                self.animator().alphaValue = self.isPressed ? 0.7 : (self.isHovered ? 0.88 : 1)
             }
         }
     }

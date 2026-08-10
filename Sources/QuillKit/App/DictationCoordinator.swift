@@ -18,6 +18,12 @@ public final class DictationCoordinator {
     private let cleaner: TranscriptCleaning
     private let history: HistoryStore
     private let snippets: SnippetStore
+    private let settings: QuillSettings
+    /// Puts words on screen while you are still speaking. Only used when the
+    /// setting is on and the focused app can actually take synthetic keystrokes;
+    /// otherwise the release-and-paste path below runs exactly as it always did.
+    private let liveTyper: LiveTyper
+    private var isLive = false
 
     /// How long the thorough cleanup is allowed to take before we give up on it
     /// and insert the fast version. Past roughly a quarter second the pause
@@ -43,8 +49,12 @@ public final class DictationCoordinator {
         overlay: OverlayPresenting,
         cleaner: TranscriptCleaning = FastCleaner(),
         history: HistoryStore = HistoryStore(),
-        snippets: SnippetStore = .shared
+        snippets: SnippetStore = .shared,
+        settings: QuillSettings = .shared,
+        liveTyper: LiveTyper = LiveTyper()
     ) {
+        self.settings = settings
+        self.liveTyper = liveTyper
         self.hotkey = hotkey
         self.transcriber = transcriber
         self.inserter = inserter
@@ -84,8 +94,12 @@ public final class DictationCoordinator {
         // The honest start of the dictation, not the moment we worked out it was one.
         timeline.hotkeyDown = Date()
         // Captured at the start, not the end: the default device can change
-        // mid-dictation, and what matters is what was heard.
-        capturedInputDevice = AudioDeviceInfo.currentInputName()
+        // mid-dictation, and what matters is what was heard. Reports the device
+        // chosen in Settings when there is one, falling back to the system
+        // default when it has been unplugged — the same fallback the capture
+        // itself makes, so the stamp never claims a microphone that recorded
+        // nothing.
+        capturedInputDevice = AudioDeviceInfo.activeInputName(uid: settings.inputDeviceUID)
 
         Task { [transcriber] in
             await transcriber.prepare()
@@ -119,6 +133,10 @@ public final class DictationCoordinator {
             speculativelyBegin()
         }
         isSpeculating = false
+        // Decided here, once, rather than per partial: the focused app is
+        // whatever the user was in when they pressed the key, and it is the only
+        // window it is ever safe to type into during this dictation.
+        isLive = settings.liveText && liveTyper.begin()
         overlay.show(.listening(level: 0))
     }
 
@@ -136,6 +154,11 @@ public final class DictationCoordinator {
             self.timeline.finalTranscript = Date()
 
             guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                // Nothing was said, but something may already be on screen: a
+                // volatile hypothesis the recogniser later withdrew. Take it back,
+                // or the user is left with words they never spoke.
+                if self.isLive { self.liveTyper.retract() }
+                self.isLive = false
                 overlay.show(.hidden)
                 return
             }
@@ -172,7 +195,24 @@ public final class DictationCoordinator {
             // matched, which is the overwhelmingly common case.
             final = snippets.expand(final)
 
-            let result = inserter.insert(final)
+            // Two ways in, and the difference is whether the text is already
+            // there. Live typing has been writing this sentence since the first
+            // partial, so finishing it means reconciling the last edit — usually
+            // nothing, sometimes the sentence the model rewrote. Pasting the whole
+            // thing here instead would insert it twice.
+            let result: InsertionResult
+            if self.isLive, !self.liveTyper.isAbandoned {
+                let live = self.liveTyper.finish(final)
+                // The one failure mode: focus moved mid-sentence. The partial text
+                // stays where it was typed and the finished text goes wherever the
+                // user is now — a duplicate, which they can see and delete, rather
+                // than a silent loss.
+                result = (live == .inserted) ? live : inserter.insert(final)
+            } else {
+                if self.isLive { self.liveTyper.reset() }
+                result = inserter.insert(final)
+            }
+            self.isLive = false
             self.timeline.textInserted = Date()
 
             switch result {
@@ -229,6 +269,10 @@ public final class DictationCoordinator {
         isDictating = false
         isSpeculating = false
         sessionID += 1
+        // Escape means "pretend this never happened", and with live typing on,
+        // part of it already did. Take every character back before anything else.
+        if isLive { liveTyper.retract() }
+        isLive = false
         Task { [transcriber, overlay] in
             await transcriber.cancel()
             overlay.hide()
@@ -238,6 +282,8 @@ public final class DictationCoordinator {
     private func fail(_ message: String) {
         isDictating = false
         isSpeculating = false
+        if isLive { liveTyper.retract() }
+        isLive = false
         overlay.show(.error(message))
     }
 
@@ -322,6 +368,14 @@ extension DictationCoordinator: TranscriberDelegate {
         if timeline.firstPartial == nil, !transcript.text.isEmpty {
             timeline.firstPartial = Date()
         }
+        guard isLive, isDictating else { return }
+        // Cleaned, not raw. Typing the raw hypothesis would mean the final pass
+        // capitalises the first letter and re-punctuates — a change at character
+        // zero, which is a delete-and-retype of the entire sentence at the exact
+        // moment the user is waiting for it to finish. Running the deterministic
+        // pass on every partial costs microseconds and makes the closing edit
+        // almost always empty.
+        liveTyper.update(to: cleaner.cleanFast(transcript.text))
     }
 
     public func transcriber(didFail error: Error) {

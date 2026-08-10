@@ -29,8 +29,10 @@ own. It now has one, on NVIDIA NIM, with the transcription still fully local.
 | **Dictation** | Hold Right ⌥, speak, release. Text lands in the focused app. Double-tap locks hands-free; Escape cancels. |
 | **Engine** | Apple `SpeechAnalyzer` + `SpeechTranscriber`, on-device. First partial ~1.0s, 43× real-time in batch, 0 MB of models in the bundle. |
 | **AI layer** | NVIDIA NIM (`meta/llama-3.1-8b-instruct`). Spoken self-correction, style, transforms, command routing. Falls back to deterministic repair with no network. |
-| **Dashboard** | Insights, Dictation history, Dictionary, Snippets. All four beat Flow's equivalents in blind review. |
-| **Tests** | 369. |
+| **Live text** | Words land in the focused app as you speak, not on key release. Revisions are reconciled with the smallest possible edit; Escape takes all of it back. |
+| **Settings** | Hold-to-talk and push-to-talk are separately bindable to any modifier, the microphone is selectable, and live text can be turned off. Persisted to `settings.json`, read live — no relaunch. |
+| **Dashboard** | Insights, Dictation history, Dictionary, Snippets, Scratchpad, Style, Settings. |
+| **Tests** | 393. |
 
 ---
 
@@ -73,7 +75,16 @@ wasn't opening until the 120ms arm delay had elapsed *and* the audio engine had
 spun up. Capture now starts at key-down, before the gesture is even known to be
 dictation; if it turns out to be a chord or a stray tap the audio is binned.
 
-**3. Putting a vocabulary list in a model prompt makes the model spend from it.**
+**3. Live text has to type the *cleaned* partial, not the raw one.**
+`SpeechTranscriber` returns the whole best-so-far string on every update, so live
+typing is a diff: delete back to the longest common prefix, type the rest. Typing
+raw hypotheses looks fine until the final pass capitalises the first letter — a
+change at character zero, which is a delete-and-retype of the entire sentence at
+the exact moment the user is waiting for it to finish. Running the deterministic
+cleaner on every partial costs microseconds and makes the closing edit almost
+always empty.
+
+**4. Putting a vocabulary list in a model prompt makes the model spend from it.**
 Giving the cleanup prompt Roman's project names caused it to inject "Builda Bed"
 into a sentence that never mentioned it. Term survival is now enforced
 deterministically. Prompting is the wrong tool for a checkable constraint.
@@ -82,7 +93,8 @@ deterministically. Prompting is the wrong tool for a checkable constraint.
 
 ## What is NOT done
 
-- **Notetaker, Scratchpad, Style UI** — three of Flow's eight sections.
+- **Notetaker** — needs system-audio capture, calendar access and a consent story. The section says so rather than faking it.
+- **Transforms and Help** — still the shell's placeholder.
 - **Roman's voice.** Every number here comes from LibriSpeech: read speech, American
   strangers. It says nothing about an Australian accent or the words actually used
   day to day. `rig/record_voice.sh` puts a script on screen and records it — about
@@ -97,10 +109,17 @@ deterministically. Prompting is the wrong tool for a checkable constraint.
 ```bash
 Scripts/build.sh --release     # signed, stable identity, TCC grants survive rebuilds
 open "$HOME/Library/Application Support/Quill/build/Quill.app"
-Scripts/test.sh                # 369 tests
+Scripts/test.sh                # 393 tests
 rig/setup.sh                   # verifies every precondition, refuses to run on a broken rig
 rig/run_eval.sh --app quill --settle 18
 rig/score.py --run out/<run-id>
+
+# Layout, at every size that has ever broken. Renders the REAL window after a
+# real resize, so a stale tracking area or a frame that survives a shrink shows
+# up — which an offscreen render at a fixed size structurally cannot catch.
+QUILL_RESIZE_SWEEP=/tmp/sweep \
+  QUILL_DASHBOARD_SECTIONS=insights,settings \
+  "$HOME/Library/Application Support/Quill/build/Quill.app/Contents/MacOS/Quill"
 ```
 
 Traps that cost real time and are documented where they bite:

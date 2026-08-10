@@ -29,6 +29,8 @@ public final class InsightsView: NSView {
 
     // MARK: Chrome
 
+    private let scroll = NSScrollView()
+    private let content = InsightsFlippedView()
     private let eyebrow: NSTextField
     private let heading: NSTextField
     private let blurb: NSTextField
@@ -93,16 +95,33 @@ public final class InsightsView: NSView {
 
         super.init(frame: .zero)
 
-        addSubview(eyebrow)
-        addSubview(heading)
-        addSubview(blurb)
-        addSubview(segmented)
+        // Six cards with real floors under them need more than the 638 points a
+        // 1060x700 window leaves — the streak band was being cut in half by the
+        // panel edge with nothing on screen to say there was more. The document
+        // is still sized to fill a tall window exactly, so this changes nothing
+        // above the height where it stops fitting.
+        scroll.drawsBackground = false
+        scroll.backgroundColor = .clear
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.contentView.drawsBackground = false
+        scroll.documentView = content
+        addSubview(scroll)
+
+        content.addSubview(eyebrow)
+        content.addSubview(heading)
+        content.addSubview(blurb)
+        content.addSubview(segmented)
         if isSample {
             let chip = DashboardChip(text: "Sample data", tone: .outline, style: style)
-            addSubview(chip)
+            content.addSubview(chip)
             sampleChip = chip
         }
-        [volumeCard, paceCard, savedCard, latencyCard, fixesCard, streakCard].forEach(addSubview)
+        [volumeCard, paceCard, savedCard, latencyCard, fixesCard, streakCard]
+            .forEach(content.addSubview)
 
         segmented.onChange = { [weak self] index in
             guard let self else { return }
@@ -193,6 +212,7 @@ public final class InsightsView: NSView {
 
     public override func layout() {
         super.layout()
+        scroll.frame = bounds
         let padX = DashboardMetrics.contentPaddingX
         let padY = DashboardMetrics.contentPaddingY
         let width = bounds.width - padX * 2
@@ -224,13 +244,31 @@ public final class InsightsView: NSView {
 
         // Three stat cards, then two panels, then the year band. Heights are
         // derived from what is left rather than fixed, so the page fills the
-        // panel exactly at 850 and degrades gracefully when the window is
-        // dragged shorter.
+        // panel exactly at 850.
+        //
+        // Below the height where the floors stop fitting, the page grows past the
+        // viewport and scrolls instead of being clipped. `max` against the
+        // viewport is what keeps the tall case identical: the document is only
+        // ever taller than the window when the alternative was losing a card.
         let gap = DashboardSpace.lg
-        let remaining = bounds.height - padY - y
         let statHeight: CGFloat = 138
-        let streakHeight = max(150, min(200, streakCard.preferredHeight))
-        let panelHeight = max(180, remaining - statHeight - streakHeight - gap * 2)
+        let minPanelHeight: CGFloat = 180
+        // The streak band is the one card here with slack in it — it reads fine
+        // compressed and merely has more air at 200 — so it gives its slack up
+        // first, which is what lets the whole page fit a 1060x700 window instead
+        // of making you scroll for the last fifty points of a card.
+        //
+        // But never below what it needs to draw itself. That floor is the card's
+        // own answer, not a number chosen here: squeezing it further does not
+        // shrink the content, it pushes the last stat out through the bottom edge.
+        let slack = bounds.height - padY - y - statHeight - minPanelHeight - gap * 2
+        let streakHeight = max(streakCard.preferredHeight, min(200, slack))
+        let natural = y + statHeight + gap + minPanelHeight + gap + streakHeight + padY
+        let documentHeight = max(bounds.height, natural)
+        content.frame = NSRect(x: 0, y: 0, width: bounds.width, height: documentHeight)
+
+        let remaining = documentHeight - padY - y
+        let panelHeight = max(minPanelHeight, remaining - statHeight - streakHeight - gap * 2)
 
         let statWidth = ((width - gap * 2) / 3).rounded(.down)
         for (index, card) in [volumeCard, paceCard, savedCard].enumerated() {
@@ -249,6 +287,12 @@ public final class InsightsView: NSView {
 
         streakCard.frame = NSRect(x: padX, y: y, width: width, height: streakHeight)
     }
+}
+
+/// Top-down inside the scroll view. Without it the header would sit at the
+/// bottom of the document and the page would open on the year band.
+final class InsightsFlippedView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 // MARK: - Stat card
@@ -999,8 +1043,23 @@ public final class InsightsStreakCard: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// The shorter of the two columns cannot decide this card's height.
+    ///
+    /// This used to measure the heatmap alone, and the heatmap is the *shorter*
+    /// half — three values with two-line captions beside it need more than a
+    /// twelve-row year grid does. The result was a card sized to its grid with
+    /// the last stat, "your biggest day", drawn below its own bottom edge and out
+    /// onto the panel. The layout below already distributes the stats into
+    /// whatever height it is given, and that only works if the height it is given
+    /// was asked to hold them.
     public var preferredHeight: CGFloat {
-        19 + 18 + 12 + heatmap.intrinsicHeight + 14
+        let chrome: CGFloat = 19 + 18 + 12
+        let grid = chrome + heatmap.intrinsicHeight + 14
+        // 200 is the width the layout reserves for the stats column, so captions
+        // wrap here exactly as they will on screen.
+        let stacked = stats.map { $0.height(for: 200) }.reduce(0, +)
+            + 9 * CGFloat(max(0, stats.count - 1))
+        return max(grid, chrome + stacked + 16)
     }
 
     public func configure(metrics m: InsightsMetrics) {

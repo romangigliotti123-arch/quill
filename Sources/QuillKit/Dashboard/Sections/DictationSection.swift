@@ -438,7 +438,13 @@ final class DictationRowView: NSView {
     private var time: NSTextField
     private var snippet: NSTextField
     private var meta: NSTextField
-    private var isHovered = false { didSet { needsDisplay = true } }
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hover.animate(to: isHovered ? 1 : 0)
+        }
+    }
+    private lazy var hover = DashboardTween(view: self)
 
     override var isFlipped: Bool { true }
 
@@ -534,8 +540,9 @@ final class DictationRowView: NSView {
             style.accent.setFill()
             NSRect(x: 6, y: 2, width: 2.5, height: bounds.height - 4).fill()
             NSGraphicsContext.restoreGraphicsState()
-        } else if isHovered {
-            DashboardDraw.fill(bounds.insetBy(dx: 6, dy: 2), radius: DashboardRadius.row, color: style.hover)
+        } else if hover.value > 0.001 {
+            DashboardDraw.fill(bounds.insetBy(dx: 6, dy: 2), radius: DashboardRadius.row,
+                               color: style.hover.faded(hover.value))
         } else if showsSeparator {
             style.hairline.setFill()
             NSRect(x: DashboardSpace.md + 2, y: 0, width: bounds.width - (DashboardSpace.md + 2) * 2, height: 1).fill()
@@ -661,7 +668,13 @@ final class DictationClearButton: NSView {
     var onClick: (() -> Void)?
 
     private let icon: DashboardIconView
-    private var isHovered = false { didSet { needsDisplay = true } }
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hover.animate(to: isHovered ? 1 : 0)
+        }
+    }
+    private lazy var hover = DashboardTween(view: self)
     private let style: DashboardStyle
 
     override var isFlipped: Bool { true }
@@ -686,8 +699,12 @@ final class DictationClearButton: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard isHovered else { return }
-        DashboardDraw.fill(bounds, radius: bounds.width / 2, color: style.hover)
+        guard hover.value > 0.001 else { return }
+        // Grows into place as well as fading in. A circle that only fades reads
+        // as a rendering artefact at this size.
+        let inset = 3 * (1 - hover.value)
+        let circle = bounds.insetBy(dx: inset, dy: inset)
+        DashboardDraw.fill(circle, radius: circle.width / 2, color: style.hover.faded(hover.value))
     }
 
     override func updateTrackingAreas() {

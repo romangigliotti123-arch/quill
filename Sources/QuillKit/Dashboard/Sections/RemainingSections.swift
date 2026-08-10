@@ -28,11 +28,22 @@ final class SectionCard: NSView {
             let t = DashboardType.label(trailing, font: DashboardType.caption,
                                          color: style.inkTertiary)
             t.translatesAutoresizingMaskIntoConstraints = false
+            t.lineBreakMode = .byTruncatingTail
             addSubview(t)
             NSLayoutConstraint.activate([
                 t.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -DashboardSpace.md),
                 t.centerYAnchor.constraint(equalTo: heading.centerYAnchor),
+                // Without this the two labels simply overlap at a narrow window —
+                // "What Quill has learned" ran into "0 corrections seen" with no
+                // space between them at all. The heading is the more important of
+                // the two, so the meta is what gives way: it truncates first, and
+                // the gap between them is never negotiable.
+                t.leadingAnchor.constraint(greaterThanOrEqualTo: heading.trailingAnchor,
+                                           constant: DashboardSpace.sm),
             ])
+            heading.lineBreakMode = .byTruncatingTail
+            t.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            heading.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

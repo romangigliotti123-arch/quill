@@ -74,7 +74,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         status.isEnabled = false
         menu.addItem(status)
 
-        let hint = NSMenuItem(title: "Hold Right ⌥ to dictate · double-tap to lock", action: nil, keyEquivalent: "")
+        let hint = NSMenuItem(title: hintLine(), action: nil, keyEquivalent: "")
         hint.isEnabled = false
         menu.addItem(hint)
         menu.addItem(.separator())
@@ -103,6 +103,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem(title: "Quit Quill", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
+    }
+
+    /// Reads the live bindings, so a key changed in Settings is reflected here on
+    /// the next poll rather than telling the user to hold a key that no longer
+    /// does anything.
+    private func hintLine() -> String {
+        let settings = QuillSettings.shared
+        let hold = settings.hold.displayName
+        if settings.toggleSharesHoldKey {
+            return "Hold \(hold) to dictate · double-tap to lock"
+        }
+        return "Hold \(hold) to dictate · tap \(settings.toggle.displayName) for hands-free"
     }
 
     private func statusLine() -> String {

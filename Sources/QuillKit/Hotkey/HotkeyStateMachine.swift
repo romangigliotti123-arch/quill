@@ -41,6 +41,13 @@ public struct HotkeyStateMachine: Equatable, Sendable {
         /// other modifier is also held — i.e. this is a chord, not a gesture.
         case triggerDown(isolated: Bool)
         case triggerUp
+        /// The *push-to-talk* key went down: a key whose single tap starts and
+        /// stops hands-free dictation, with nothing to hold. Only ever produced
+        /// when it is a different physical key from the hold trigger — when the
+        /// two are bound to the same key, hands-free is reached by double-tapping
+        /// and this input never arrives.
+        case toggleDown(isolated: Bool)
+        case toggleUp
         /// Some *other* modifier changed while a gesture was in flight.
         case otherModifierChanged
         /// `isBare` means no ⌘⌥⌃⇧ held; see HotkeyBinding.chordMask for why fn
@@ -136,7 +143,25 @@ public struct HotkeyStateMachine: Equatable, Sendable {
             state = .idle
             return [.cancelArmTimer, .abortPreroll]
 
-        case (.armed, .keyDown), (.armed, .otherModifierChanged):
+        case (.idle, let .toggleDown(isolated)):
+            // No arm delay and no preroll window to protect: there is no tap-vs-hold
+            // ambiguity on a key that only ever toggles, so recording starts on the
+            // press itself. `beginPreroll` still comes first because it is what
+            // opens the microphone, and `notifyPressed` is what puts the HUD up.
+            guard isolated else { return [] }
+            lastTapAt = nil
+            state = .handsFree
+            return [.beginPreroll, .notifyPressed]
+
+        case (.handsFree, .toggleDown):
+            // Either bound key ends hands-free. Isolation is not required to stop:
+            // refusing to stop because a stray ⇧ was also down would strand a
+            // recording the user has plainly asked to end.
+            lastTapAt = nil
+            state = .idle
+            return [.notifyReleased]
+
+        case (.armed, .keyDown), (.armed, .otherModifierChanged), (.armed, .toggleDown):
             // It was the beginning of a chord. Abandon it, and refuse to let it
             // count as the first half of a double-tap.
             lastTapAt = nil
@@ -186,7 +211,10 @@ public struct HotkeyStateMachine: Equatable, Sendable {
 
         default:
             // Includes: modifiers changing mid-recording (a stray ⇧ must not kill a
-            // dictation in progress), auto-repeat, and timers whose gesture is gone.
+            // dictation in progress), auto-repeat, timers whose gesture is gone,
+            // every `.toggleUp` (the push-to-talk key is a tap, so its release
+            // means nothing), and the push key pressed during a hold — the hold is
+            // the gesture in progress and it decides when it ends.
             return []
         }
     }

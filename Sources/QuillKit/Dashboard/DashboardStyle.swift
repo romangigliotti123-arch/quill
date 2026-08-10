@@ -545,8 +545,21 @@ public final class DashboardButton: NSView {
     public var style: DashboardStyle { didSet { rebuild() } }
     public var onClick: (() -> Void)?
 
-    private var isHovered = false { didSet { needsDisplay = true } }
-    private var isPressed = false { didSet { needsDisplay = true } }
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hover.animate(to: isHovered ? 1 : 0)
+        }
+    }
+    private var isPressed = false {
+        didSet {
+            guard isPressed != oldValue else { return }
+            press.animate(to: isPressed ? 1 : 0,
+                          duration: isPressed ? DashboardMotion.press : DashboardMotion.quick)
+        }
+    }
+    private lazy var hover = DashboardTween(view: self)
+    private lazy var press = DashboardTween(view: self)
     private let label = NSTextField(labelWithString: "")
     private var icon: DashboardIconView?
 
@@ -614,9 +627,15 @@ public final class DashboardButton: NSView {
 
     public override func draw(_ dirtyRect: NSRect) {
         let radius = DashboardRadius.control
+        // Both states are continuous now, so hover and press stack rather than
+        // one replacing the other — a button pressed while the pointer is on it
+        // ends up somewhere neither state reaches alone, which is the point.
+        let lit = hover.value
+        let down = press.value
+
         switch kind {
         case .primary:
-            let base = isPressed ? style.fillHover : (isHovered ? style.fillHover : style.fill)
+            let base = style.fill.mixed(with: style.fillHover, lit)
             DashboardDraw.shadowed(style.shadowRaised, flipped: true) {
                 base.setFill()
                 DashboardDraw.path(bounds, radius).fill()
@@ -626,13 +645,19 @@ public final class DashboardButton: NSView {
             }
         case .secondary:
             DashboardDraw.raisedSurface(bounds, radius: radius,
-                                        fillColor: isHovered ? style.raisedTop : style.raised,
+                                        fillColor: style.raised.mixed(with: style.raisedTop, lit),
                                         topColor: nil, style: style,
                                         shadow: style.shadowRaised, flipped: true)
         case .ghost:
-            if isHovered {
-                DashboardDraw.fill(bounds, radius: radius, color: style.hover)
-            }
+            DashboardDraw.fill(bounds, radius: radius, color: style.hover.faded(lit))
+        }
+
+        // The press itself: a scrim, not an alpha change. Fading the whole button
+        // out would take its label with it and read as "disabled" for as long as
+        // the finger is down.
+        if down > 0.001 {
+            DashboardDraw.fill(bounds, radius: radius,
+                               color: NSColor(white: style.isDark ? 1 : 0, alpha: 0.09 * down))
         }
     }
 
@@ -644,8 +669,15 @@ public final class DashboardButton: NSView {
                                        owner: self))
     }
 
-    public override func mouseEntered(with event: NSEvent) { isHovered = true }
-    public override func mouseExited(with event: NSEvent) { isHovered = false }
+    public override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        NSCursor.pointingHand.set()
+    }
+    public override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        isPressed = false
+        NSCursor.arrow.set()
+    }
     public override func mouseDown(with event: NSEvent) { isPressed = true }
     public override func mouseUp(with event: NSEvent) {
         isPressed = false

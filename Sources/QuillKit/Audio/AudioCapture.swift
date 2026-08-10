@@ -18,6 +18,7 @@ public final class AudioCapture: AudioSource {
 
     private let engine = AVAudioEngine()
     private let enableVoiceProcessing: Bool
+    private let settings: QuillSettings
     private var running = false
     private var prepared = false
 
@@ -28,8 +29,10 @@ public final class AudioCapture: AudioSource {
     /// transcriber's own models are noise-robust, and the mic is a hand's width
     /// from the speaker. The flag is here for anyone who wants to trade first-word
     /// latency for echo cancellation on a desk speaker setup.
-    public init(enableVoiceProcessing: Bool = false) {
+    public init(enableVoiceProcessing: Bool = false,
+                settings: QuillSettings = .shared) {
         self.enableVoiceProcessing = enableVoiceProcessing
+        self.settings = settings
     }
 
     public var captureFormat: AVAudioFormat? {
@@ -45,8 +48,37 @@ public final class AudioCapture: AudioSource {
         // Touching inputNode is what actually instantiates the HAL unit; doing it
         // on hotkey-down means start() is a flag flip rather than a device open.
         _ = engine.inputNode
+        selectConfiguredInputDevice()
         engine.prepare()
         prepared = true
+    }
+
+    /// Points the engine's input at the microphone chosen in Settings.
+    ///
+    /// `AVAudioEngine` has no API for this: the input node is hard-wired to the
+    /// system default, and the only way past it is to reach through to the
+    /// underlying HAL audio unit. It has to happen while the engine is stopped,
+    /// and before the format is read — changing the device changes the node's
+    /// output format underneath you, and a tap installed with the old format
+    /// silently delivers nothing.
+    ///
+    /// A device that is no longer plugged in is not an error worth failing on:
+    /// falling through to the system default is what the user expects when they
+    /// unplug a headset mid-day, and `AudioDeviceInfo.activeInputName` reports the
+    /// same fallback so the transcript is stamped with what actually recorded it.
+    private func selectConfiguredInputDevice() {
+        guard let uid = settings.inputDeviceUID,
+              let deviceID = AudioDeviceInfo.deviceID(forUID: uid),
+              let unit = engine.inputNode.audioUnit
+        else { return }
+
+        var id = deviceID
+        AudioUnitSetProperty(unit,
+                             kAudioOutputUnitProperty_CurrentDevice,
+                             kAudioUnitScope_Global,
+                             0,
+                             &id,
+                             UInt32(MemoryLayout<AudioDeviceID>.size))
     }
 
     public func start() throws {
@@ -57,6 +89,10 @@ public final class AudioCapture: AudioSource {
         }
 
         let input = engine.inputNode
+        // Repeated from prepare() on purpose: start() is reachable without it
+        // (a confirmation with no speculation behind it), and the device has to be
+        // set on the stopped engine either way.
+        selectConfiguredInputDevice()
 
         if enableVoiceProcessing {
             // Best effort: a device that refuses voice processing still captures.

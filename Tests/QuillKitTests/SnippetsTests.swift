@@ -307,7 +307,9 @@ private func snippet(_ phrase: String,
         inserter: inserter,
         overlay: SilentOverlay(),
         history: HistoryStore(url: historyURL),
-        snippets: snippets)
+        snippets: snippets,
+        settings: pasteOnlySettings(),
+        liveTyper: LiveTyper(keyboard: SilentKeystrokes()))
 
     coordinator.hotkeyMayBegin()
     coordinator.hotkeyPressed()

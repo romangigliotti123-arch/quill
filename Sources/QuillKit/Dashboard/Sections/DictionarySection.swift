@@ -381,7 +381,13 @@ final class DictionaryTermRow: NSView {
     private var extra: NSTextField?
     private let count: NSTextField
 
-    private var isHovered = false { didSet { needsDisplay = true } }
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hover.animate(to: isHovered ? 1 : 0)
+        }
+    }
+    private lazy var hover = DashboardTween(view: self)
 
     override var isFlipped: Bool { true }
 
@@ -492,9 +498,9 @@ final class DictionaryTermRow: NSView {
             DashboardDraw.raisedSurface(pill, radius: DashboardRadius.row,
                                         fillColor: style.raised, topColor: style.raisedTop,
                                         style: style, shadow: style.shadowRaised, flipped: true)
-        } else if isHovered {
+        } else if hover.value > 0.001 {
             DashboardDraw.fill(NSRect(x: 8, y: 1, width: bounds.width - 16, height: bounds.height - 2),
-                               radius: DashboardRadius.row, color: style.hover)
+                               radius: DashboardRadius.row, color: style.hover.faded(hover.value))
         }
 
         // Volume bar. Proportional to the busiest term, so the column reads as

@@ -32,7 +32,9 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
 
     public weak var delegate: HotkeyEngineDelegate?
 
-    private let binding: HotkeyBinding
+    /// Asked on every keystroke rather than read once. That is what makes a
+    /// rebind take effect on the next key press instead of the next launch.
+    private let bindings: HotkeyBindingProviding
     private let retryInterval: TimeInterval
 
     private var machine: HotkeyStateMachine
@@ -48,11 +50,11 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     private var lastReportedReason: String?
 
     public init(
-        binding: HotkeyBinding = .rightOption,
+        bindings: HotkeyBindingProviding = QuillSettings.shared,
         timing: HotkeyStateMachine.Timing = .default,
         retryInterval: TimeInterval = 2.0
     ) {
-        self.binding = binding
+        self.bindings = bindings
         self.machine = HotkeyStateMachine(timing: timing)
         self.retryInterval = retryInterval
     }
@@ -255,15 +257,34 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             return false
         }
 
+        // The Settings screen is waiting for the user to press the key they want
+        // to assign. Acting on it here would start a dictation with the same press
+        // that chose the key — so the engine goes deaf, and any gesture already in
+        // flight is dropped rather than left half-finished.
+        if bindings.isCapturingHotkey {
+            if machine.state != .idle { apply(machine.handle(.tapInterrupted, at: Self.now())) }
+            return false
+        }
+
         let keyCode = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags
 
         switch type {
         case .flagsChanged:
-            if keyCode == binding.keyCode {
-                let isDown = flags.contains(binding.presenceMask)
-                let isolated = flags.intersection(HotkeyBinding.isolationMask) == binding.genericMask
+            let hold = bindings.hold
+            let toggle = bindings.toggle
+            if keyCode == hold.keyCode {
+                let isDown = flags.contains(hold.presenceMask)
+                let isolated = flags.intersection(HotkeyBinding.isolationMask) == hold.genericMask
                 apply(machine.handle(isDown ? .triggerDown(isolated: isolated) : .triggerUp,
+                                     at: Self.now()))
+            } else if keyCode == toggle.keyCode {
+                // Only reachable when the two are bound to different keys — the
+                // branch above claims the shared case, which is what keeps
+                // double-tap working as the default push-to-talk.
+                let isDown = flags.contains(toggle.presenceMask)
+                let isolated = flags.intersection(HotkeyBinding.isolationMask) == toggle.genericMask
+                apply(machine.handle(isDown ? .toggleDown(isolated: isolated) : .toggleUp,
                                      at: Self.now()))
             } else if HotkeyBinding.isTrackedModifier(keyCode: keyCode) {
                 apply(machine.handle(.otherModifierChanged, at: Self.now()))

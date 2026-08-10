@@ -229,11 +229,18 @@ final class SnippetsTextArea: NSView {
 final class SnippetsSegmented: NSView {
 
     var onSelect: ((Int) -> Void)?
-    var selectedIndex: Int { didSet { rebuild() } }
+    var selectedIndex: Int {
+        didSet {
+            rebuild()
+            thumb.animate(to: CGFloat(selectedIndex), duration: DashboardMotion.standard)
+        }
+    }
 
     private let titles: [String]
     private let style: DashboardStyle
     private var labels: [NSTextField] = []
+    /// Segment index as a continuous number, so the thumb can be between two.
+    private lazy var thumb = DashboardTween(view: self, initial: CGFloat(selectedIndex))
 
     override var isFlipped: Bool { true }
 
@@ -277,7 +284,10 @@ final class SnippetsSegmented: NSView {
     override func draw(_ dirtyRect: NSRect) {
         DashboardDraw.fill(bounds, radius: DashboardRadius.control, color: style.isDark ? style.cardAlt : style.card)
         DashboardDraw.stroke(bounds, radius: DashboardRadius.control, color: style.hairline)
-        let thumb = NSRect(x: segmentWidth * CGFloat(selectedIndex) + 3, y: 3,
+        // Interpolated position, not the selected index. The thumb travelling to
+        // the segment you clicked is what makes a segmented control feel like one
+        // object rather than three lights.
+        let thumb = NSRect(x: segmentWidth * thumb.value + 3, y: 3,
                            width: segmentWidth - 6, height: bounds.height - 6)
         DashboardDraw.raisedSurface(thumb, radius: DashboardRadius.control - 3,
                                     fillColor: style.raised, topColor: style.raisedTop,
@@ -302,9 +312,17 @@ final class SnippetsSegmented: NSView {
 final class SnippetsToggle: NSView {
 
     var onToggle: ((Bool) -> Void)?
-    var isOn: Bool { didSet { needsDisplay = true } }
+    var isOn: Bool {
+        didSet {
+            guard isOn != oldValue else { return }
+            knob.animate(to: isOn ? 1 : 0, duration: DashboardMotion.standard)
+        }
+    }
 
     private let style: DashboardStyle
+    /// 0 = off, 1 = on. The knob's travel and the track's colour both read from
+    /// it, so they arrive together instead of the fill snapping ahead.
+    private lazy var knob = DashboardTween(view: self, initial: isOn ? 1 : 0)
 
     override var isFlipped: Bool { true }
 
@@ -319,27 +337,26 @@ final class SnippetsToggle: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let radius = bounds.height / 2
-        if isOn {
-            // Ink, not accent. macOS tints its own switch with the system accent
-            // colour, and copying that here would make "this row is on" the
-            // loudest thing on a screen whose actual subject is the text below
-            // it. Colour is spent on the snippet, not on its power switch.
-            DashboardDraw.fill(bounds, radius: radius, color: style.fill)
-        } else {
-            DashboardDraw.fill(bounds, radius: radius, color: style.isDark ? style.raised : style.card)
-            DashboardDraw.stroke(bounds, radius: radius, color: style.hairlineStrong)
+        let t = knob.value
+
+        // Ink, not accent. macOS tints its own switch with the system accent
+        // colour, and copying that here would make "this row is on" the loudest
+        // thing on a screen whose actual subject is the text below it. Colour is
+        // spent on the snippet, not on its power switch.
+        let off = style.isDark ? style.raised : style.card
+        DashboardDraw.fill(bounds, radius: radius, color: off.mixed(with: style.fill, t))
+        if t < 1 {
+            DashboardDraw.stroke(bounds, radius: radius, color: style.hairlineStrong.faded(1 - t))
         }
+
         let inset: CGFloat = 3
         let diameter = bounds.height - inset * 2
-        let x = isOn ? bounds.width - inset - diameter : inset
-        let knob = NSRect(x: x, y: inset, width: diameter, height: diameter)
+        let x = inset + (bounds.width - inset * 2 - diameter) * t
+        let dot = NSRect(x: x, y: inset, width: diameter, height: diameter)
+        let restColor = style.isDark ? style.inkQuaternary : NSColor.white
         DashboardDraw.shadowed(style.shadowContact, flipped: true) {
-            (isOn ? style.onFill : NSColor.white).setFill()
-            NSBezierPath(ovalIn: knob).fill()
-        }
-        if !isOn, style.isDark {
-            style.inkQuaternary.setFill()
-            NSBezierPath(ovalIn: knob).fill()
+            restColor.mixed(with: style.onFill, t).setFill()
+            NSBezierPath(ovalIn: dot).fill()
         }
     }
 

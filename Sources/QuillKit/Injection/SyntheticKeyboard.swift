@@ -10,6 +10,10 @@ public enum SyntheticKeyboard {
     /// is what makes ⌘V portable.
     public static let keyV: CGKeyCode = 9
 
+    /// ANSI Delete — the key labelled ⌫. Used to take back text Quill typed
+    /// speculatively while you were still speaking.
+    public static let keyBackspace: CGKeyCode = 51
+
     /// Defensive chunk size in UTF-16 units for the typing fallback.
     /// `keyboardSetUnicodeString` takes a length, but long strings are unreliable
     /// across apps and truncation is silent — there is no return value, no error,
@@ -74,6 +78,32 @@ public enum SyntheticKeyboard {
             // characters when several land in one run-loop turn; a sub-millisecond
             // gap is cheap insurance on a path that only runs when paste failed.
             usleep(1_500)
+        }
+        return true
+    }
+
+    /// Posts `count` backspaces.
+    ///
+    /// One event per character, because there is no "delete N" keystroke — and
+    /// with a gap between them, because a text view that coalesces input drops
+    /// backspaces that arrive in the same run-loop turn. Dropping one is not a
+    /// cosmetic bug: it leaves a stale character in the middle of the sentence
+    /// and every subsequent edit is off by one.
+    @discardableResult
+    public static func backspace(times count: Int, gap: useconds_t = 700) -> Bool {
+        guard count > 0 else { return true }
+        guard let source = makeSource() else { return false }
+        for _ in 0..<count {
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyBackspace, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: keyBackspace, keyDown: false)
+            else { return false }
+            down.flags = []
+            up.flags = []
+            stamp(down)
+            stamp(up)
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            usleep(gap)
         }
         return true
     }

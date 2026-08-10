@@ -205,7 +205,9 @@ public final class DashboardStatusPill: NSView {
             string: text,
             attributes: [.font: DashboardType.caption, .foregroundColor: style.inkSecondary, .kern: 0])
         keycaps.forEach { $0.removeFromSuperview() }
-        keycaps = [DashboardKeycap("hold ⌥", style: style)]
+        // Reads the live binding. A keycap in the titlebar that names a key the
+        // user rebound is worse than no keycap at all.
+        keycaps = [DashboardKeycap("hold \(QuillSettings.shared.hold.capText)", style: style)]
         keycaps.forEach(addSubview)
         needsLayout = true
         needsDisplay = true

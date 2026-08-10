@@ -31,6 +31,7 @@ public final class DashboardSectionRegistry: DashboardSectionProvider {
         register(.scratchpad) { ScratchpadSectionView(style: $0, notes: NoteStore.shared.all) }
         register(.style) { StyleSectionView(style: $0, profile: StyleStore.shared.profile) }
         register(.notetaker) { NotetakerSectionView(style: $0) }
+        register(.settings) { SettingsSectionView(style: $0) }
     }
 
     public func register(_ section: DashboardSection, _ builder: @escaping (DashboardStyle) -> NSView?) {
