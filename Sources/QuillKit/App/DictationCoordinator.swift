@@ -213,7 +213,19 @@ public final class DictationCoordinator {
     }
 
     private func cancelDictation() {
-        guard isDictating else { return }
+        // `isSpeculating` too, and this is not defensive tidying — it was a
+        // permanent deadlock.
+        //
+        // Capture starts at key-down, but isDictating only becomes true when the
+        // gesture is confirmed ~120ms later. A cancel landing in that window hit
+        // the old `guard isDictating` and returned early, leaving isSpeculating
+        // true forever — and speculativelyBegin() refuses to start while it is.
+        // The app then stops dictating silently, with no error and no overlay,
+        // until it is relaunched.
+        //
+        // Seen in a traced run as a 112-second gap in which three dictations were
+        // requested and no session started at all.
+        guard isDictating || isSpeculating else { return }
         isDictating = false
         isSpeculating = false
         sessionID += 1

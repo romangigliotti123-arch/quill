@@ -187,3 +187,79 @@ private func dictate(_ coordinator: DictationCoordinator, _ inserter: RecordingI
     }
     #expect(result == "in time")
 }
+
+// MARK: - The speculation deadlock
+
+// Regression for a permanent silent failure. Capture begins at key-down, but the
+// gesture is only confirmed as a dictation ~120ms later. A cancel arriving in
+// that window used to hit `guard isDictating` and return early, leaving the
+// coordinator convinced a speculation was still in flight — and it refuses to
+// start a new one while that is true. The app then stopped dictating with no
+// error, no overlay and no recovery short of relaunching.
+//
+// Seen in a traced run as a 112-second gap in which three dictations were asked
+// for and no session started at all.
+
+/// Returns text only if it was actually started — which is the whole point. The
+/// shared FakeTranscriber hands back its transcript regardless, so it cannot tell
+/// "the app dictated" from "the app never opened the microphone", and a
+/// regression test built on it passes with the bug still present. It did.
+private final class OnlyIfStarted: Transcriber, @unchecked Sendable {
+    weak var delegate: TranscriberDelegate?
+    var onLevel: ((Float) -> Void)?
+    private let transcript: String
+    private var started = false
+    /// How many times the microphone was actually opened. The deadlock does not
+    /// stop text coming back — the STALE session from the first key-down is still
+    /// open and answers for it, which is also how old audio ends up in a new
+    /// transcript. What it stops is a NEW capture ever beginning.
+    private(set) var startCount = 0
+    init(_ transcript: String) { self.transcript = transcript }
+    /// Slow on purpose. It guarantees the FIRST speculation is cancelled before
+    /// it ever opens a capture, which is what makes this test deterministic:
+    /// afterwards, any text at all can only have come from a NEW session.
+    func prepare() async { try? await Task.sleep(for: .milliseconds(200)) }
+    func start() async throws { started = true; startCount += 1 }
+    func stop() async -> String { started ? transcript : "" }
+    func cancel() async { started = false }
+}
+
+@Test @MainActor func aCancelBeforeTheGestureConfirmsDoesNotWedgeTheApp() async {
+    let hotkey = FakeHotkey()
+    let inserter = RecordingInserter()
+    let scratch = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-wedge-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+
+    let transcriber = OnlyIfStarted("the second dictation")
+    let coordinator = DictationCoordinator(
+        hotkey: hotkey,
+        transcriber: transcriber,
+        inserter: inserter,
+        overlay: SilentOverlay(),
+        cleaner: FastCleaner(),
+        history: HistoryStore(url: scratch.appendingPathComponent("history.json")),
+        snippets: SnippetStore(inMemory: [])
+    )
+    coordinator.start()
+
+    // Key down, then cancelled before it was ever confirmed — the wedge.
+    hotkey.delegate?.hotkeyMayBegin()
+    hotkey.delegate?.hotkeyCancelled()
+
+    // A normal dictation must still work afterwards.
+    hotkey.delegate?.hotkeyMayBegin()
+    hotkey.delegate?.hotkeyPressed()
+    // Capture is started on a Task. A real dictation has speech in between; without
+    // a beat here the release overtakes the start and the test fails for a reason
+    // that has nothing to do with the bug.
+    try? await Task.sleep(for: .milliseconds(400))
+    hotkey.delegate?.hotkeyReleased()
+
+    for _ in 0 ..< 60 where inserter.inserted == nil {
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(inserter.inserted != nil,
+            "the app refused to dictate again after a gesture was cancelled before it confirmed")
+    #expect(transcriber.startCount >= 1, "no capture was ever opened")
+}
