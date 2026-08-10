@@ -45,13 +45,35 @@ separates this from a plausible-sounding table.
 
 | Measure | Wispr Flow | Quill |
 |---|---|---|
-| WER, raw ASR — 50 clips | 2.11% (24/1138) | *see results below* |
+| WER, raw ASR — 50 clips | **2.11%** (24/1138) | 2.37% (27/1138) |
 | WER, raw ASR — 2-clip smoke | 4.35% | **2.17%** |
 | Formatter divergence | 1.40% | **0.00%** |
 | Latency, key-release → text | 807ms median | 0.39s median (own instrumentation) |
 | Works offline | no | **yes** |
 
 Corpus: a frozen, checksummed 50-utterance slice of LibriSpeech test-clean.
+
+**Flow is ahead on raw accuracy, by three words.** 27 errors against 24, on the
+same 1138 reference words, every transcript audited to the loopback device. That
+gap is not statistically meaningful at this sample size — but it is not a win
+either, and the honest summary is that the two recognisers are level on read
+American speech, with Flow a hair in front. Quill's case rests on the columns it
+wins outright: offline, latency after release, and a formatter that does not
+drift from what was said.
+
+Worth knowing: the number was NOT produced by `rig/run_eval.sh`. That script
+fails to read back a transcript after its first clip or two — the row lands in
+Quill's history correctly and the reader reports `no_new_record` anyway — and the
+cause is still unfound. The 50 clips were driven by a minimal loop doing the same
+sequence by hand (mark → `ptt hold` → `ffmpeg -re` → settle → `read_quill.sh
+--since`), which works every time. Anyone re-running this should treat run_eval
+as suspect until that is chased down. Raw transcripts:
+`rig/out/20260810-quill-50/transcripts.tsv`.
+
+One trap found the hard way while writing that loop: **ffmpeg without `-nostdin`
+swallows the driving loop's stdin** and silently skips clips — the first attempt
+scored 25 clips while believing it had done 50. `rig/run_eval.sh` already passes
+`-nostdin`, which is exactly why.
 
 ---
 

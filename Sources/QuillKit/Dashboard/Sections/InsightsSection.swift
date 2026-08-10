@@ -564,39 +564,64 @@ public final class InsightsLatencyCard: NSView {
         header.configure(title: "Response time",
                          meta: "\(InsightsFormat.count(m.endToEndMs.count)) dictations")
 
-        primary.attributedStringValue = number(InsightsFormat.seconds(m.endToEndP50), unit: "s",
-                                               color: style.accent, size: 30)
+        // The headline is release → text, not key-down → text.
+        //
+        // This card used to show `endToEndP50` under the words "median, key
+        // release to text on screen". Those are different quantities: end-to-end
+        // starts when the key goes DOWN, so it contains however long the person
+        // spoke. Against a corpus of five-second clips it read 12.11s and made
+        // the fastest thing about this app look like the slowest, while the
+        // figure it claimed to be — what you wait through after letting go — was
+        // three milliseconds.
+        primary.attributedStringValue = m.hasReleaseLatency
+            ? number(InsightsFormat.seconds(m.releaseP50), unit: "s", color: style.accent, size: 30)
+            : number("—", unit: "", color: style.inkTertiary, size: 30)
         primaryCaption.removeFromSuperview()
-        primaryCaption = DashboardType.label("median, key release to text on screen",
-                                             font: .systemFont(ofSize: 11.5, weight: .regular),
-                                             color: style.inkTertiary, tracking: 0)
+        primaryCaption = DashboardType.label(
+            m.hasReleaseLatency
+                // Short on purpose. A caption sits under its number and shares
+                // the line with a second measurement — the long version pushed
+                // the first-word figure past the legend, where the layout rule
+                // correctly hid it, and the card lost the one number it did have.
+                ? "median, after you stop talking"
+                : "not measured yet",
+            font: .systemFont(ofSize: 11.5, weight: .regular),
+            color: style.inkTertiary, tracking: 0)
         addSubview(primaryCaption)
 
         secondary.attributedStringValue = number(InsightsFormat.seconds(m.firstWordP50), unit: "s",
                                                  color: style.ink, size: 22)
         secondaryCaption.removeFromSuperview()
-        secondaryCaption = DashboardType.label("median to the first word appearing",
+        secondaryCaption = DashboardType.label("median, key press to first word",
                                                font: .systemFont(ofSize: 11.5, weight: .regular),
                                                color: style.inkTertiary, tracking: 0)
         addSubview(secondaryCaption)
 
+        // The distribution follows the headline. Where there is no release data
+        // yet the chart falls back to end-to-end rather than drawing nothing, and
+        // the footnote below says which of the two is on screen — an unlabelled
+        // fallback is how this card got into trouble in the first place.
         plot.firstWord = m.firstWordMs
-        plot.endToEnd = m.endToEndMs
-        plot.markerP50 = m.endToEndP50
-        plot.markerP90 = m.endToEndP90
+        plot.endToEnd = m.hasReleaseLatency ? m.releaseMs : m.endToEndMs
+        plot.markerP50 = m.hasReleaseLatency ? m.releaseP50 : m.endToEndP50
+        plot.markerP90 = m.hasReleaseLatency ? m.releaseP90 : m.endToEndP90
         plot.needsDisplay = true
 
         footnote.removeFromSuperview()
-        footnote = DashboardType.label("No server in the path — the slow tail is this Mac under load, not a network.",
-                                       font: .systemFont(ofSize: 11, weight: .regular),
-                                       color: style.inkQuaternary, tracking: 0)
+        footnote = DashboardType.label(
+            m.hasReleaseLatency
+                ? "No server in the path — the slow tail is this Mac under load, not a network."
+                : "Chart is key-down to text — older history carries no release stamp.",
+            font: .systemFont(ofSize: 11, weight: .regular),
+            color: style.inkQuaternary, tracking: 0)
         addSubview(footnote)
 
         // The two numbers the chart cannot show: what the worst hundredth costs,
         // and how often the thorough cleanup pass beat its deadline instead of
         // falling back to the fast one.
         footnoteMeta.removeFromSuperview()
-        footnoteMeta = DashboardType.label("p99 \(InsightsFormat.seconds(m.endToEndP99))s · thorough cleanup \(InsightsFormat.percent(m.thoroughShare))",
+        let p99 = m.hasReleaseLatency ? m.releaseP99 : m.endToEndP99
+        footnoteMeta = DashboardType.label("p99 \(InsightsFormat.seconds(p99))s · thorough cleanup \(InsightsFormat.percent(m.thoroughShare))",
                                            font: DashboardType.micro,
                                            color: style.inkQuaternary, alignment: .right)
         addSubview(footnoteMeta)

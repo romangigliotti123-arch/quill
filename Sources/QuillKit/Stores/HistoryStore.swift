@@ -30,6 +30,26 @@ public struct DictationRecord: Codable, Sendable, Equatable {
         public let audioDurationMs: Int?
         /// Whether the model cleanup beat its deadline, or the fast pass shipped.
         public let usedThoroughCleanup: Bool
+        /// Key release → text on screen: the latency a person actually waits
+        /// through, and the one Flow's 807ms is measured on. Optional because
+        /// every record written before it existed does not have it — and the
+        /// synthesised decoder treats a missing optional as nil rather than
+        /// failing, so an old history file still loads.
+        public let releaseToInsertedMs: Int?
+
+        public init(timeToFirstWordMs: Int?,
+                    finalToInsertedMs: Int?,
+                    endToEndMs: Int?,
+                    audioDurationMs: Int?,
+                    usedThoroughCleanup: Bool,
+                    releaseToInsertedMs: Int? = nil) {
+            self.timeToFirstWordMs = timeToFirstWordMs
+            self.finalToInsertedMs = finalToInsertedMs
+            self.endToEndMs = endToEndMs
+            self.audioDurationMs = audioDurationMs
+            self.usedThoroughCleanup = usedThoroughCleanup
+            self.releaseToInsertedMs = releaseToInsertedMs
+        }
     }
 }
 

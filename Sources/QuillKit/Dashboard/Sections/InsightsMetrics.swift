@@ -97,11 +97,24 @@ public struct InsightsMetrics: Sendable {
     // Latency — the measurement nobody else exposes.
     public let firstWordMs: [Double]
     public let endToEndMs: [Double]
+    /// Key release → text on screen. The number a person actually waits through,
+    /// and the one Flow's published 807ms is measured on. Empty for history
+    /// written before the release moment was stamped, which is deliberate: those
+    /// records genuinely do not contain it, and filling the gap with end-to-end
+    /// would report a figure that includes however long the person was speaking.
+    public let releaseMs: [Double]
     public let firstWordP50: Double
     public let endToEndP50: Double
     public let endToEndP90: Double
     public let endToEndP99: Double
+    public let releaseP50: Double
+    public let releaseP90: Double
+    public let releaseP99: Double
     public let thoroughShare: Double
+
+    /// True once any dictation has been recorded with the release stamp. The
+    /// card shows "not measured yet" rather than a wrong number until then.
+    public var hasReleaseLatency: Bool { !releaseMs.isEmpty }
 
     // Corrections
     public let wordsCorrected: Int
@@ -171,6 +184,7 @@ public struct InsightsMetrics: Sendable {
 
         let firstWord = inRange.compactMap { $0.timings.timeToFirstWordMs.map(Double.init) }.sorted()
         let endToEnd = inRange.compactMap { $0.timings.endToEndMs.map(Double.init) }.sorted()
+        let release = inRange.compactMap { $0.timings.releaseToInsertedMs.map(Double.init) }.sorted()
         let thorough = inRange.filter { $0.timings.usedThoroughCleanup }.count
         let thoroughShare = inRange.isEmpty ? 0 : Double(thorough) / Double(inRange.count)
 
@@ -202,10 +216,14 @@ public struct InsightsMetrics: Sendable {
             speakingSeconds: speakingSeconds,
             firstWordMs: firstWord,
             endToEndMs: endToEnd,
+            releaseMs: release,
             firstWordP50: percentile(firstWord, 0.5),
             endToEndP50: percentile(endToEnd, 0.5),
             endToEndP90: percentile(endToEnd, 0.9),
             endToEndP99: percentile(endToEnd, 0.99),
+            releaseP50: percentile(release, 0.5),
+            releaseP90: percentile(release, 0.9),
+            releaseP99: percentile(release, 0.99),
             thoroughShare: thoroughShare,
             wordsCorrected: corrections.words,
             dictionaryFixes: corrections.dictionary,

@@ -69,7 +69,27 @@ public final class DictationCoordinator {
         self.transcriber.onLevel = { [weak self] level in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard let self, self.isDictating else { return }
+                    guard let self else { return }
+                    // The first level is the first buffer off the microphone, so
+                    // this is where audio actually began.
+                    //
+                    // It has to be stamped here rather than read back from the
+                    // transcriber: both transcribers keep a `DictationTimeline`
+                    // of their own and dutifully record `audioFirstBuffer` into
+                    // it, and nothing ever read that copy. The coordinator's
+                    // timeline — the one written to history — had the field nil
+                    // on all 230 records on this Mac, which is why Insights has
+                    // been reporting "not enough dictations yet" for speaking
+                    // pace and "needs the length of what you spoke" for time
+                    // saved since the day they were built.
+                    //
+                    // Stamped before the isDictating guard: audio starts during
+                    // speculation, which is the whole point of speculation.
+                    if self.timeline.audioFirstBuffer == nil,
+                       self.isDictating || self.isSpeculating {
+                        self.timeline.audioFirstBuffer = Date()
+                    }
+                    guard self.isDictating else { return }
                     self.overlay.show(.listening(level: level))
                 }
             }
@@ -144,6 +164,10 @@ public final class DictationCoordinator {
         guard isDictating else { return }
         isDictating = false
         isSpeculating = false
+        // Stamped first, before anything else in this method can cost time. This
+        // is the moment the user stopped talking, and everything after it is
+        // latency they sit through.
+        timeline.hotkeyUp = Date()
         let session = sessionID
         overlay.show(.transcribing)
 
@@ -235,13 +259,9 @@ public final class DictationCoordinator {
                     timeToFirstWordMs: self.timeline.timeToFirstWordMs,
                     finalToInsertedMs: self.timeline.finalToInsertedMs,
                     endToEndMs: self.timeline.endToEndMs,
-                    // How long speech actually ran. Left nil until now, which is
-                    // why Insights showed "0 wpm" and "usual range 0-0" against
-                    // real history: every rate derived from it divided by nothing.
-                    audioDurationMs: self.timeline.audioFirstBuffer.flatMap { first in
-                        self.timeline.finalTranscript.map { Int($0.timeIntervalSince(first) * 1000) }
-                    },
-                    usedThoroughCleanup: usedThorough
+                    audioDurationMs: self.timeline.audioDurationMs,
+                    usedThoroughCleanup: usedThorough,
+                    releaseToInsertedMs: self.timeline.releaseToInsertedMs
                 )
             ))
 

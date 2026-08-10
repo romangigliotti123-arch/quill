@@ -114,6 +114,9 @@ public struct DictationTimeline: Sendable {
     public var hotkeyDown: Date?
     public var audioFirstBuffer: Date?
     public var firstPartial: Date?
+    /// The moment the key came back up — i.e. the moment the user stopped
+    /// speaking and started waiting. Everything after this is latency they feel.
+    public var hotkeyUp: Date?
     public var finalTranscript: Date?
     public var textInserted: Date?
 
@@ -121,16 +124,39 @@ public struct DictationTimeline: Sendable {
 
     private func ms(_ a: Date?, _ b: Date?) -> Int? {
         guard let a, let b else { return nil }
-        return Int(b.timeIntervalSince(a) * 1000)
+        // Rounded, not truncated. `Date` is a Double of seconds since 2001, so
+        // at present-day magnitudes a difference of exactly 0.4s comes back as
+        // 0.39999999990686774 and `Int()` floors it to 399. Every duration in
+        // this app was quietly reported up to a millisecond short.
+        return Int((b.timeIntervalSince(a) * 1000).rounded())
     }
 
-    /// The number that decides the latency piece: key release → text on screen.
     public var timeToFirstWordMs: Int? { ms(hotkeyDown, firstPartial) }
     public var finalToInsertedMs: Int? { ms(finalTranscript, textInserted) }
-    public var endToEndMs: Int? { ms(hotkeyDown, textInserted) }
+
+    /// **The number that decides the latency piece**, and the one Wispr Flow is
+    /// measured on: let go of the key, how long until the text is there. 807ms
+    /// for Flow.
+    ///
+    /// This is deliberately not `endToEndMs`. That one starts at key-*down*, so
+    /// it includes however long the person spoke — a forty-second dictation
+    /// scores forty seconds, and the median across a corpus of five-second clips
+    /// reads as twelve. It is a fine diagnostic and a meaningless headline, and
+    /// it was being shown on the Insights card under the label "key release to
+    /// text on screen", which is this number and not that one.
+    public var releaseToInsertedMs: Int? { ms(hotkeyUp, textInserted) }
+
+    /// How long speech actually ran, for words-per-minute and time-saved.
+    public var audioDurationMs: Int? { ms(audioFirstBuffer, finalTranscript) }
 
     public var logLine: String {
         let f = { (v: Int?) in v.map(String.init) ?? "—" }
-        return "ttfw=\(f(timeToFirstWordMs))ms final→insert=\(f(finalToInsertedMs))ms e2e=\(f(endToEndMs))ms"
+        return "ttfw=\(f(timeToFirstWordMs))ms release→insert=\(f(releaseToInsertedMs))ms "
+            + "final→insert=\(f(finalToInsertedMs))ms e2e=\(f(endToEndMs))ms"
     }
+
+    /// Key-down to text. Kept because it is the honest measure of a whole
+    /// interaction, and because every record written before this file grew a
+    /// release stamp has only this.
+    public var endToEndMs: Int? { ms(hotkeyDown, textInserted) }
 }

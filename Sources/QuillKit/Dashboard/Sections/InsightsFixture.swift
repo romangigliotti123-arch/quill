@@ -97,7 +97,17 @@ public enum InsightsFixture {
         let audio = Int((speech + 520 + random.unit() * 900).rounded())
 
         let firstWord = Int(random.logNormal(median: 206, sigma: 0.46).clamped(to: 118...940))
-        let endToEnd = Int(random.logNormal(median: 379, sigma: 0.47).clamped(to: 186...2_150))
+        // This distribution was always modelling release → text — a median of
+        // 379ms only makes sense as "how long after you let go". It was being
+        // stored as end-to-end, which is why the sample looked plausible while
+        // real history on the same card read twelve seconds. It is now labelled
+        // as what it is, and end-to-end is derived the way it actually happens:
+        // however long you spoke, plus the wait afterwards.
+        let release = Int(random.logNormal(median: 379, sigma: 0.47).clamped(to: 186...2_150))
+        // The key is held for the whole recording, not merely for the speech —
+        // `audio` already carries the lead-in and the tail — so end-to-end is
+        // the recording plus the wait afterwards.
+        let endToEnd = audio + release
         let finalToInserted = Int(random.logNormal(median: 88, sigma: 0.38).clamped(to: 38...420))
 
         return DictationRecord(
@@ -114,7 +124,8 @@ public enum InsightsFixture {
                 audioDurationMs: audio,
                 // The thorough cleanup pass has a deadline; when it misses, the
                 // fast pass ships. Roughly one in six.
-                usedThoroughCleanup: random.unit() < 0.83
+                usedThoroughCleanup: random.unit() < 0.83,
+                releaseToInsertedMs: release
             )
         )
     }
