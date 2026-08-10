@@ -56,7 +56,7 @@ public final class DictionarySectionView: NSView {
                                       color: style.inkTertiary)
         heading = DashboardType.label("Dictionary", font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label(
-            "Apple’s recogniser takes these terms as a bias and ignores them — measured on this Mac. So Quill repairs them after the transcript, and every entry here shows what it has actually caught.",
+            "",
             font: DashboardType.body, color: style.inkSecondary, lines: 2, lineHeight: 20)
 
         let primary = DashboardSection.dictionary.primaryAction
@@ -139,7 +139,7 @@ public final class DictionarySectionView: NSView {
         y += headingSize.height + 8
 
         let blurbWidth = min(width - 300, 660)
-        let blurbHeight = DashboardType.size(blurb, width: blurbWidth).height
+        let blurbHeight = blurb.stringValue.isEmpty ? 0 : DashboardType.size(blurb, width: blurbWidth).height
         blurb.frame = NSRect(x: padX, y: y, width: blurbWidth, height: blurbHeight)
         y += blurbHeight
 

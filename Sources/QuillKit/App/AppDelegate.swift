@@ -34,6 +34,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         rebuildMenu()
 
+        // A second launch hands over to this instance instead of starting a rival.
+        DistributedNotificationCenter.default().addObserver(
+            forName: .init("com.romangigliotti.quill.showWindow"), object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.openDashboard() }
+        }
+
         // The grant lands while the app is already running, and nothing notifies
         // us. Polling is what makes Quill come alive the moment the box is
         // ticked, instead of needing a relaunch nobody thinks to do.

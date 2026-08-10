@@ -31,44 +31,32 @@ final class OverlayListeningContent: OverlayContentView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        addSubview(dot)
+        // Waveform only. The dot said "recording" next to a waveform that was
+        // already moving, and the esc chip taught a shortcut every time you spoke
+        // rather than the once you needed it. What is left is the smallest thing
+        // that still answers "is it hearing me".
         addSubview(waveform)
-        addSubview(keyCap)
-        keyCap.alphaValue = 0
     }
 
     required init?(coder: NSCoder) { nil }
 
     override var contentWidth: CGFloat {
-        leading + dotBox + dotToWave + waveform.intrinsicWidth + waveToCap + keyCap.intrinsicWidth + trailing
+        leading + waveform.intrinsicWidth + trailing
     }
 
     override func apply(_ palette: OverlayPalette) {
-        dot.apply(palette)
         waveform.apply(palette)
-        keyCap.apply(palette)
     }
 
     override func layout() {
         super.layout()
-        let h = bounds.height
-        dot.frame = NSRect(x: leading, y: (h - dotBox) / 2, width: dotBox, height: dotBox)
-        waveform.frame = NSRect(x: leading + dotBox + dotToWave, y: 0,
-                                width: waveform.intrinsicWidth, height: h)
-        keyCap.frame = NSRect(x: waveform.frame.maxX + waveToCap,
-                              y: (h - keyCap.intrinsicHeight) / 2,
-                              width: keyCap.intrinsicWidth, height: keyCap.intrinsicHeight)
+        waveform.frame = NSRect(x: leading, y: 0,
+                                width: waveform.intrinsicWidth, height: bounds.height)
     }
 
     override func advance(dt: CGFloat, elapsed: CGFloat, level: CGFloat) {
         waveform.level = level
         waveform.advance(dt: dt)
-        dot.advance(elapsed: elapsed)
-        // Fades in, never delays. Holding the hint back so the mic reads first
-        // sounds right and looks wrong: the pill reserves the chip's width from
-        // frame one, so any delay leaves a hole on the right at exactly the
-        // moment the HUD has the user's attention.
-        keyCap.alphaValue = Double(OverlayEasing.outCubic(elapsed / 0.30))
     }
 }
 

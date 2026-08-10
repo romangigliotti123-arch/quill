@@ -58,6 +58,25 @@ if let dir = ProcessInfo.processInfo.environment["QUILL_OVERLAY_SHOTS"] {
     exit(0)
 }
 
+// One Quill at a time.
+//
+// Two copies can exist — the build output and the installed one — and macOS will
+// happily run both, each with its own event tap fighting for the same hotkey and
+// its own writer on the same history file. Bundle identifier rather than path is
+// the right test: it is still the same app wherever it was launched from.
+if let bundleID = Bundle.main.bundleIdentifier {
+    let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+        .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+    if let existing = others.first {
+        // Hand over rather than dying quietly: whoever double-clicked expects a
+        // window, and a launcher that appears to do nothing reads as broken.
+        existing.activate(options: [])
+        DistributedNotificationCenter.default().postNotificationName(
+            .init("com.romangigliotti.quill.showWindow"), object: nil, deliverImmediately: true)
+        exit(0)
+    }
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

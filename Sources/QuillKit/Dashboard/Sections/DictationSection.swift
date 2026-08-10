@@ -72,7 +72,7 @@ public final class DictationSectionView: NSView {
         heading = DashboardType.label("Dictation", font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label(records.isEmpty
                                     ? "Every dictation is kept on this Mac, with the raw transcript beside what was actually typed."
-                                    : "Raw transcript beside what was actually typed.",
+                                    : "",
                                     font: DashboardType.body, color: style.inkSecondary,
                                     lines: 2, lineHeight: 20)
         action = DashboardButton(title: DashboardSection.dictation.primaryAction.title,
@@ -301,7 +301,7 @@ public final class DictationSectionView: NSView {
         y += headingSize.height + 6
 
         let blurbWidth = min(width - 300, 560)
-        let blurbHeight = DashboardType.size(blurb, width: blurbWidth).height
+        let blurbHeight = blurb.stringValue.isEmpty ? 0 : DashboardType.size(blurb, width: blurbWidth).height
         blurb.frame = NSRect(x: padX, y: y, width: blurbWidth, height: blurbHeight)
         y += blurbHeight
 

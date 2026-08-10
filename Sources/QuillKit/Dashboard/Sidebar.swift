@@ -131,12 +131,7 @@ public final class SidebarView: NSView {
     private var rows: [DashboardSection: SidebarRowView] = [:]
     private let mark: DashboardMark
     private let wordmark: NSTextField
-    private let badge: DashboardChip
     private let rule: DashboardRule
-    private let privacyCard: DashboardCardView
-    private let privacyIcon: DashboardIconView
-    private let privacyTitle: NSTextField
-    private let privacyBody: NSTextField
 
     public override var isFlipped: Bool { true }
 
@@ -146,30 +141,17 @@ public final class SidebarView: NSView {
         mark = DashboardMark(style: style)
         wordmark = DashboardType.label("Quill", font: .systemFont(ofSize: 17, weight: .semibold),
                                        color: style.ink, tracking: -0.3)
-        badge = DashboardChip(text: "On-device", tone: .neutral, style: style)
         rule = DashboardRule(color: style.hairline)
-        privacyCard = DashboardCardView(style: style, elevation: .sunken, radius: DashboardRadius.card)
-        privacyIcon = DashboardIconView(image: DashboardIcon.image("lock.laptopcomputer", pointSize: 13, weight: .semibold, color: style.inkSecondary))
-        privacyTitle = DashboardType.label("Nothing leaves this Mac",
-                                           font: DashboardType.caption, color: style.ink)
-        privacyBody = DashboardType.label("Speech, cleanup and history all run locally. No account, no upload, no word cap.",
-                                          font: .systemFont(ofSize: 11.5, weight: .regular),
-                                          color: style.inkTertiary, tracking: 0, lines: 4, lineHeight: 16)
         super.init(frame: .zero)
 
         addSubview(mark)
         addSubview(wordmark)
-        addSubview(badge)
         for section in DashboardSection.allCases {
             let row = SidebarRowView(section: section, style: style)
             row.onClick = { [weak self] in self?.select(section) }
             addSubview(row)
             rows[section] = row
         }
-        addSubview(privacyCard)
-        privacyCard.addSubview(privacyIcon)
-        privacyCard.addSubview(privacyTitle)
-        privacyCard.addSubview(privacyBody)
         addSubview(rule)
 
         rows[selection]?.isSelected = true
@@ -192,13 +174,7 @@ public final class SidebarView: NSView {
     private func applyStyle() {
         mark.apply(style)
         DashboardType.recolor(wordmark, style.ink)
-        badge.style = style
         rows.values.forEach { $0.style = style }
-        privacyCard.style = style
-        privacyIcon.image = DashboardIcon.image("lock.laptopcomputer", pointSize: 13,
-                                                weight: .semibold, color: style.inkSecondary)
-        DashboardType.recolor(privacyTitle, style.ink)
-        DashboardType.recolor(privacyBody, style.inkTertiary)
         rule.color = style.hairline
         needsLayout = true
         needsDisplay = true
@@ -217,9 +193,6 @@ public final class SidebarView: NSView {
         wordmark.frame = NSRect(x: inset + 4 + 26 + 9,
                                 y: headerY + ((26 - wordSize.height) / 2).rounded(),
                                 width: wordSize.width, height: wordSize.height)
-        badge.frame = NSRect(x: wordmark.frame.maxX + 8,
-                             y: headerY + ((26 - badge.frame.height) / 2).rounded(),
-                             width: badge.frame.width, height: badge.frame.height)
 
         var y = headerY + 26 + 30
         for section in DashboardSection.primary {
@@ -245,20 +218,6 @@ public final class SidebarView: NSView {
         bottom -= 20
 
         // The card belongs with the nav, not floating above the footer. Anchored
-        // to the bottom cluster it leaves a void in the middle of the rail that
-        // reads as a missing element; anchored under the nav, the same empty
-        // space sits directly above a pinned footer, which is a shape every Mac
-        // sidebar already has.
-        let cardWidth = width - inset * 2
-        let bodyHeight = DashboardType.size(privacyBody, width: cardWidth - 28).height
-        let cardHeight = 16 + 18 + 8 + bodyHeight + 16
-        let cardTop = min(navBottom + 30, bottom - cardHeight)
-        privacyCard.frame = NSRect(x: inset, y: cardTop, width: cardWidth, height: cardHeight)
-        privacyIcon.frame = NSRect(x: 14, y: 15, width: 16, height: 16)
-        let titleSize = privacyTitle.fittingSize
-        privacyTitle.frame = NSRect(x: 36, y: 15 + ((16 - titleSize.height) / 2).rounded(),
-                                    width: titleSize.width, height: titleSize.height)
-        privacyBody.frame = NSRect(x: 14, y: 15 + 16 + 8, width: cardWidth - 28, height: bodyHeight)
     }
 }
 

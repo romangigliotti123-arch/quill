@@ -528,8 +528,8 @@ public final class InsightsHeatmap: NSView {
             .foregroundColor: style.inkQuaternary,
             .kern: 0.4,
         ]
-        let less = "LESS" as NSString
-        let more = "MORE" as NSString
+        let less = "Less" as NSString
+        let more = "More" as NSString
         let lessSize = less.size(withAttributes: legendAttributes)
         let moreSize = more.size(withAttributes: legendAttributes)
         let legendWidth = lessSize.width + 6 + 5 * (swatch + 3) - 3 + 6 + moreSize.width

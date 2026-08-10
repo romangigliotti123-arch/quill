@@ -77,7 +77,7 @@ public final class InsightsView: NSView {
                                       font: DashboardType.eyebrow, color: style.inkTertiary)
         heading = DashboardType.label("Insights",
                                       font: DashboardType.display, color: style.ink)
-        blurb = DashboardType.label("Measured on this Mac, from your own audio — no estimates, no ranking against strangers.",
+        blurb = DashboardType.label("",
                                     font: DashboardType.body, color: style.inkSecondary,
                                     lines: 2, lineHeight: 20)
         segmented = InsightsSegmented(titles: InsightsRange.allCases.map(\.title),
@@ -156,7 +156,7 @@ public final class InsightsView: NSView {
             caption: hasPace ? "median pace over \(InsightsFormat.count(m.sessions)) dictations"
                              : "speaking pace",
             footnote: hasPace ? "your usual range is \(m.wpmP10)–\(m.wpmP90)"
-                              : "needs a few more dictations before this means anything",
+                              : "not enough dictations yet",
             chip: nil,
             accent: false,
             accessory: hasPace
@@ -171,13 +171,17 @@ public final class InsightsView: NSView {
             .map(\.text).joined().replacingOccurrences(of: " ", with: "")
         let typed = InsightsFormat.duration(m.typingSeconds)
             .map(\.text).joined().replacingOccurrences(of: " ", with: "")
+        let hasSpokenTime = m.speakingSeconds > 0
         savedCard.configure(
-            value: InsightsFormat.duration(m.savedSeconds),
+            value: hasSpokenTime ? InsightsFormat.duration(m.savedSeconds) : [("—", true)],
             caption: "saved against typing it out",
-            footnote: "\(spoken) spoken vs \(typed) typed at 40 wpm",
+            footnote: hasSpokenTime ? "\(spoken) spoken vs \(typed) typed at 40 wpm"
+                                    : "needs the length of what you spoke",
             chip: nil,
             accent: false,
-            accessory: .split(fraction: m.typingSeconds > 0 ? m.speakingSeconds / m.typingSeconds : 0)
+            accessory: hasSpokenTime
+                ? .split(fraction: m.typingSeconds > 0 ? m.speakingSeconds / m.typingSeconds : 0)
+                : .none
         )
 
         latencyCard.configure(metrics: m)
@@ -214,9 +218,9 @@ public final class InsightsView: NSView {
         y += headingSize.height + 5
 
         let blurbWidth = min(width - 260, 640)
-        let blurbHeight = DashboardType.size(blurb, width: blurbWidth).height
+        let blurbHeight = blurb.stringValue.isEmpty ? 0 : DashboardType.size(blurb, width: blurbWidth).height
         blurb.frame = NSRect(x: padX, y: y, width: blurbWidth, height: blurbHeight)
-        y += blurbHeight + 30
+        y += blurbHeight + (blurbHeight > 0 ? 30 : 12)
 
         // Three stat cards, then two panels, then the year band. Heights are
         // derived from what is left rather than fixed, so the page fills the

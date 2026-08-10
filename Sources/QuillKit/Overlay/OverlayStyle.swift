@@ -10,8 +10,8 @@ enum OverlayMetrics {
     /// reason to drop the animation; the pill morphs *inside* this instead.
     static let panelSize = NSSize(width: 640, height: 156)
 
-    static let pillHeight: CGFloat = 44
-    static let pillRadius: CGFloat = 22
+    static let pillHeight: CGFloat = 32
+    static let pillRadius: CGFloat = 16
     static let minPillWidth: CGFloat = 148
     static let maxPillWidth: CGFloat = 452
 

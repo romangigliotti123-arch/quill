@@ -78,7 +78,7 @@ public final class SnippetsSectionView: NSView {
         eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
                                       color: style.inkTertiary)
         heading = DashboardType.label("Snippets", font: DashboardType.display, color: style.ink)
-        blurb = DashboardType.label("Say a phrase mid-sentence and Quill types the whole block.",
+        blurb = DashboardType.label("",
                                     font: DashboardType.body, color: style.inkSecondary)
         stat = NSTextField(labelWithString: "")
         newButton = DashboardButton(title: "New snippet", symbol: "plus", kind: .primary, style: style)
