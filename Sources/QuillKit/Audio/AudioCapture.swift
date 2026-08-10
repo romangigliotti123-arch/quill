@@ -95,6 +95,18 @@ public final class AudioCapture: AudioSource {
         // into a half-torn-down session while the engine spins down.
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+
+        // stop() halts rendering; it does NOT discard what the nodes have already
+        // buffered. Restart the same engine and those frames are delivered as the
+        // first audio of the NEXT dictation, so the transcript opens with the tail
+        // of the previous one.
+        //
+        // Proven rather than assumed: the rig records an independent tap of the
+        // same audio window, and for the contaminated clips that tap contained
+        // ONLY the correct utterance. The device was clean; the leftovers were
+        // inside this engine. reset() is the documented way to drop them.
+        engine.reset()
+
         running = false
         prepared = false
         DispatchQueue.main.async { [weak self] in self?.onLevel?(0) }
