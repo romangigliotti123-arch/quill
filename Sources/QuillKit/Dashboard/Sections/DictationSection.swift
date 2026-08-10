@@ -130,11 +130,16 @@ public final class DictationSectionView: NSView {
 
     /// The shipping path: real history, or the fixture set when there is none.
     /// A section that screenshots as an empty rectangle is a section nobody can
-    /// review, and a first launch that shows an empty rectangle is a first
-    /// launch nobody trusts.
+    /// An empty history shows the empty state, NOT invented dictations.
+    ///
+    /// The old comment here argued that "a first launch that shows an empty
+    /// rectangle is a first launch nobody trusts" — and then substituted eight
+    /// fabricated dictations, unlabelled, styled exactly like real ones. Someone
+    /// opening Quill for the first time would have read a week of their own
+    /// history that never happened. An empty state is the honest answer; the
+    /// fixtures stay, for the render harness only.
     public convenience init(style: DashboardStyle, store: HistoryStore = HistoryStore()) {
-        let stored = store.all
-        self.init(style: style, records: stored.isEmpty ? DictationFixtures.records() : stored)
+        self.init(style: style, records: store.all)
     }
 
     @available(*, unavailable)

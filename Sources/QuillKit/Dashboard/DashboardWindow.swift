@@ -245,284 +245,63 @@ public final class DashboardStatusPill: NSView {
 /// What a section looks like before its owner ships it — and the specimen the
 /// design system is reviewed against. Header, metric row, content well: the
 /// three shapes every section is built from.
+/// Shown for a section that does not exist yet.
+///
+/// It used to invent its content: "1,284 words dictated today", "119 wpm", and
+/// eight fabricated dictations — "Groceries: coffee, oat milk…", "Quill beat Flow
+/// on latency again this morning" — rendered exactly like real history with no
+/// marker distinguishing them. Anyone opening Transforms would have read their
+/// own past week off a screen that was making it up.
+///
+/// A section with nothing behind it says so.
 public final class DashboardPlaceholderView: NSView {
 
-    private let section: DashboardSection
-    private let style: DashboardStyle
-
-    private let eyebrow: NSTextField
     private let heading: NSTextField
-    private let blurb: NSTextField
-    private let action: DashboardButton
-    private let secondary: DashboardButton?
-    private var tiles: [DashboardMetricTile] = []
-    private let well: DashboardCardView
-    private let wellTitle: NSTextField
-    private let wellChip: DashboardChip
-    private var rowViews: [DashboardSampleRow] = []
+    private let body: NSTextField
 
     public override var isFlipped: Bool { true }
 
     public init(section: DashboardSection, style: DashboardStyle) {
-        self.section = section
-        self.style = style
-        eyebrow = DashboardType.label(section.title, font: DashboardType.eyebrow,
-                                      color: style.inkTertiary)
-        heading = DashboardType.label(DashboardPlaceholderView.heading(for: section),
-                                      font: DashboardType.display, color: style.ink)
-        blurb = DashboardType.label(section.blurb, font: DashboardType.body,
-                                    color: style.inkSecondary, lines: 2, lineHeight: 20)
-        action = DashboardButton(title: section.primaryAction.title,
-                                 symbol: section.primaryAction.symbol,
-                                 kind: .primary, style: style)
-        secondary = section.secondaryAction.map {
-            DashboardButton(title: $0.title, symbol: $0.symbol, kind: .secondary, style: style)
-        }
-        well = DashboardCardView(style: style, elevation: .sunken, radius: DashboardRadius.card)
-        wellTitle = DashboardType.label("Today", font: DashboardType.headline, color: style.ink)
-        wellChip = DashboardChip(text: "\(DashboardPlaceholderView.samples.count) entries", tone: .neutral, style: style)
-
+        heading = DashboardType.label(section.title, font: DashboardType.display, color: style.ink)
+        body = DashboardType.label(DashboardPlaceholderView.explanation(for: section),
+                                   font: DashboardType.body, color: style.inkSecondary,
+                                   lines: 3, lineHeight: 20)
         super.init(frame: .zero)
-
-        addSubview(eyebrow)
         addSubview(heading)
-        addSubview(blurb)
-        addSubview(action)
-        secondary.map(addSubview)
-
-        for (value, unit, caption, accent) in DashboardPlaceholderView.metrics {
-            let tile = DashboardMetricTile(value: value, unit: unit, caption: caption,
-                                           accent: accent, style: style)
-            addSubview(tile)
-            tiles.append(tile)
-        }
-
-        addSubview(well)
-        well.addSubview(wellTitle)
-        well.addSubview(wellChip)
-        for (time, text) in DashboardPlaceholderView.samples {
-            let row = DashboardSampleRow(time: time, text: text, style: style)
-            well.addSubview(row)
-            rowViews.append(row)
-        }
+        addSubview(body)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
-
-    /// Never the section's own name — the sidebar and the eyebrow have already
-    /// said that twice, and a page whose title repeats its tab teaches nothing.
-    private static func heading(for section: DashboardSection) -> String {
+    /// What the section will do, stated plainly. No numbers, because there are none.
+    private static func explanation(for section: DashboardSection) -> String {
         switch section {
-        case .dictation: return "Everything you have said"
-        case .notetaker: return "Record the room, keep the notes"
-        case .insights: return "How you actually speak"
-        case .dictionary: return "Words only you use"
-        case .snippets: return "Say less, insert more"
-        case .style: return "How Quill writes for you"
-        case .transforms: return "Rewrite it without retyping"
-        case .scratchpad: return "Somewhere to think out loud"
-        case .settings: return "Quill, tuned to this machine"
-        case .help: return "When something goes wrong"
+        case .transforms:
+            return "Not built yet. It will rewrite what you just said — shorten it, make it a list, change the tone — without retyping it."
+        case .settings:
+            return "Not built yet. Hotkey, microphone, vocabulary and the AI connection are configurable from the menu bar in the meantime."
+        case .help:
+            return "Not built yet."
+        default:
+            return "Not built yet."
         }
     }
-
-    private static let metrics: [(String, String, String, Bool)] = [
-        ("1,284", "words", "dictated today", false),
-        ("119", "wpm", "median, last 7 days", true),
-        ("0.42", "s", "speech end to text in", false),
-    ]
-
-    private static let samples: [(String, String)] = [
-        ("9:41 am", "Push the Netlify build once the Firestore rules land — Carlo needs the workshop dashboard before Thursday."),
-        ("9:12 am", "Reply to Noah: the booking page is live, the deposit flow goes in tonight, nothing else changes this week."),
-        ("8:57 am", "Idea for Quill — let a transform run on the clipboard, not just on the last dictation."),
-        ("8:30 am", "Groceries: coffee, oat milk, the good bread from the place on Sydney Road."),
-        ("8:04 am", "Draft the Builda Bed copy — lead with the reversible bedhead, the fabric range second, price last."),
-        ("7:52 am", "Remind me to check whether the analyzer keeps its context window across a locked session."),
-        ("7:41 am", "Yes to Friday, but I'd rather do the morning — afternoon is already booked with the Rosehill thing."),
-        ("7:26 am", "Quill beat Flow on latency again this morning. Median 0.42 against 1.1."),
-    ]
 
     public override func layout() {
         super.layout()
         let padX = DashboardMetrics.contentPaddingX
         let padY = DashboardMetrics.contentPaddingY
         let width = bounds.width - padX * 2
-
-        var y = padY
-        let eyebrowSize = eyebrow.fittingSize
-        eyebrow.frame = NSRect(x: padX, y: y, width: eyebrowSize.width, height: eyebrowSize.height)
-        y += eyebrowSize.height + 10
+        guard width > 0 else { return }
 
         let headingSize = heading.fittingSize
-        heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 260), height: headingSize.height)
-        y += headingSize.height + 8
+        heading.frame = NSRect(x: padX, y: padY, width: headingSize.width, height: headingSize.height)
 
-        let blurbWidth = min(width - 300, 700)
-        let blurbHeight = DashboardType.size(blurb, width: blurbWidth).height
-        blurb.frame = NSRect(x: padX, y: y, width: blurbWidth, height: blurbHeight)
-        y += blurbHeight
-
-        // Actions sit on the heading's optical line, right-aligned.
-        let actionWidth = action.intrinsicWidth
-        action.frame = NSRect(x: bounds.width - padX - actionWidth,
-                              y: padY + eyebrowSize.height + 6, width: actionWidth, height: 36)
-        if let secondary {
-            let secondaryWidth = secondary.intrinsicWidth
-            secondary.frame = NSRect(x: action.frame.minX - 10 - secondaryWidth,
-                                     y: action.frame.minY, width: secondaryWidth, height: 36)
-        }
-
-        y += DashboardSpace.xl
-
-        let gap = DashboardSpace.md
-        let tileWidth = ((width - gap * CGFloat(tiles.count - 1)) / CGFloat(tiles.count)).rounded(.down)
-        for (index, tile) in tiles.enumerated() {
-            tile.frame = NSRect(x: padX + (tileWidth + gap) * CGFloat(index), y: y,
-                                width: tileWidth, height: 104)
-        }
-        y += 104 + DashboardSpace.lg
-
-        well.frame = NSRect(x: padX, y: y, width: width, height: max(120, bounds.height - y - padY))
-        let titleSize = wellTitle.fittingSize
-        wellTitle.frame = NSRect(x: 20, y: 18, width: titleSize.width, height: titleSize.height)
-        wellChip.frame = NSRect(x: 20 + titleSize.width + 10,
-                                y: 18 + ((titleSize.height - wellChip.frame.height) / 2).rounded(),
-                                width: wellChip.frame.width, height: wellChip.frame.height)
-
-        // Rows are laid out until one would not fit whole. A list that runs off
-        // the bottom edge of its container looks like a bug; a list that stops
-        // cleanly and obviously has more below it looks like a list.
-        var rowY: CGFloat = 18 + titleSize.height + 14
-        for row in rowViews {
-            let height = row.height(for: well.bounds.width - 2)
-            let fits = rowY + height <= well.bounds.height - 4
-            row.isHidden = !fits
-            guard fits else { continue }
-            row.frame = NSRect(x: 1, y: rowY, width: well.bounds.width - 2, height: height)
-            rowY += height
-        }
-    }
-}
-
-/// A number and what it means. Deliberately not a card — the tiles read as one
-/// horizontal band divided by rules, which keeps three numbers from looking like
-/// three unrelated widgets.
-public final class DashboardMetricTile: NSView {
-
-    private let style: DashboardStyle
-    private let accent: Bool
-    private let value: NSTextField
-    private let caption: NSTextField
-
-    public override var isFlipped: Bool { true }
-
-    public init(value: String, unit: String, caption: String, accent: Bool, style: DashboardStyle) {
-        self.style = style
-        self.accent = accent
-
-        // Number and unit are one attributed string, not two labels. Two labels
-        // means aligning a 30pt box against a 14pt box by hand, and every
-        // hand-aligned baseline is wrong by two or three points in a way you
-        // cannot unsee. The text system already knows where the baseline is.
-        let line = NSMutableAttributedString(string: value, attributes: [
-            .font: DashboardType.metric,
-            .foregroundColor: accent ? style.accent : style.ink,
-            .kern: -0.9,
-        ])
-        line.append(NSAttributedString(string: "  " + unit, attributes: [
-            .font: NSFont.systemFont(ofSize: 14, weight: .medium),
-            .foregroundColor: style.inkTertiary,
-            .kern: 0,
-        ]))
-        let field = NSTextField(labelWithString: "")
-        field.isBezeled = false
-        field.drawsBackground = false
-        field.isEditable = false
-        field.isSelectable = false
-        field.maximumNumberOfLines = 1
-        field.cell?.usesSingleLineMode = true
-        field.attributedStringValue = line
-        self.value = field
-
-        self.caption = DashboardType.label(caption, font: DashboardType.callout, color: style.inkSecondary)
-        super.init(frame: .zero)
-        addSubview(self.value)
-        addSubview(self.caption)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    deinit { NotificationCenter.default.removeObserver(self) }
-
-    public override func layout() {
-        super.layout()
-        let valueSize = value.fittingSize
-        value.frame = NSRect(x: 20, y: 22, width: min(valueSize.width, bounds.width - 40), height: valueSize.height)
-        let captionSize = caption.fittingSize
-        caption.frame = NSRect(x: 20, y: 22 + valueSize.height + 10,
-                               width: min(captionSize.width, bounds.width - 40), height: captionSize.height)
-    }
-
-    public override func draw(_ dirtyRect: NSRect) {
-        DashboardDraw.sunkenSurface(bounds, radius: DashboardRadius.card, style: style, flipped: true)
-        if accent {
-            // One hairline of colour along the top edge, clipped to the corner
-            // curve. Enough to say "this is the number that matters".
-            NSGraphicsContext.saveGraphicsState()
-            DashboardDraw.path(bounds, DashboardRadius.card).addClip()
-            style.accent.setFill()
-            NSRect(x: 0, y: 0, width: bounds.width, height: 2).fill()
-            NSGraphicsContext.restoreGraphicsState()
-        }
-    }
-}
-
-/// One history row: timestamp gutter, text, hairline. The gutter is a fixed
-/// column so four rows scan as a table rather than four paragraphs.
-public final class DashboardSampleRow: NSView {
-
-    private let style: DashboardStyle
-    private let time: NSTextField
-    private let text: NSTextField
-
-    public override var isFlipped: Bool { true }
-
-    public init(time: String, text: String, style: DashboardStyle) {
-        self.style = style
-        self.time = DashboardType.label(time, font: DashboardType.mono, color: style.inkTertiary)
-        self.text = DashboardType.label(text, font: DashboardType.body, color: style.ink,
-                                        lines: 3, lineHeight: 21)
-        super.init(frame: .zero)
-        addSubview(self.time)
-        addSubview(self.text)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    deinit { NotificationCenter.default.removeObserver(self) }
-
-    public func height(for width: CGFloat) -> CGFloat {
-        DashboardType.size(text, width: width - 130).height + 28
-    }
-
-    public override func layout() {
-        super.layout()
-        let timeSize = time.fittingSize
-        time.frame = NSRect(x: 20, y: 15, width: timeSize.width, height: timeSize.height)
-        let textWidth = bounds.width - 130
-        text.frame = NSRect(x: 106, y: 13, width: textWidth,
-                            height: DashboardType.size(text, width: textWidth).height)
-    }
-
-    public override func draw(_ dirtyRect: NSRect) {
-        style.hairline.setFill()
-        NSRect(x: 20, y: 0, width: bounds.width - 40, height: 1).fill()
+        let bodyWidth = min(width, 520)
+        let bodyHeight = DashboardType.size(body, width: bodyWidth).height
+        body.frame = NSRect(x: padX, y: padY + headingSize.height + 10,
+                            width: bodyWidth, height: bodyHeight)
     }
 }
 
@@ -664,5 +443,123 @@ public enum DashboardMainMenu {
         main.addItem(windowItem)
 
         return main
+    }
+}
+
+/// A number and what it means. Deliberately not a card — the tiles read as one
+/// horizontal band divided by rules, which keeps three numbers from looking like
+/// three unrelated widgets.
+public final class DashboardMetricTile: NSView {
+
+    private let style: DashboardStyle
+    private let accent: Bool
+    private let value: NSTextField
+    private let caption: NSTextField
+
+    public override var isFlipped: Bool { true }
+
+    public init(value: String, unit: String, caption: String, accent: Bool, style: DashboardStyle) {
+        self.style = style
+        self.accent = accent
+
+        // Number and unit are one attributed string, not two labels. Two labels
+        // means aligning a 30pt box against a 14pt box by hand, and every
+        // hand-aligned baseline is wrong by two or three points in a way you
+        // cannot unsee. The text system already knows where the baseline is.
+        let line = NSMutableAttributedString(string: value, attributes: [
+            .font: DashboardType.metric,
+            .foregroundColor: accent ? style.accent : style.ink,
+            .kern: -0.9,
+        ])
+        line.append(NSAttributedString(string: "  " + unit, attributes: [
+            .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+            .foregroundColor: style.inkTertiary,
+            .kern: 0,
+        ]))
+        let field = NSTextField(labelWithString: "")
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.isEditable = false
+        field.isSelectable = false
+        field.maximumNumberOfLines = 1
+        field.cell?.usesSingleLineMode = true
+        field.attributedStringValue = line
+        self.value = field
+
+        self.caption = DashboardType.label(caption, font: DashboardType.callout, color: style.inkSecondary)
+        super.init(frame: .zero)
+        addSubview(self.value)
+        addSubview(self.caption)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    public override func layout() {
+        super.layout()
+        let valueSize = value.fittingSize
+        value.frame = NSRect(x: 20, y: 22, width: min(valueSize.width, bounds.width - 40), height: valueSize.height)
+        let captionSize = caption.fittingSize
+        caption.frame = NSRect(x: 20, y: 22 + valueSize.height + 10,
+                               width: min(captionSize.width, bounds.width - 40), height: captionSize.height)
+    }
+
+    public override func draw(_ dirtyRect: NSRect) {
+        DashboardDraw.sunkenSurface(bounds, radius: DashboardRadius.card, style: style, flipped: true)
+        if accent {
+            // One hairline of colour along the top edge, clipped to the corner
+            // curve. Enough to say "this is the number that matters".
+            NSGraphicsContext.saveGraphicsState()
+            DashboardDraw.path(bounds, DashboardRadius.card).addClip()
+            style.accent.setFill()
+            NSRect(x: 0, y: 0, width: bounds.width, height: 2).fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
+    }
+}
+
+/// One history row: timestamp gutter, text, hairline. The gutter is a fixed
+/// column so four rows scan as a table rather than four paragraphs.
+public final class DashboardSampleRow: NSView {
+
+    private let style: DashboardStyle
+    private let time: NSTextField
+    private let text: NSTextField
+
+    public override var isFlipped: Bool { true }
+
+    public init(time: String, text: String, style: DashboardStyle) {
+        self.style = style
+        self.time = DashboardType.label(time, font: DashboardType.mono, color: style.inkTertiary)
+        self.text = DashboardType.label(text, font: DashboardType.body, color: style.ink,
+                                        lines: 3, lineHeight: 21)
+        super.init(frame: .zero)
+        addSubview(self.time)
+        addSubview(self.text)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    public func height(for width: CGFloat) -> CGFloat {
+        DashboardType.size(text, width: width - 130).height + 28
+    }
+
+    public override func layout() {
+        super.layout()
+        let timeSize = time.fittingSize
+        time.frame = NSRect(x: 20, y: 15, width: timeSize.width, height: timeSize.height)
+        let textWidth = bounds.width - 130
+        text.frame = NSRect(x: 106, y: 13, width: textWidth,
+                            height: DashboardType.size(text, width: textWidth).height)
+    }
+
+    public override func draw(_ dirtyRect: NSRect) {
+        style.hairline.setFill()
+        NSRect(x: 20, y: 0, width: bounds.width - 40, height: 1).fill()
     }
 }
