@@ -104,11 +104,43 @@ fi
 
 # `|| true`: ffmpeg always exits non-zero when listing devices, and under
 # `set -euo pipefail` that would kill the script here with no message at all.
-AV_IDX="$(ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 \
+#
+# Index 0 is NOT the microphone. It was taking `head -1` — the first device
+# ffmpeg lists — and on any machine set up for this rig that is BlackHole, the
+# virtual loopback with nothing playing into it. The result is a recording of
+# perfect digital silence, nineteen seconds of zeroes, and an auto-stop that can
+# never fire because the level never rises. It cost a real recording session.
+#
+# So: match the device the SYSTEM is using for input, by name.
+AV_LIST="$(ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 \
            | sed -n '/AVFoundation audio devices/,$p' \
-           | sed -n 's/^\[AVFoundation indev @ [^]]*\] *\[\([0-9]\{1,\}\)\] *\(.*\)$/\1|\2/p' \
-           | head -1 | cut -d'|' -f1 || true)"
-[[ -n "$AV_IDX" ]] || die "ffmpeg cannot see any audio input device"
+           | sed -n 's/^\[AVFoundation indev @ [^]]*\] *\[\([0-9]\{1,\}\)\] *\(.*\)$/\1|\2/p' || true)"
+[[ -n "$AV_LIST" ]] || die "ffmpeg cannot see any audio input device"
+
+SYS_INPUT="$(SwitchAudioSource -c -t input 2>/dev/null || true)"
+AV_IDX="$(printf '%s\n' "$AV_LIST" | awk -F'|' -v want="$SYS_INPUT" '$2==want{print $1; exit}')"
+AV_NAME="$SYS_INPUT"
+
+if [[ -z "$AV_IDX" ]]; then
+    # Fall back to the first device that is not a loopback, rather than to
+    # whatever happens to be first.
+    AV_IDX="$(printf '%s\n' "$AV_LIST" | awk -F'|' '$2 !~ /BlackHole|Loopback|Aggregate/{print $1; exit}')"
+    AV_NAME="$(printf '%s\n' "$AV_LIST" | awk -F'|' -v i="$AV_IDX" '$1==i{print $2; exit}')"
+fi
+[[ -n "$AV_IDX" ]] || die "no usable microphone" \
+    "ffmpeg sees: $(printf '%s' "$AV_LIST" | tr '\n' ' ')" \
+    "fix: pick a real microphone in System Settings > Sound > Input."
+
+case "$AV_NAME" in
+    *BlackHole*|*Loopback*|*Aggregate*)
+        die "the system input is \"$AV_NAME\", which is a virtual loopback device." \
+            "Nothing is playing into it, so every take would be pure silence —" \
+            "which is exactly what it records, without complaining." \
+            "fix: System Settings > Sound > Input, choose the built-in microphone." \
+            "     (rig/run_eval.sh switches the input to BlackHole and does not" \
+            "      switch it back; that is what usually leaves it like this.)" ;;
+esac
+say "microphone        : $AV_NAME (avfoundation index $AV_IDX)"
 
 BYTES_PER_SEC=96000      # 48000 Hz × 1 channel × 2 bytes, the raw capture format
 
@@ -194,6 +226,30 @@ PY
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
     [[ -s "$raw" ]] || return 1
+
+    # A take with no signal in it at all is not a bad take, it is a broken setup,
+    # and it must not be offered for review as though it were audio. Silence is
+    # what a denied microphone sounds like, and what a loopback device sounds
+    # like, and in both cases the auto-stop can never fire either — so the
+    # symptom is someone sitting in front of a prompt that will never move.
+    local peak
+    peak="$(python3 - "$raw" <<'PY2'
+import array, os, sys
+p = sys.argv[1]
+size = os.path.getsize(p)
+a = array.array("h")
+with open(p, "rb") as fh:
+    a.frombytes(fh.read(size // 2 * 2))
+print(max((abs(x) for x in a), default=0))
+PY2
+)"
+    if [[ "${peak:-0}" -lt 32 ]]; then
+        warn "that take contained no sound at all (peak $peak of 32768)."
+        warn "The microphone is open but nothing is reaching it."
+        warn "  · check System Settings > Sound > Input has the right device and the level moves"
+        warn "  · check the terminal has Microphone permission in Privacy & Security"
+        return 2
+    fi
     return 0
 }
 
@@ -322,7 +378,17 @@ for ((i = START; i <= END; i++)); do
         say ""
         printf '  %s● recording…%s speak now' "$C_RED" "$C_RST" >&2
         RAW="$VOICE_DIR/.take.raw"
-        if ! record_one "$RAW"; then
+        # `|| take_status=$?` rather than `; take_status=$?`: under `set -e` a
+        # non-zero return from record_one would kill the script before the status
+        # could be read, so the silent-take branch below would never run.
+        take_status=0
+        record_one "$RAW" || take_status=$?
+        if (( take_status == 2 )); then
+            say "  not saved — fix the input and press ENTER to try this line again"
+            read -r _ </dev/tty || true
+            continue
+        fi
+        if (( take_status != 0 )); then
             printf '\r  %swarn%s nothing was captured. Try again.\n' "$C_YEL" "$C_RST" >&2
             sleep 1.2; continue
         fi

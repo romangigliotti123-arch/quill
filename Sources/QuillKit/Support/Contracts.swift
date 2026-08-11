@@ -149,9 +149,18 @@ public struct DictationTimeline: Sendable {
     /// How long speech actually ran, for words-per-minute and time-saved.
     public var audioDurationMs: Int? { ms(audioFirstBuffer, finalTranscript) }
 
+    /// Key-down to the first buffer off the microphone.
+    ///
+    /// The gap a person would have to wait through before speaking, if they had
+    /// to wait at all. Capture is started at key-down precisely so they do not —
+    /// but "designed not to" and "measured not to" are different claims, and
+    /// only one of them belongs in an answer to "how long should I wait?".
+    public var micOpenMs: Int? { ms(hotkeyDown, audioFirstBuffer) }
+
     public var logLine: String {
         let f = { (v: Int?) in v.map(String.init) ?? "—" }
-        return "ttfw=\(f(timeToFirstWordMs))ms release→insert=\(f(releaseToInsertedMs))ms "
+        return "micOpen=\(f(micOpenMs))ms ttfw=\(f(timeToFirstWordMs))ms "
+            + "release→insert=\(f(releaseToInsertedMs))ms "
             + "final→insert=\(f(finalToInsertedMs))ms e2e=\(f(endToEndMs))ms"
     }
 

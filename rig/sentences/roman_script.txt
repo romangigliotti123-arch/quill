@@ -1,50 +1,83 @@
 # Spoken-corpus script for the quill gauntlet.
 #
 # Read one line at a time, exactly as written. Blank lines and #-comments are
-# ignored. The line IS the ground truth, so if you improvise, the WER for that
-# clip is measuring your improvisation, not the app.
+# ignored. THE LINE IS THE GROUND TRUTH — if you improvise, the word error rate
+# for that clip measures your improvisation, not the app. If you fluff one, redo
+# it: rig/record_voice.sh --redo 12
 #
-# The vocabulary is deliberate. LibriSpeech is 19th-century audiobook prose and
-# tells you nothing about how either app handles the words Roman actually
-# dictates: project names, Australian place names, and developer jargon that a
-# general language model has never been asked to spell. That is exactly where a
-# cloud model with a big vocabulary should beat a small local one, so it is the
-# fair place to look for the gap.
+# Order is deliberate. If you stop half way, the half that got recorded is still
+# the half worth having.
 #
-# 32 lines: 14 vocabulary-loaded, 18 ordinary dictation prose.
+#   1-10   Short. Under two seconds each, and they are the risk case: the
+#          recogniser has a floor on how fast it can say anything, so a short
+#          utterance is where a dictation comes back EMPTY. Nothing in
+#          LibriSpeech is this short, so this has never been measured.
+#   11-22  Your vocabulary. Proper nouns no recogniser has a reason to know.
+#   23-30  Numbers, money, times, dates — where formatting goes wrong.
+#   31-36  Spoken self-corrections. Say them exactly as written, including the
+#          "no wait" — the raw transcript is supposed to contain it, and the
+#          cleanup dropping it is scored separately.
+#   37-44  Client and work sentences, the way you would actually dictate them.
+#   45-50  Longer prose, for the tail of the length distribution.
 
-# ── project and tool names ────────────────────────────────────────────────────
+# --- 1-10: short utterances (the empty-transcript risk case) ---
+On my way.
+Sounds good.
+Give me five minutes.
+Yes, that works.
+Send it through.
+Not today.
+I will check tonight.
+Thanks, got it.
+Can you call me?
+Booked in for Friday.
+
+# --- 11-22: your vocabulary ---
 Push the nxt onboarding manager to Netlify once the Firestore rules are updated.
 The graphify workspace rebuilt the knowledge graph across every project folder.
 Open Nebula and check whether the cosmic globe still renders the god nodes.
 Vesper is the Lunar style wrapper that sits around the blockcraft replica.
-I need to check the Firestore security rules before the client codes go live.
-The Netlify production build only deploys from main, not from dev.
 Send the deposit invoice to the barber shop in Craigieburn this afternoon.
+Noah Kass wants the booking page live before the weekend.
+Carlo needs the Builda Bed workshop dashboard by Thursday.
 I am based in Melbourne, so most of my clients are in the northern suburbs.
-Add a blockcraft tile to the dashboard next to the graphify link.
-The Vesper launcher needs the bundled runtime before it can extract anything.
+The Netlify production build only deploys from main, not from dev.
+The Nebula viewer needs a local proxy because the API has no CORS headers.
 Quill should insert the text without ever touching the clipboard.
 Wispr Flow stores every transcript in a local SQLite database.
-Check the Firestore console for the onboarding process project.
-The Nebula viewer needs a local proxy because the API has no CORS headers.
 
-# ── ordinary dictation prose ──────────────────────────────────────────────────
-Can you send me the updated invoice before the end of the week?
+# --- 23-30: numbers, money, times, dates ---
+The deposit is fifty percent, so that is four hundred and fifty dollars up front.
+Let us meet at half past two on Tuesday the twelfth.
+The page loads in about one point four seconds on a cold cache.
+I quoted him eighteen hundred for the whole build.
+Version one point two point seven went out this morning.
+There were twenty three bookings last month and thirty one this month.
+Call him back on oh four one two, three three four, five five six.
+It should take about forty five minutes, an hour at the outside.
+
+# --- 31-36: spoken self-corrections (say them exactly, including the cue) ---
+Send it to Noah, no wait, send it to Carlo.
+Let us meet at three, actually make that four.
+The invoice is for five hundred, sorry, fifteen hundred dollars.
+I was going to the, I mean, I went to the shop.
+We should, we should probably ship it tomorrow.
+Book him in for Tuesday, no, Wednesday morning.
+
+# --- 37-44: client and work sentences ---
 I think the hero section needs more contrast and a bit more breathing room.
-Let me know if Tuesday afternoon works better for the call.
 The client wants the booking form above the fold on mobile.
-I spent most of yesterday debugging a permissions issue that turned out to be a typo.
-We should probably ship the smaller change first and measure it properly.
-There is no point optimising something that nobody has actually complained about.
-Remind me to follow up with him on Thursday if I have not heard back.
-The whole page loads in under a second now, which is a decent improvement.
-I would rather do it properly once than rush it and redo it twice.
 Could you double check the pricing table before I send this over?
-It turns out the bug only happens when the window is resized quickly.
-Let us keep the copy short and let the photography do the work.
-The dark mode version needs slightly warmer greys than the light one.
-I will push the changes tonight and tag a release in the morning.
-Honestly, the second draft reads much better than the first one did.
+Let me know if Tuesday afternoon works better for the call.
 Make sure the contact form actually sends before we call it finished.
-If the numbers do not move after a week, we will try something else entirely.
+The dark mode version needs slightly warmer greys than the light one.
+I have organised the files by client rather than by date.
+The colour on the second panel does not quite match the brand.
+
+# --- 45-50: longer prose ---
+I spent most of yesterday debugging a permissions issue that turned out to be a typo.
+There is no point optimising something that nobody has actually complained about.
+It turns out the bug only happens when the window is resized quickly, which took a while to work out.
+I would rather do it properly once than rush it and end up redoing the whole thing twice.
+If the numbers do not move after a week, we will try something else entirely rather than keep tuning it.
+Honestly, the second draft reads much better than the first one did, so I am going to keep going in that direction.
