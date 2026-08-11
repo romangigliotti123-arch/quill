@@ -159,8 +159,8 @@ import array, math, sys
 try:
     a = array.array('h'); a.frombytes(open('$raw','rb').read())
 except Exception:
-    print('300 900'); sys.exit()
-if not len(a): print('300 900'); sys.exit()
+    print('250 120'); sys.exit()
+if not len(a): print('250 120'); sys.exit()
 rms = math.sqrt(sum(x*x for x in a)/len(a))
 # speech gate well above the floor, silence gate just above it
 print(f'{max(rms*3.5, 250):.0f} {max(rms*1.8, 120):.0f}')"
@@ -179,35 +179,61 @@ record_one() {
     ffmpeg -hide_banner -nostdin -v error -y -f avfoundation -i ":$AV_IDX" \
         -t "$MAX_SEC" -ar 48000 -ac 1 -f s16le "$raw" >/dev/null 2>&1 &
     local pid=$!
-    local started=0 quiet_since="" t0
+    local started=0 quiet_since="" t0 last_rms=0 waited=0
     t0="$(python3 -c 'import time; print(time.time())')"
 
     while kill -0 "$pid" 2>/dev/null; do
-        if (( MANUAL )); then
-            if read -r -t 0.2 _ </dev/tty 2>/dev/null; then break; fi
-        else
-            # ENTER still works as an override in auto mode.
-            if read -r -t 0.2 _ </dev/tty 2>/dev/null; then break; fi
-        fi
+        # ENTER always works as an override, in either mode.
+        if read -r -t 0.2 _ </dev/tty 2>/dev/null; then break; fi
         (( MANUAL )) && continue
         [[ -f "$raw" ]] || continue
 
         local state
-        state="$(python3 - "$raw" "$SPEECH_GATE" "$SILENCE_GATE" "$BYTES_PER_SEC" <<'PY'
+        state="$(python3 - "$raw" "$SPEECH_GATE" "$SILENCE_GATE" "$BYTES_PER_SEC" <<'PY2'
 import array, math, os, sys
 raw, speech_gate, silence_gate, bps = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4])
 size = os.path.getsize(raw)
-win = int(bps * 1.0)
+# Half a second, not a whole one. "On my way." is barely longer than the window
+# itself, so averaging over a full second buries the speech in the silence on
+# either side of it.
+win = int(bps * 0.5)
 if size < win:
-    print("short 0"); raise SystemExit
+    print("short 0 0"); raise SystemExit
 with open(raw, "rb") as fh:
     fh.seek(size - win)
     a = array.array("h"); a.frombytes(fh.read(win // 2 * 2))
-rms = math.sqrt(sum(x * x for x in a) / len(a)) if len(a) else 0.0
-print(("loud" if rms >= speech_gate else ("quiet" if rms <= silence_gate else "mid")), f"{rms:.0f}")
-PY
+if not len(a):
+    print("short 0 0"); raise SystemExit
+rms = math.sqrt(sum(x * x for x in a) / len(a))
+peak = max(abs(x) for x in a)
+# Onset on PEAK, release on RMS.
+#
+# A mean level is the wrong instrument for detecting the start of a short
+# utterance: three words inside a half-second window are a fraction of it, and
+# the average lands close to the noise floor even when the voice is plainly
+# audible. The peak does not care how much of the window was speech. Silence
+# still uses the mean, because that is the question there — has it been quiet
+# for a while, not was there ever a click.
+state = "loud" if peak >= speech_gate * 3 else ("quiet" if rms <= silence_gate else "mid")
+print(state, f"{rms:.0f}", peak)
+PY2
 )"
         local level="${state%% *}"
+        last_rms="$(echo "$state" | awk '{print $2}')"
+        local last_peak; last_peak="$(echo "$state" | awk '{print $3}')"
+
+        # Show the level. Without this the only feedback is a cursor, and there is
+        # no way for anyone — including whoever wrote it — to tell "waiting for you
+        # to speak" apart from "cannot hear you at all".
+        local bar meter
+        bar="$(python3 -c "
+peak=float('${last_peak:-0}' or 0); gate=float('$SPEECH_GATE')*3
+n=min(24,int(24*peak/max(gate*1.5,1)))
+print('#'*n + '.'*(24-n))")"
+        printf '\r  %s speaking… [%s] peak %-6s (need %s)   ' \
+               "$( ((started)) && echo '●' || echo '○' )" "$bar" "${last_peak:-0}" \
+               "$(( SPEECH_GATE * 3 ))" >&2
+
         case "$level" in
             loud)  started=1; quiet_since="" ;;
             quiet)
@@ -221,7 +247,24 @@ PY
                     fi
                 fi ;;
         esac
+
+        # Never wait forever for a level that is not coming. Hanging with no
+        # explanation is the failure this whole script kept producing.
+        if (( ! started )); then
+            waited="$(python3 -c "print(1 if $(python3 -c 'import time; print(time.time())') - $t0 >= 12 else 0)")"
+            if (( waited )); then
+                printf '\r%*s\r' 70 '' >&2
+                kill "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                warn "heard nothing above the speech gate in 12 seconds."
+                warn "  last peak seen: ${last_peak:-0}   ·   needed: $(( SPEECH_GATE * 3 ))"
+                warn "  If the bar moved while you spoke, the gate is too high — tell me the numbers."
+                warn "  If the bar stayed flat, the microphone is not reaching this script."
+                return 2
+            fi
+        fi
     done
+    printf '\r%*s\r' 70 '' >&2
 
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
@@ -344,7 +387,17 @@ else
 fi
 say ""
 printf '  calibrating your room… ' >&2
-read -r SPEECH_GATE SILENCE_GATE <<<"$(calibrate)"
+read -r SPEECH_GATE SILENCE_GATE <<<"$(calibrate)" || true
+# Empty or non-numeric gates are the quietest possible failure: the level check
+# below is handed "" , python raises on float(""), prints nothing, the state is
+# empty, no case arm matches, and the loop spins forever with no output. Which is
+# precisely the hang this script kept producing.
+case "${SPEECH_GATE:-}" in ''|*[!0-9]*) SPEECH_GATE=250 ;; esac
+case "${SILENCE_GATE:-}" in ''|*[!0-9]*) SILENCE_GATE=120 ;; esac
+# And the fallback pair was inverted — 300 speech against 900 silence would call
+# a whisper "quiet" and never let anything be loud.
+if (( SILENCE_GATE >= SPEECH_GATE )); then SILENCE_GATE=$(( SPEECH_GATE / 2 )); fi
+say "levels            : speech ≥ $SPEECH_GATE, silence ≤ $SILENCE_GATE"
 printf 'speech gate %s, silence gate %s\n' "$SPEECH_GATE" "$SILENCE_GATE" >&2
 say ""
 printf '  press ENTER when ready' >&2; read -r _ </dev/tty || true
