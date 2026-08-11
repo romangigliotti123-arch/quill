@@ -181,6 +181,18 @@ public enum VocabularyHarvest {
         // knows it, and adding it only creates a chance to mis-correct. "blockcraft"
         // is worth having; "my website" is not.
         if parts.allSatisfy({ isCommonWord($0.lowercased()) }) { return nil }
+        // A single ordinary English word is the worst possible dictionary entry:
+        // the recogniser already knows it, so the term can never repair anything,
+        // and it sits there as one more chance to rewrite a word the user meant.
+        // Measured on this machine, the harvest proposed "dashboard", "maze",
+        // "cortex" and "orbital" — every one of them a folder Roman named with a
+        // real word.
+        //
+        // Only single words. A multi-word name made of ordinary words is still
+        // worth having, because the value is in the spacing and the casing:
+        // "roman design co" is a brand, "client work" is a folder, and the shorter
+        // `common` list above is what separates those two.
+        if parts.count == 1, VocabularyCorrector.isRealEnglishWord(rejoined) { return nil }
         return rejoined
     }
 

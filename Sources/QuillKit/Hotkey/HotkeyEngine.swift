@@ -47,6 +47,21 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     private var tapRunLoop: CFRunLoop?
     private var worker: Thread?
     private var stopping = false
+    /// Signalled when the tap thread has finished tearing itself down.
+    ///
+    /// `stop()` used to return while that thread was still inside its run loop.
+    /// A `start()` immediately afterwards set `stopping` back to false before the
+    /// old thread had read it, so the old thread never retired: two tap threads
+    /// then ran against one set of instance variables, and whichever one exited
+    /// first ran `tearDown()` and invalidated the *other* one's tap. The hotkey
+    /// went dead with nothing logged and no way to tell from the outside — the
+    /// engine reported `isInstalled` true the whole time.
+    ///
+    /// Restarting matters because it is not a rare path: it is what happens when
+    /// the user rebinds the key, and what a permission grant does when it finally
+    /// lands.
+    private let workerFinished = NSCondition()
+    private var workerRunning = false
     private var lastReportedReason: String?
 
     public init(
@@ -100,6 +115,9 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
         lock.lock()
         worker = thread
         lock.unlock()
+        workerFinished.lock()
+        workerRunning = true
+        workerFinished.unlock()
         thread.start()
 
         return isInstalled
@@ -117,12 +135,29 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             CFMachPortInvalidate(tap)
         }
         let runLoop = tapRunLoop
+        let stoppingWorker = worker
         worker = nil
         lock.unlock()
 
         if let runLoop {
             CFRunLoopStop(runLoop)
             CFRunLoopWakeUp(runLoop)
+        }
+
+        // Wait for the thread to actually be gone, so a start() after this cannot
+        // race it. Bounded, because a hung tap thread must not take the app's
+        // shutdown with it — and skipped entirely if the tap thread is the one
+        // calling stop(), which would otherwise wait for itself forever.
+        guard Thread.current !== stoppingWorker else { return }
+        workerFinished.lock()
+        let deadline = Date().addingTimeInterval(2)
+        while workerRunning, Date() < deadline {
+            workerFinished.wait(until: deadline)
+        }
+        let stillRunning = workerRunning
+        workerFinished.unlock()
+        if stillRunning {
+            NSLog("[quill] hotkey tap thread did not retire within 2s — not restarting it")
         }
     }
 
@@ -135,6 +170,12 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     // MARK: - Tap thread
 
     private func serviceTap() {
+        defer {
+            workerFinished.lock()
+            workerRunning = false
+            workerFinished.broadcast()
+            workerFinished.unlock()
+        }
         lock.lock()
         tapRunLoop = CFRunLoopGetCurrent()
         let stopBeforeStart = stopping

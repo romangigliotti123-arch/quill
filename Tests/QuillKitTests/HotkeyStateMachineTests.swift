@@ -302,3 +302,32 @@ private struct Driver {
     #expect(!up.contains(.abortPreroll))
     #expect(d.machine.state == .handsFree)
 }
+
+// MARK: - Restarting the engine
+
+@Test func theEngineCanBeStoppedAndStartedAgain() async {
+    // Rebinding the hotkey stops the engine and starts it again, and so does a
+    // permission grant landing. That path used to leave the old tap thread alive
+    // — stop() returned before it had retired, and the next start() cleared the
+    // flag it was waiting on — so two threads shared one set of instance
+    // variables and whichever exited first invalidated the other's tap. The
+    // hotkey died silently while still reporting itself installed.
+    //
+    // Under CI or a fresh checkout there is no Accessibility grant, so no tap is
+    // ever created. The assertion is therefore about consistency rather than
+    // installation: whatever the first start reported, the second must report the
+    // same, and neither stop may hang.
+    let engine = EventTapHotkeyEngine()
+
+    let first = engine.start()
+    engine.stop()
+    let second = engine.start()
+    engine.stop()
+
+    #expect(first == second,
+            "restarting the engine changed whether the tap was installed")
+    // A third cycle, immediately, is the shape that actually broke: stop() and
+    // start() back to back with no time in between for the old thread to notice.
+    engine.start()
+    engine.stop()
+}

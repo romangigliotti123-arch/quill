@@ -37,6 +37,8 @@ public final class DictionarySectionView: NSView {
     /// history. Unlabelled sample data on a screen that exists to prove a number
     /// is worse than an empty screen: it is a claim, and it is false.
     private var sampleChip: DashboardChip?
+    /// The add / import panel, present only while it is open.
+    private var composer: DictionaryComposer?
 
     public override var isFlipped: Bool { true }
 
@@ -95,10 +97,71 @@ public final class DictionarySectionView: NSView {
         addSubview(detail)
 
         list.onSelect = { [weak self] entry in self?.show(entry) }
+        addButton.onClick = { [weak self] in self?.open(.add) }
+        if let requested = ProcessInfo.processInfo.environment["QUILL_DICTIONARY_PANEL"] {
+            // A review hook, same shape as QUILL_RESIZE_SWEEP: open the panel so a
+            // render or a sweep can see it. Never set in normal use.
+            // Synchronously, inside init. Deferring it to the next main-queue tick
+            // put the panel into the tree after the renderer's display cycle had
+            // already run, and AppKit does not graft a late subview's layer onto
+            // its superview without another one — so the hook fired, the panel
+            // existed, and the screenshot showed no panel.
+            open(requested == "import"
+                 ? .suggestions(VocabularyHarvest.suggestions())
+                 : .add)
+        }
+        importButton.onClick = { [weak self] in
+            self?.open(.suggestions(VocabularyHarvest.suggestions()))
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    // MARK: - Adding words
+
+    /// Opens the panel, or closes it if the same button is pressed again.
+    ///
+    /// Not private: the offscreen renderer and the resize sweep need to be able
+    /// to put the section into this state, and a panel that can only be reached
+    /// by a mouse click is a panel that never gets reviewed at any window size.
+    func open(_ mode: DictionaryComposer.Mode) {
+        let alreadyOpen = composer != nil
+        composer?.removeFromSuperview()
+        composer = nil
+        guard !alreadyOpen || isDifferent(mode) else {
+            needsLayout = true
+            return
+        }
+
+        let panel = DictionaryComposer(mode: mode, style: style)
+        panel.onDismiss = { [weak self] in
+            self?.composer?.removeFromSuperview()
+            self?.composer = nil
+            self?.needsLayout = true
+        }
+        // Rebuild the whole section: the term counts, the tiles and the list all
+        // change together, and a screen where the header disagrees with the table
+        // under it is the specific failure this section was written to avoid.
+        panel.onAdded = { _ in
+            NotificationCenter.default.post(name: .quillDashboardNeedsReload, object: nil)
+        }
+        addSubview(panel)
+        composer = panel
+        needsLayout = true
+        DispatchQueue.main.async { panel.focus() }
+    }
+
+    /// Pressing "Add word" while the import panel is open should swap panels, not
+    /// close it and leave the user wondering what happened.
+    private func isDifferent(_ mode: DictionaryComposer.Mode) -> Bool {
+        guard let composer else { return true }
+        switch (composer.mode, mode) {
+        case (.add, .add): return false
+        case (.suggestions, .suggestions): return false
+        default: return true
+        }
+    }
 
     // MARK: - Numbers
 
@@ -168,6 +231,12 @@ public final class DictionarySectionView: NSView {
         }
 
         y += DashboardSpace.lg + DashboardSpace.xxs
+
+        if let composer {
+            let height = composer.height(forWidth: width)
+            composer.frame = NSRect(x: padX, y: y, width: width, height: height)
+            y += height + DashboardSpace.md
+        }
 
         let tileGap = DashboardSpace.md
         let tileWidth = ((width - tileGap * CGFloat(tiles.count - 1)) / CGFloat(tiles.count)).rounded(.down)

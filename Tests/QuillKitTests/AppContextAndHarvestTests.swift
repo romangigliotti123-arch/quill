@@ -130,13 +130,13 @@ import Testing
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("quill-harvest-\(UUID().uuidString)")
     let fm = FileManager.default
-    for name in ["blockcraft", "cortex", "src", "my-portfolio-site"] {
+    for name in ["blockcraft", "geodash", "src", "my-portfolio-site"] {
         try? fm.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
     }
     defer { try? fm.removeItem(at: root) }
 
     let terms = VocabularyHarvest.suggestions(roots: [root], existing: existing).map(\.term)
-    #expect(terms.contains("cortex"))
+    #expect(terms.contains("geodash"))
     #expect(!terms.contains("blockcraft"), "suggested a term already in the dictionary")
     #expect(!terms.contains("src"))
     #expect(!terms.contains("my portfolio site"))
@@ -193,4 +193,71 @@ import Testing
     // The long keys the feature exists for are untouched.
     #expect(VocabularyCorrector.phoneticSimilarity("netterfly", "netlify")
               >= VocabularyCorrector.phoneticThreshold)
+}
+
+// MARK: - A word added in the Dictionary has to work on the next dictation
+
+@Test func addingATermTakesEffectWithoutRelaunching() throws {
+    // The cleaner is built once at launch and lives as long as the process, and
+    // it held a snapshot of the vocabulary file. So "Add word" wrote to disk and
+    // changed nothing: the term was listed in the Dictionary, and the corrector
+    // it was added to went on not knowing about it until the app was restarted.
+    // A silent no-op that looks exactly like success.
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-vocab-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try Data("{\"terms\":[]}".utf8).write(to: url)
+
+    let book = VocabularyBook(url: url)
+    let corrector = VocabularyCorrector(book: book)
+
+    #expect(corrector.correct("push it to Netterfly tonight") == "push it to Netterfly tonight",
+            "repaired a term that is not in the dictionary")
+
+    #expect(book.add("Netlify"))
+    #expect(corrector.correct("push it to Netterfly tonight").contains("Netlify"),
+            "the corrector did not see a term added after it was built")
+
+    // Same word twice is not an error, but it is not a change either — the panel
+    // says so rather than reporting a second success.
+    #expect(book.add("netlify") == false)
+    #expect(book.add("   ") == false)
+    #expect(book.terms.count == 1)
+}
+
+@Test func aHandEditToTheVocabularyFileIsPickedUp() throws {
+    // The file's own documentation calls it the source of truth and invites
+    // editing it directly, so following it has to mean following it, not
+    // following whatever it said when the app launched.
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-vocab-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try Data("{\"terms\":[\"Netlify\"]}".utf8).write(to: url)
+
+    let book = VocabularyBook(url: url)
+    #expect(book.terms == ["Netlify"])
+
+    // Modification dates have one-second resolution on some filesystems; a stamp
+    // that has not moved is indistinguishable from a file that has not changed.
+    Thread.sleep(forTimeInterval: 1.1)
+    try Data("{\"terms\":[\"Netlify\",\"Craigieburn\"]}".utf8).write(to: url)
+    #expect(book.terms.contains("Craigieburn"), "did not notice the file changing")
+}
+
+@Test func harvestingRejectsAnOrdinaryEnglishWordOnItsOwn() {
+    // Straight off Roman's machine: the harvest proposed "dashboard", "maze",
+    // "cortex" and "orbital", all of them folders he named with a real word. A
+    // single English word is the worst possible entry — the recogniser already
+    // knows it, so it can never repair anything, and it sits in the list as one
+    // more chance to rewrite a word he meant.
+    for word in ["dashboard", "maze", "cortex", "orbital", "homepage"] {
+        #expect(VocabularyHarvest.candidate(from: word) == nil, "accepted \(word)")
+    }
+    // Not English, and therefore exactly what the dictionary is for.
+    for word in ["blockcraft", "geodash", "mediadeck", "buildabed"] {
+        #expect(VocabularyHarvest.candidate(from: word) == word, "rejected \(word)")
+    }
+    // Several ordinary words together are still a name: the value is the spacing
+    // and the casing, not the individual words.
+    #expect(VocabularyHarvest.candidate(from: "roman-design-co") == "roman design co")
 }

@@ -13,8 +13,38 @@ import Foundation
 /// macOS 27 that *is* worth taking: `AnalyzerInputConverter`.
 public final class AudioCapture: AudioSource {
 
-    public var onBuffer: ((AVAudioPCMBuffer, AVAudioTime?) -> Void)?
-    public var onLevel: ((Float) -> Void)?
+    /// Both handlers are written from whatever thread drives a dictation and read
+    /// from the tap's own queue, so both go through the lock.
+    ///
+    /// Capturing them once when the tap is installed would be cheaper and is the
+    /// obvious fix, but it is the wrong one here: setting `onBuffer = nil` is how
+    /// the transcriber detaches from a SHARED audio source without stopping the
+    /// engine, and a captured copy would keep feeding a session that has already
+    /// been torn down. The tap has to see the current value, which means it has to
+    /// be read safely.
+    ///
+    /// A lock is acceptable on this path because `installTap` delivers on an
+    /// AVAudioEngine-owned serial queue, not the HAL render thread — this is not
+    /// a real-time context, and the alternative is an unsynchronised read of a
+    /// closure reference while another thread reassigns it.
+    public var onBuffer: ((AVAudioPCMBuffer, AVAudioTime?) -> Void)? {
+        get { withLock { _onBuffer } }
+        set { withLock { _onBuffer = newValue } }
+    }
+    public var onLevel: ((Float) -> Void)? {
+        get { withLock { _onLevel } }
+        set { withLock { _onLevel = newValue } }
+    }
+
+    private var _onBuffer: ((AVAudioPCMBuffer, AVAudioTime?) -> Void)?
+    private var _onLevel: ((Float) -> Void)?
+    private let lock = NSLock()
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
 
     private let engine = AVAudioEngine()
     private let enableVoiceProcessing: Bool
@@ -110,9 +140,16 @@ public final class AudioCapture: AudioSource {
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
             guard let self else { return }
             if let warmupDeadline, Date() < warmupDeadline { return }
-            self.onBuffer?(buffer, time)
+            // Read once, call outside the lock: the handler runs a transcription
+            // ingest, and holding a lock across it would let a slow ingest block
+            // whatever thread is trying to stop the dictation.
+            let handler = self.withLock { self._onBuffer }
+            handler?(buffer, time)
             let level = LevelMeter.level(of: buffer)
-            DispatchQueue.main.async { self.onLevel?(level) }
+            DispatchQueue.main.async {
+                let meter = self.withLock { self._onLevel }
+                meter?(level)
+            }
         }
 
         engine.prepare()
@@ -145,6 +182,10 @@ public final class AudioCapture: AudioSource {
 
         running = false
         prepared = false
-        DispatchQueue.main.async { [weak self] in self?.onLevel?(0) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let meter = self.withLock { self._onLevel }
+            meter?(0)
+        }
     }
 }

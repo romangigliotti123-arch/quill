@@ -20,24 +20,52 @@ import Foundation
 /// the system dictionary), and multi-word spans must clear a higher bar still.
 public struct VocabularyCorrector: Sendable {
 
-    private let terms: [String]
+    /// Fixed for tests and for anything scoring a corpus, where the list must not
+    /// move underneath the run. Nil in the app, where it comes from the book.
+    private let fixedTerms: [String]?
+    private let book: VocabularyBook?
+
+    /// Read per call, not per instance.
+    ///
+    /// The cleaner is built once at launch and lives for the life of the process,
+    /// so a corrector holding a snapshot meant a word added in the Dictionary did
+    /// nothing at all until the app was relaunched — with the screen reporting it
+    /// as added the whole time.
+    var terms: [String] { fixedTerms ?? book?.terms ?? [] }
     /// Tuned against real failures rather than picked round: "craigeburn" vs
     /// "craigieburn" scores 0.91 and must pass; "graphifi" vs "graphify" scores
     /// 0.875 and must pass; ordinary English near-misses must not.
     private let singleWordThreshold: Double
     private let multiWordThreshold: Double
 
+    /// A corrector over a fixed list.
     public init(
-        vocabulary: Vocabulary = .load(),
+        vocabulary: Vocabulary,
         singleWordThreshold: Double = 0.80,
         multiWordThreshold: Double = 0.85
     ) {
-        self.terms = vocabulary.contextualStrings
+        self.fixedTerms = vocabulary.contextualStrings
+        self.book = nil
+        self.singleWordThreshold = singleWordThreshold
+        self.multiWordThreshold = multiWordThreshold
+    }
+
+    /// The shipping corrector: follows the vocabulary file as it changes.
+    public init(
+        book: VocabularyBook = .shared,
+        singleWordThreshold: Double = 0.80,
+        multiWordThreshold: Double = 0.85
+    ) {
+        self.fixedTerms = nil
+        self.book = book
         self.singleWordThreshold = singleWordThreshold
         self.multiWordThreshold = multiWordThreshold
     }
 
     public func correct(_ text: String) -> String {
+        // Once, at the top: the list must not change between two windows of the
+        // same sentence.
+        let terms = self.terms
         guard !terms.isEmpty, !text.isEmpty else { return text }
 
         var tokens = Self.tokenise(text)
@@ -62,7 +90,8 @@ public struct VocabularyCorrector: Sendable {
                 else { continue }
                 let candidate = window.map(\.word).joined(separator: " ")
                 guard let match = bestMatch(for: candidate, spanCount: span,
-                                            phoneticAllowed: allowsPhoneticMatch(window))
+                                            phoneticAllowed: allowsPhoneticMatch(window),
+                                            terms: terms)
                 else { continue }
 
                 // Keep the trailing punctuation of the last token in the span.
@@ -83,8 +112,11 @@ public struct VocabularyCorrector: Sendable {
 
     // MARK: - Matching
 
+    /// `terms` is passed in rather than read from `self` so a sentence is matched
+    /// against one list from first window to last, and so the file is stat-ed once
+    /// per dictation instead of once per candidate span.
     private func bestMatch(for candidate: String, spanCount: Int,
-                           phoneticAllowed: Bool) -> String? {
+                           phoneticAllowed: Bool, terms: [String]) -> String? {
         let normalised = Self.normalise(candidate)
         guard normalised.count >= 3 else { return nil }
 
