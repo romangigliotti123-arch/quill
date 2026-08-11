@@ -403,7 +403,18 @@ say ""
 printf '  press ENTER when ready' >&2; read -r _ </dev/tty || true
 
 START=1; END=$TOTAL
-if [[ -n "$REDO" ]]; then START="$REDO"; END="$REDO"; fi
+# `--redo 4` or `--redo 1-11`. A range because re-reading a run of lines is the
+# normal case — the first few takes of a session are the ones where you are still
+# working out how the tool behaves, and asking someone to type eleven commands to
+# fix eleven lines is a way of not fixing them.
+if [[ -n "$REDO" ]]; then
+    case "$REDO" in
+        *-*) START="${REDO%%-*}"; END="${REDO##*-}" ;;
+        *)   START="$REDO"; END="$REDO" ;;
+    esac
+    case "$START$END" in *[!0-9]*) die "--redo takes a line number or a range, e.g. 7 or 1-11" ;; esac
+    (( END >= START )) || die "--redo range is backwards: $REDO"
+fi
 
 for ((i = START; i <= END; i++)); do
     ID="$(clip_id_for "$i")"
@@ -468,7 +479,8 @@ for ((i = START; i <= END; i++)); do
             *)   break ;;
         esac
     done
-    [[ -n "$REDO" ]] && break
+    # Only stop early for a single line; a range should run to its end.
+    [[ -n "$REDO" && "$REDO" != *-* ]] && break
 done
 
 write_manifest

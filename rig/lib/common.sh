@@ -11,11 +11,11 @@ set -euo pipefail
 RIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$(cd "$RIG_DIR/.." && pwd)"
 AUDIO_DIR="$RIG_DIR/audio"
-CLIPS_DIR="$AUDIO_DIR/clips"
+CLIPS_DIR="${QUILL_CLIPS_DIR:-$AUDIO_DIR/clips}"
 DOWNLOAD_DIR="$AUDIO_DIR/downloads"
 OUT_DIR="$RIG_DIR/out"
 BIN_DIR="$RIG_DIR/bin"
-MANIFEST="$RIG_DIR/corpus_manifest.tsv"
+MANIFEST="${QUILL_MANIFEST:-$RIG_DIR/corpus_manifest.tsv}"
 
 FLOW_APP="/Applications/Wispr Flow.app"
 QUILL_APP="$REPO_DIR/build/Quill.app"
