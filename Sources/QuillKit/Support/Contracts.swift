@@ -27,7 +27,12 @@ public protocol HotkeyEngineDelegate: AnyObject {
     func hotkeyPressed()
     func hotkeyReleased()
     /// Escape, or any keystroke that means "throw this dictation away".
-    func hotkeyCancelled()
+    ///
+    /// `userKeystrokeReachedApp` is true when the cancelling key was NOT
+    /// swallowed and therefore landed in the focused app as a real character.
+    /// Live typing has to know: taking back exactly what it typed would otherwise
+    /// delete that character too and leave one of its own behind.
+    func hotkeyCancelled(userKeystrokeReachedApp: Bool)
     /// The tap died or could not be created. Carries something a human can act on.
     func hotkeyEngineUnavailable(reason: String)
 }

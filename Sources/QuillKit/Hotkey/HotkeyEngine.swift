@@ -345,7 +345,10 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             case .notifyReleased:
                 deliver { $0.hotkeyReleased() }
             case .notifyCancelled:
-                deliver { $0.hotkeyCancelled() }
+                // Escape is swallowed and never reaches the app; any other key is
+                // passed through and lands as a character the user can see.
+                let swallowed = effects.contains(.swallowEvent)
+                deliver { $0.hotkeyCancelled(userKeystrokeReachedApp: !swallowed) }
             case let .startArmTimer(token, delay):
                 startArmTimer(token: token, delay: delay)
             case .cancelArmTimer:

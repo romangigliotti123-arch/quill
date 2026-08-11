@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Foundation
 
 /// The keystrokes live typing issues, behind a seam.
@@ -57,6 +58,8 @@ public final class LiveTyper {
 
     private let keyboard: KeystrokeEmitting
     private var targetPID: pid_t?
+    /// The field the words are going into, not merely the app.
+    private var targetElement: AXUIElement?
     private var lastUpdate: TimeInterval = 0
     private var pendingFlush: DispatchWorkItem?
     private var pendingText: String?
@@ -89,6 +92,7 @@ public final class LiveTyper {
             return false
         }
         targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        targetElement = focusedElement()
         return targetPID != nil
     }
 
@@ -132,19 +136,38 @@ public final class LiveTyper {
             isAbandoned = true
             return .failed(reason: "Focus moved while Quill was still typing.")
         }
+        let before = typed
         apply(text, force: true)
+        // Report what actually happened, not what was attempted.
+        //
+        // This returned .inserted unconditionally, so an apply() that aborted
+        // mid-edit — after the backspaces had already gone out — still told the
+        // coordinator the text was on screen. The paste fallback then never
+        // fired, and the user was left with a hole where their sentence had been
+        // and nothing on the clipboard to put back.
+        if isAbandoned || typed != text {
+            return .failed(reason: "Live typing stopped before the text was complete.")
+        }
+        _ = before
         return .inserted
     }
 
     /// Takes back everything typed during this dictation. For Escape, and for a
     /// transcript that turned out to be empty.
-    public func retract() {
+    /// - Parameter extraCharactersToLeave: characters that arrived after ours and
+    ///   are not ours to delete — the keystroke that cancelled the dictation,
+    ///   when it was passed through to the app rather than swallowed.
+    public func retract(extraCharactersToLeave: Int = 0) {
         cancelPending()
         guard !isAbandoned, !typed.isEmpty, focusHeld() else {
             typed = ""
             return
         }
-        keyboard.backspace(times: typed.count)
+        // Delete fewer than we typed, never more. Leaving one of our characters
+        // behind is a visible smudge the user can remove; deleting one of theirs
+        // is us destroying their work, and they may never notice which.
+        let count = max(0, typed.count - extraCharactersToLeave)
+        if count > 0 { keyboard.backspace(times: count) }
         typed = ""
     }
 
@@ -153,6 +176,7 @@ public final class LiveTyper {
         typed = ""
         isAbandoned = false
         targetPID = nil
+        targetElement = nil
     }
 
     // MARK: - The diff
@@ -209,9 +233,36 @@ public final class LiveTyper {
         return (current.count - shared, String(target[j...]))
     }
 
+    /// Whether the text is still going where it was going.
+    ///
+    /// The process is necessary and not sufficient. Comparing only the PID means
+    /// a click into a different field of the SAME app — a browser address bar, a
+    /// second document, another cell — still looks like the original target, so
+    /// the backspaces for the next revision land in whatever the user just
+    /// clicked into and delete their characters instead of ours.
+    ///
+    /// The focused element is asked for as well, through Accessibility. When AX
+    /// declines to answer (it often does, and Electron apps are unreliable here)
+    /// the check falls back to the process alone rather than abandoning a
+    /// perfectly good dictation — the failure mode of being too strict is losing
+    /// text, and of being too loose is what we already had.
     private func focusHeld() -> Bool {
         guard let targetPID else { return false }
-        return NSWorkspace.shared.frontmostApplication?.processIdentifier == targetPID
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == targetPID else {
+            return false
+        }
+        guard let target = targetElement, let now = focusedElement() else { return true }
+        return CFEqual(target, now)
+    }
+
+    private func focusedElement() -> AXUIElement? {
+        guard let targetPID else { return nil }
+        let app = AXUIElementCreateApplication(targetPID)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value) == .success
+        else { return nil }
+        guard let element = value, CFGetTypeID(element) == AXUIElementGetTypeID() else { return nil }
+        return (element as! AXUIElement)
     }
 
     private func cancelPending() {

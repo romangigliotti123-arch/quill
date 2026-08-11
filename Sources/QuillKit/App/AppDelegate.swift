@@ -160,6 +160,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if !state.missing.isEmpty { menu.addItem(.separator()) }
 
+        // The safety net, at the top of the menu where it can be found in a hurry.
+        //
+        // Every insertion path in this app can fail for reasons outside it: focus
+        // moved, the target refused a synthetic paste, Secure Input came on
+        // mid-sentence. The text always exists — it is in history a millisecond
+        // later — but "open the dashboard, find the row, select the text, copy it"
+        // is not something anyone does while the thought is still warm. One click.
+        let recover = NSMenuItem(title: "Copy Last Dictation",
+                                 action: #selector(copyLastDictation), keyEquivalent: "c")
+        recover.keyEquivalentModifierMask = [.command, .shift]
+        recover.target = self
+        menu.addItem(recover)
+        menu.addItem(.separator())
+
+        let scan = NSMenuItem(title: "Find New Words…", action: #selector(scanVocabulary), keyEquivalent: "")
+        scan.target = self
+        menu.addItem(scan)
+
         let vocab = NSMenuItem(title: "Edit Vocabulary…", action: #selector(editVocabulary), keyEquivalent: "")
         vocab.target = self
         menu.addItem(vocab)
@@ -199,6 +217,58 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openDashboard() {
         if dashboard == nil { dashboard = DashboardWindowController() }
         dashboard?.present()
+    }
+
+    /// Puts the last thing you dictated back on the clipboard.
+    ///
+    /// Reads history rather than caching a copy in memory, so it still works
+    /// after the dictation that produced it has been forgotten by everything
+    /// else, and so it survives the app being busy with the next one.
+    @objc private func copyLastDictation() {
+        guard let last = HistoryStore().all.first else {
+            NSSound.beep()
+            return
+        }
+        let text = last.insertedText.isEmpty ? last.rawText : last.insertedText
+        guard !text.isEmpty else { NSSound.beep(); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// Offers the proper nouns found on this Mac, and adds only what is accepted.
+    ///
+    /// Shown rather than applied. A dictionary that grows by itself is one that
+    /// starts rewriting speech into words the user never chose, and the terms in
+    /// it are precisely the ones the corrector is allowed to substitute — so the
+    /// list has to be seen before it takes effect. The source of each word is
+    /// named for the same reason: a suggestion that cannot be judged can only be
+    /// accepted on faith.
+    @objc private func scanVocabulary() {
+        let found = VocabularyHarvest.suggestions()
+        let alert = NSAlert()
+        guard !found.isEmpty else {
+            alert.messageText = "No new words found"
+            alert.informativeText = """
+                Quill looked at your project folders and package names and found                 nothing that is not already in your dictionary.
+                """
+            alert.runModal()
+            return
+        }
+
+        let shown = found.prefix(40)
+        alert.messageText = "Found \(found.count) word\(found.count == 1 ? "" : "s") on this Mac"
+        alert.informativeText = """
+            These came from folder and package names — the words a recogniser has             never seen and mangles every time. Nothing has been added yet.
+
+            """ + shown.map { "  \($0.term)   ·   \($0.source)" }.joined(separator: "\n")
+            + (found.count > shown.count ? "\n  …and \(found.count - shown.count) more" : "")
+        alert.addButton(withTitle: "Add \(found.count)")
+        alert.addButton(withTitle: "Not now")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        var vocabulary = Vocabulary.load()
+        vocabulary.terms.append(contentsOf: found.map(\.term))
+        vocabulary.save()
     }
 
     @objc private func editVocabulary() {

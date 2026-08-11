@@ -38,6 +38,14 @@ public final class DictationCoordinator {
     /// dictation and thrown away if it does not.
     private var isSpeculating = false
     private var capturedInputDevice: String?
+    /// Where the words are going, decided at key-down.
+    ///
+    /// Captured with the focus rather than read at insertion time, for the same
+    /// reason the live typer captures its target then: the app you were in when
+    /// you started speaking is the one you meant, and formatting decided against
+    /// whatever happens to be frontmost a second later would be formatting for an
+    /// app the user never chose.
+    private var capturedContext: AppContext = .prose
     /// Guards against a late result from a previous dictation landing in this
     /// one — it would paste stale text into whatever you are now typing in.
     private var sessionID = 0
@@ -160,6 +168,7 @@ public final class DictationCoordinator {
         // Decided here, once, rather than per partial: the focused app is
         // whatever the user was in when they pressed the key, and it is the only
         // window it is ever safe to type into during this dictation.
+        capturedContext = AppContext.current()
         isLive = settings.liveText && liveTyper.begin()
         overlay.show(.listening(level: 0))
     }
@@ -178,13 +187,45 @@ public final class DictationCoordinator {
         Task { [transcriber, cleaner, inserter, overlay, history, snippets, cleanupDeadline] in
             let raw = await transcriber.stop()
             guard session == self.sessionID else {
-                // A newer gesture started while this one was still finalising, so
-                // its text is being dropped on the floor — no insertion, and no
-                // history row either. Whether that is the right call is a separate
-                // question; the point of this line is that it used to happen in
-                // complete silence.
-                NSLog("[quill] DROPPED a finished transcript: session %d superseded by %d (%d chars)",
-                      session, self.sessionID, raw.count)
+                // A newer gesture started while this one was finalising.
+                //
+                // Not inserting is right: pasting a sentence from thirty seconds
+                // ago into whatever the user is typing in NOW is the failure this
+                // fence exists to prevent. Throwing the sentence away is not — it
+                // was said, it was transcribed, and it used to vanish with no
+                // insertion, no clipboard and no history row, surviving only in a
+                // log line nobody reads.
+                //
+                // The window is not narrow either. When nothing has been
+                // recognised yet, stop() holds the microphone for the short-
+                // utterance grace, then waits on the drain, then on a bounded
+                // cancel — several seconds during which any press of the trigger
+                // supersedes this session.
+                //
+                // So it goes to history and to the clipboard, and the user is
+                // told where to find it. Losing words is the one thing this app
+                // may never do.
+                let rescued = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !rescued.isEmpty {
+                    let cleaned = cleaner.cleanFast(rescued)
+                    history.append(DictationRecord(
+                        id: UUID(), date: Date(), rawText: rescued, insertedText: "",
+                        wordCount: cleaned.split(separator: " ").count,
+                        inputDevice: self.capturedInputDevice,
+                        timings: .init(timeToFirstWordMs: self.timeline.timeToFirstWordMs,
+                                       finalToInsertedMs: nil,
+                                       endToEndMs: self.timeline.endToEndMs,
+                                       audioDurationMs: self.timeline.audioDurationMs,
+                                       usedThoroughCleanup: false,
+                                       releaseToInsertedMs: nil)))
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(cleaned, forType: .string)
+                    overlay.show(.error("You started again before that finished — it is on your clipboard."))
+                    try? await Task.sleep(for: .milliseconds(1_800))
+                }
+                // Repaint regardless. An aborted speculation leaves nothing else
+                // to clear the HUD, and it would sit on "Transcribing" forever.
+                if !self.isDictating { overlay.hide() }
                 return
             }
 
@@ -247,6 +288,12 @@ public final class DictationCoordinator {
             // matched, which is the overwhelmingly common case.
             final = snippets.expand(final)
 
+            // Last, because it is the only step that knows where the text is
+            // going. A shell command does not want the full stop the cleanup just
+            // added, and deleting it by hand every time is the kind of small tax
+            // that quietly ends the habit of dictating at all.
+            final = AppContextFormatter.apply(final, context: self.capturedContext)
+
             // Two ways in, and the difference is whether the text is already
             // there. Live typing has been writing this sentence since the first
             // partial, so finishing it means reconciling the last edit — usually
@@ -300,7 +347,7 @@ public final class DictationCoordinator {
         }
     }
 
-    private func cancelDictation() {
+    private func cancelDictation(userTypedACharacter: Bool = false) {
         // `isSpeculating` too, and this is not defensive tidying — it was a
         // permanent deadlock.
         //
@@ -319,7 +366,10 @@ public final class DictationCoordinator {
         sessionID += 1
         // Escape means "pretend this never happened", and with live typing on,
         // part of it already did. Take every character back before anything else.
-        if isLive { liveTyper.retract() }
+        // The cancelling keystroke, if it reached the app, is sitting at the end
+        // of the text we are about to take back. Deleting our own character count
+        // would eat it and leave one of ours in its place.
+        if isLive { liveTyper.retract(extraCharactersToLeave: userTypedACharacter ? 1 : 0) }
         isLive = false
         Task { [transcriber, overlay] in
             await transcriber.cancel()
@@ -407,7 +457,9 @@ extension DictationCoordinator: HotkeyEngineDelegate {
     public func hotkeyAborted() { abandonSpeculation() }
     public func hotkeyPressed() { beginDictation() }
     public func hotkeyReleased() { endDictation() }
-    public func hotkeyCancelled() { cancelDictation() }
+    public func hotkeyCancelled(userKeystrokeReachedApp: Bool) {
+        cancelDictation(userTypedACharacter: userKeystrokeReachedApp)
+    }
     public func hotkeyEngineUnavailable(reason: String) {
         overlay.show(.error(reason))
     }
@@ -427,7 +479,11 @@ extension DictationCoordinator: TranscriberDelegate {
         // moment the user is waiting for it to finish. Running the deterministic
         // pass on every partial costs microseconds and makes the closing edit
         // almost always empty.
-        liveTyper.update(to: cleaner.cleanFast(transcript.text))
+        // Formatted for the destination here too, not only at the end. The live
+        // stream and the final text have to agree, or the last edit becomes a
+        // visible flicker as a capital letter or a full stop is taken back.
+        liveTyper.update(to: AppContextFormatter.apply(cleaner.cleanFast(transcript.text),
+                                                       context: capturedContext))
     }
 
     public func transcriber(didFail error: Error) {

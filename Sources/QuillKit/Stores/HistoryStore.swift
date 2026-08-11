@@ -83,14 +83,40 @@ public final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// Set when the file exists but could not be read. While it is true nothing
+    /// is written, because the alternative is writing an empty array over data
+    /// that is probably still recoverable.
+    private var loadFailed = false
+
     private func load() {
         guard let data = try? Data(contentsOf: url) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        records = (try? decoder.decode([DictationRecord].self, from: data)) ?? []
+        if let decoded = try? decoder.decode([DictationRecord].self, from: data) {
+            records = decoded
+            loadFailed = false
+            return
+        }
+        // A file that will not decode is NOT an empty history.
+        //
+        // It used to be treated as one, and the next dictation atomically wrote
+        // an empty array over the top — every dictation ever recorded, gone, in
+        // response to a single unreadable byte. One partial write during a crash,
+        // one field this build does not understand, and the whole file is
+        // replaced with `[]`.
+        //
+        // So: refuse to write, keep a copy of what could not be read, and say so.
+        // The user's data outranks the app's convenience every time.
+        loadFailed = true
+        let salvage = url.appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970))")
+        try? data.write(to: salvage, options: .atomic)
+        NSLog("[quill] history.json could not be decoded — refusing to overwrite it. Copy at %@",
+              salvage.lastPathComponent)
     }
 
     private func persist() {
+        // Never overwrite a file we failed to read. See load().
+        guard !loadFailed else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

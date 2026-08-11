@@ -94,6 +94,14 @@ public final class TextInserter: TextInserting {
         guard let ourChangeCount = PasteboardSnapshot.write(text, to: pasteboard, transient: true) else {
             // Another process is holding the pasteboard. Typing needs no
             // clipboard at all, so it is the one route still open.
+            //
+            // But `write` declares its types before it discovers it cannot write,
+            // and declaring clears the board — so by the time it reports failure
+            // the user's clipboard is already gone. Put it back before walking
+            // away. Losing someone's clipboard as a side effect of a dictation
+            // that then took a different route is a bad trade for them and an
+            // invisible one for us.
+            previous.restore(to: pasteboard)
             return insertByTyping(text)
         }
 

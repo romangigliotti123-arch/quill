@@ -59,7 +59,7 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
     /// take 4s and a user's next keypress will not wait. So ownership is tracked
     /// instead: a stop only tears down the audio if it still owns it.
     private var audioOwner = 0
-    private var stopInFlight: Task<String, Never>?
+    private var stopInFlight: (sessionID: Int?, task: Task<String, Never>)?
 
     /// How long to keep the microphone open past the key release when the
     /// recogniser has not committed to a single word yet.
@@ -225,21 +225,51 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
     }
 
     public func stop() async -> String {
-        // Reentrancy: two stops for the same dictation must not both tear down.
-        if let pending = withLock({ stopInFlight }) { return await pending.value }
+        // Reentrancy, keyed to the session rather than to the transcriber.
+        //
+        // Sharing one in-flight stop across dictations is the same bug as
+        // returning `lastFinalText`, arrived at from the other direction: a
+        // second dictation's stop() would join the first one's task, receive the
+        // FIRST utterance's text, and never finalise its own session — so the
+        // second dictation's words are both wrong on screen and lost. The point
+        // of this guard is only ever "two stops for the SAME dictation must not
+        // both tear it down".
+        let currentSession = withLock { session?.id }
+        if let pending = withLock({ stopInFlight }), pending.sessionID == currentSession {
+            return await pending.task.value
+        }
         let task = Task<String, Never> { [weak self] in
             guard let self else { return "" }
             return await self.performStop()
         }
-        withLock { stopInFlight = task }
+        withLock { stopInFlight = (sessionID: currentSession, task: task) }
         let result = await task.value
-        withLock { stopInFlight = nil }
+        withLock { if stopInFlight?.task == task { stopInFlight = nil } }
         return result
     }
 
     private func performStop() async -> String {
         let live: Session? = withLock { session }
-        guard let session = live else { return withLock { lastFinalText } }
+        guard let session = live else {
+            // Empty, never `lastFinalText`.
+            //
+            // This used to return the PREVIOUS dictation's transcript, and the
+            // coordinator has no way to tell that apart from a real one: it is a
+            // non-empty string, so it sails past the empty guard, gets cleaned,
+            // and is pasted into whatever the user is typing in now — a sentence
+            // they said a minute ago, appearing as though they had just said it,
+            // with a history row to match. What they actually said is never
+            // recorded at all.
+            //
+            // Reachable whenever a dictation ends before its session exists: the
+            // key released during model warm-up, or during the rewarm that
+            // follows every successful dictation. Two quick dictations in a row
+            // is enough.
+            //
+            // Returning nothing is honest — the coordinator then shows "Nothing
+            // was heard", which is exactly what happened.
+            return ""
+        }
 
         // Keep listening a moment longer when nothing has been recognised yet.
         //

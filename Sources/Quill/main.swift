@@ -20,6 +20,23 @@ if let raw = ProcessInfo.processInfo.environment["QUILL_CLEAN_TEXT"] {
     exit(0)
 }
 
+// QUILL_CLEAN_FILE=/path runs the deterministic cleanup over every line and
+// prints the result, one line in, one line out.
+//
+// This is what makes the vocabulary work measurable. Word error rate is scored
+// on raw recogniser output, so the corrector's effect is invisible to the rig —
+// and the only honest way to tune a repair pass is to run it over the transcripts
+// it will actually see and count what it fixed against what it broke. Fifty real
+// transcripts, in under a second, instead of a 25-minute run of the whole rig.
+if let path = ProcessInfo.processInfo.environment["QUILL_CLEAN_FILE"] {
+    let cleaner = FastCleaner()
+    let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        print(cleaner.cleanFast(String(line)))
+    }
+    exit(0)
+}
+
 // Transcription harness: QUILL_TRANSCRIBE_FILE=/path/to.wav runs the real
 // transcription path against a file and prints what it measured. Needs no
 // microphone and no TCC grant, which is what makes "the engine works, and here
