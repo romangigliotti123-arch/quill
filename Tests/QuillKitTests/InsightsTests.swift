@@ -324,3 +324,33 @@ private final class InsightsOnlyProvider: DashboardSectionProvider {
         return InsightsView(records: InsightsFixture.sample, vocabulary: .seed, isSample: true, style: style)
     }
 }
+
+@Test func theStreakDenominatorCountsOnlyDaysSinceTheFirstDictation() {
+    // It used to be the whole heatmap window. On a fresh install that read
+    // "3 days you dictated on, out of 308" — counting 305 days before Quill
+    // existed as days the user failed to use it. Arithmetically true, and it
+    // tells the reader something false about themselves, on a screen whose only
+    // job is to be trusted with numbers.
+    let now = Date()
+    let day: TimeInterval = 86_400
+    let records = (0 ..< 3).map { offset in
+        DictationRecord(id: UUID(), date: now.addingTimeInterval(-Double(offset) * day),
+                        rawText: "a b c", insertedText: "A b c.", wordCount: 3,
+                        inputDevice: "test",
+                        timings: .init(timeToFirstWordMs: 200, finalToInsertedMs: 10,
+                                       endToEndMs: 900, audioDurationMs: 1200,
+                                       usedThoroughCleanup: false, releaseToInsertedMs: 30))
+    }
+    let metrics = InsightsMetrics.compute(records: records, vocabulary: Vocabulary(terms: []),
+                                          range: .all, now: now)
+
+    // Three calendar days of history, possibly four squares if "now" is early in
+    // the day and the heat window ends on a week boundary.
+    #expect((3 ... 4).contains(metrics.observedDays),
+            "denominator was \(metrics.observedDays) for three days of history")
+    #expect(metrics.activeDays <= metrics.observedDays,
+            "more active days than days observed")
+    #expect(metrics.heat.count > metrics.observedDays,
+            "the heatmap should still draw its full window — only the ratio is scoped")
+    #expect(metrics.firstRecord != nil)
+}

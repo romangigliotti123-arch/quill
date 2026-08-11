@@ -473,16 +473,31 @@ public final class TransformStore: @unchecked Sendable {
         }
     }
 
+    /// Saves an edit without touching the usage statistics.
+    ///
+    /// The editor holds the transform as it was when it opened. If the transform
+    /// fires while that editor is on screen — which is the normal case, since the
+    /// reason to open it is usually that the last run came out wrong — then
+    /// `recordUse` bumps the counter and the next Save writes the stale snapshot
+    /// straight back over it. The count silently rolls backwards, the "most used
+    /// first" ordering shuffles, and there is nothing on screen to explain it.
+    ///
+    /// `useCount` and `lastUsed` belong to the run path. An edit is not a use, so
+    /// an edit does not get to decide what they are.
     @discardableResult
     public func upsert(_ transform: Transform) -> Transform {
         queue.sync {
             if let index = items.firstIndex(where: { $0.id == transform.id }) {
-                items[index] = transform
+                var merged = transform
+                merged.useCount = max(items[index].useCount, transform.useCount)
+                merged.lastUsed = [items[index].lastUsed, transform.lastUsed]
+                    .compactMap { $0 }.max()
+                items[index] = merged
             } else {
                 items.append(transform)
             }
             persist()
-            return transform
+            return items.first { $0.id == transform.id } ?? transform
         }
     }
 

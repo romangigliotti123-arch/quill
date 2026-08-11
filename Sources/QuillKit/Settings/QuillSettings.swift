@@ -15,8 +15,23 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
 
     public static let shared = QuillSettings()
 
+    /// Overridable, because a measurement run has no business editing the
+    /// settings of the person it is measuring.
+    ///
+    /// The eval rig needs a specific microphone and specific key bindings, and
+    /// the only way to give it those was to write the real settings file and put
+    /// it back afterwards. It was put back by hand, which means once it was not:
+    /// Roman's chosen microphone was erased and "show text as you speak" — the
+    /// feature he had asked for that morning — came back off, with nothing to
+    /// indicate either had happened. A run that mutates the user's configuration
+    /// is one interrupted run away from losing it.
+    ///
+    /// `QUILL_SETTINGS_FILE` points the whole app at a scratch file instead.
     public static let defaultURL: URL = {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if let override = ProcessInfo.processInfo.environment["QUILL_SETTINGS_FILE"], !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Quill/settings.json")
     }()
 

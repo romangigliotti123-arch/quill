@@ -127,6 +127,16 @@ public struct InsightsMetrics: Sendable {
     public let longestStreak: Int
     public let busiestDay: Day?
     public let activeDays: Int
+    /// Days the user has actually had Quill, not days the heatmap happens to draw.
+    ///
+    /// The denominator used to be the whole heatmap window — ten months of
+    /// squares — so a new install read "3 days you dictated on, out of 308",
+    /// counting 305 days before the app existed as days he failed to use it. The
+    /// number was arithmetically true and told the reader something false.
+    public let observedDays: Int
+    /// The date of the earliest dictation, for the card's "since" line. Also not
+    /// the start of the drawing window.
+    public let firstRecord: Date?
 
     public var totalFixes: Int { wordsCorrected + dictionaryFixes }
 
@@ -202,6 +212,21 @@ public struct InsightsMetrics: Sendable {
         let heat = densify(records: records, days: heatDays, endingAt: heatEnd, calendar: cal)
         let streaks = streakLengths(heat, now: now, calendar: cal)
 
+        // Only the days since the first dictation count against him.
+        let firstRecord = records.map(\.date).min()
+        let observed: Int
+        if let firstRecord {
+            // Bounded at both ends. The heatmap runs to the end of the current
+            // week so the grid is square, which meant the denominator also swept
+            // up the days between today and Saturday — days that have not happened
+            // yet, counted as days he did not dictate.
+            let from = cal.startOfDay(for: firstRecord)
+            let today = cal.startOfDay(for: now)
+            observed = max(1, heat.filter { $0.date >= from && $0.date <= today }.count)
+        } else {
+            observed = 0
+        }
+
         return InsightsMetrics(
             range: range,
             generatedAt: now,
@@ -232,7 +257,9 @@ public struct InsightsMetrics: Sendable {
             currentStreak: streaks.current,
             longestStreak: streaks.longest,
             busiestDay: heat.max(by: { $0.words < $1.words }).flatMap { $0.words > 0 ? $0 : nil },
-            activeDays: heat.filter { $0.sessions > 0 }.count
+            activeDays: heat.filter { $0.sessions > 0 }.count,
+            observedDays: observed,
+            firstRecord: firstRecord
         )
     }
 

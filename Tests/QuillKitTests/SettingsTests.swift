@@ -160,3 +160,26 @@ func pasteOnlySettings() -> QuillSettings {
     settings.setLiveText(false)
     return settings
 }
+
+@Test func aRunCanBePointedAtItsOwnSettingsFile() {
+    // The eval rig needs a specific microphone and specific bindings, and the
+    // only way to give it those was to overwrite the real settings file and
+    // restore it afterwards by hand. Which means that once, it was not restored:
+    // Roman's microphone choice was erased and "show text as you speak" came back
+    // off, silently, hours after he had asked for it.
+    let scratch = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-settings-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: scratch) }
+
+    let settings = QuillSettings(url: scratch)
+    settings.setLiveText(false)
+    settings.setInputDeviceUID("ScratchMic")
+
+    #expect(FileManager.default.fileExists(atPath: scratch.path))
+    let reloaded = QuillSettings(url: scratch)
+    #expect(reloaded.liveText == false)
+    #expect(reloaded.inputDeviceUID == "ScratchMic")
+    // The real file is untouched: a fresh store on the default path does not see
+    // anything this test did.
+    #expect(QuillSettings.defaultURL.path != scratch.path)
+}

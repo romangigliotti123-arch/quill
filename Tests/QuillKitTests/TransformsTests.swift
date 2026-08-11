@@ -321,3 +321,32 @@ private let shorterBounds = LengthBounds(minRatio: 0.15, maxRatio: 1.0, slack: 8
     #expect(TransformHotkey(keyCode: 11, modifiers: [.maskCommand, .maskShift])?.displayName == "⇧⌘B")
     #expect(TransformHotkey(keyCode: 9, modifiers: [.maskControl, .maskAlternate])?.displayName == "⌃⌥V")
 }
+
+@Test func savinganEditNeverRollsBackTheUseCount() {
+    // The editor holds the transform as it was when it opened, and the usual
+    // reason to open it is that the last run came out wrong — so the transform
+    // firing while the editor is on screen is the normal case, not the rare one.
+    // Save then wrote that stale snapshot back over the bumped counter: the count
+    // went backwards, the "most used first" ordering reshuffled, and nothing on
+    // screen explained why.
+    let original = Transform(name: "Bullets", instruction: "Rewrite as bullets",
+                             triggers: ["make it bullets"], keywords: ["bullet"])
+    let store = TransformStore(inMemory: [original])
+
+    // The editor opens and takes its copy.
+    let editorCopy = store.transform(id: original.id)!
+    // The transform fires twice while it is open.
+    store.recordUse(original.id)
+    store.recordUse(original.id)
+    #expect(store.transform(id: original.id)?.useCount == 2)
+
+    // The user renames it and saves.
+    var edited = editorCopy
+    edited.name = "Bullet points"
+    store.upsert(edited)
+
+    let saved = store.transform(id: original.id)
+    #expect(saved?.name == "Bullet points", "the edit was lost")
+    #expect(saved?.useCount == 2, "the use count rolled back to \(saved?.useCount ?? -1)")
+    #expect(saved?.lastUsed != nil, "the last-used date was erased by an edit")
+}

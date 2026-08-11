@@ -1088,7 +1088,8 @@ public final class InsightsStreakCard: NSView {
     }
 
     public func configure(metrics m: InsightsMetrics) {
-        let start = m.heat.first?.date
+        // The first dictation, not the first square drawn.
+        let start = m.firstRecord ?? m.heat.first?.date
         header.configure(
             title: m.currentStreak > 0 ? "\(m.currentStreak) day streak" : "Every day you dictated",
             // "All time" is stated explicitly because the range control at the top
@@ -1104,7 +1105,7 @@ public final class InsightsStreakCard: NSView {
             InsightsStatLine(value: "\(m.longestStreak)", unit: "days",
                              caption: "longest run without missing one", style: style),
             InsightsStatLine(value: "\(m.activeDays)", unit: "days",
-                             caption: "you dictated on, out of \(m.heat.count)", style: style),
+                             caption: "you dictated on, out of \(m.observedDays)", style: style),
         ]
         if let busiest = m.busiestDay {
             lines.append(InsightsStatLine(value: InsightsFormat.count(busiest.words), unit: "words",
