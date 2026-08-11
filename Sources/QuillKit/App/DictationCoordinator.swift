@@ -48,6 +48,16 @@ public final class DictationCoordinator {
     /// whatever happens to be frontmost a second later would be formatting for an
     /// app the user never chose.
     private var capturedContext: AppContext = .prose
+    /// How the destination is decided, injected so it can be pinned.
+    ///
+    /// `AppContext.current()` reads the frontmost application — process-wide
+    /// state that a unit test does not own. Three tests of the dictation path
+    /// started passing or failing depending on which window happened to be
+    /// focused on the machine running them: focused on a terminal, the formatter
+    /// correctly lower-cased the first letter and stripped the trailing full
+    /// stop, and the assertions were written against prose. A test whose result
+    /// depends on where the mouse was last clicked is not a test.
+    private let context: @MainActor () -> AppContext
     /// Guards against a late result from a previous dictation landing in this
     /// one — it would paste stale text into whatever you are now typing in.
     private var sessionID = 0
@@ -61,8 +71,10 @@ public final class DictationCoordinator {
         history: HistoryStore = HistoryStore(),
         snippets: SnippetStore = .shared,
         settings: QuillSettings = .shared,
-        liveTyper: LiveTyper = LiveTyper()
+        liveTyper: LiveTyper = LiveTyper(),
+        context: @escaping @MainActor () -> AppContext = { AppContext.current() }
     ) {
+        self.context = context
         self.settings = settings
         self.liveTyper = liveTyper
         self.hotkey = hotkey
@@ -186,7 +198,7 @@ public final class DictationCoordinator {
         // Decided here, once, rather than per partial: the focused app is
         // whatever the user was in when they pressed the key, and it is the only
         // window it is ever safe to type into during this dictation.
-        capturedContext = AppContext.current()
+        capturedContext = context()
         isLive = settings.liveText && liveTyper.begin()
         overlay.show(.listening(level: 0))
     }

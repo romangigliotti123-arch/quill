@@ -309,7 +309,8 @@ private func snippet(_ phrase: String,
         history: HistoryStore(url: historyURL),
         snippets: snippets,
         settings: pasteOnlySettings(),
-        liveTyper: LiveTyper(keyboard: SilentKeystrokes()))
+        liveTyper: LiveTyper(keyboard: SilentKeystrokes()),
+        context: { .prose })
 
     coordinator.hotkeyMayBegin()
     coordinator.hotkeyPressed()

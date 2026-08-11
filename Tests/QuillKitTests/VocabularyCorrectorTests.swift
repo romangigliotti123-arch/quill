@@ -106,3 +106,56 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
     #expect(FastCleaner().cleanFast("Whisperflow stores every transcript in a local database")
               .contains("Wispr Flow"))
 }
+
+// MARK: - The corrector must not rewrite sentences into brand names
+
+@Test func anOrdinaryEnglishPhraseIsNeverRewrittenIntoATerm() {
+    // Both of these shipped, in the DEFAULT seed vocabulary, and both were found
+    // by running the real corrector rather than reading it.
+    //
+    // "Builda Bed" normalises to "buildabed" and so does "build a bed", and the
+    // exact-match branch returned before any guard ran. "Roman design cost"
+    // scores 0.867 against "Roman Design Co", cleared the 0.85 multi-word bar,
+    // and DELETED the verb — the single-word route has refused real English
+    // since the start, and the multi-word route had no such check at all, which
+    // is the half where words go missing rather than merely changing spelling.
+    let corrector = VocabularyCorrector(vocabulary: .seed)
+    for sentence in [
+        "I need to build a bed for the spare room",
+        "he asked me to build a bed and I did",
+        "we build a bed every week",
+        "the Roman design cost a lot more than I thought",
+        "we know the Roman design cost too much",
+    ] {
+        #expect(corrector.correct(sentence) == sentence,
+                "rewrote ordinary English: \(corrector.correct(sentence))")
+    }
+}
+
+@Test func everyRepairMeasuredOnHisVoiceStillFires() {
+    // The guards above are worth nothing if they close the door on the repairs
+    // the pass exists for. Each of these is a measured failure from Roman's own
+    // corpus, and each must survive.
+    let corrector = VocabularyCorrector(vocabulary: .seed)
+    #expect(corrector.correct("push it to Netterfly tonight").contains("Netlify"))
+    #expect(corrector.correct("the grapify workspace is fine").contains("graphify"))
+    #expect(corrector.correct("run graph if I over the folder").contains("graphify"))
+    #expect(corrector.correct("the block craft replica").contains("blockcraft"))
+    #expect(corrector.correct("the fire store rules are open").contains("Firestore"))
+    #expect(corrector.correct("send it to Noah Kess").contains("Noah Kass"))
+    #expect(corrector.correct("until Craig Eburn is done").contains("Craigieburn"))
+    // A single span word is the recogniser GLUING a name together, which is the
+    // same failure as splitting one and has to stay reachable.
+    #expect(corrector.correct("Whisperflow stores every transcript").contains("Wispr Flow"))
+}
+
+@Test func aMultiWordTermNeedsAMatchingNumberOfSpokenWords() {
+    // "Builda Bed" is two words. A three-word span collapsing into it is a
+    // sentence, not a mis-heard name. Single-word terms stay exempt, because a
+    // name arriving as several words is the whole reason this pass exists.
+    #expect(VocabularyCorrector.spanCanBe("Builda Bed", spanCount: 3) == false)
+    #expect(VocabularyCorrector.spanCanBe("Builda Bed", spanCount: 2))
+    #expect(VocabularyCorrector.spanCanBe("Builda Bed", spanCount: 1))
+    #expect(VocabularyCorrector.spanCanBe("graphify", spanCount: 3))
+    #expect(VocabularyCorrector.spanCanBe("Firestore", spanCount: 2))
+}

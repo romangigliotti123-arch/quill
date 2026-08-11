@@ -131,7 +131,18 @@ public struct VocabularyCorrector: Sendable {
             guard ratio >= threshold - 0.15 else { continue }
 
             if normalised == target {
-                // Already right apart from casing — fix the casing only.
+                // An exact letter match is normally the strongest evidence there
+                // is — "fire store" IS "Firestore". But it used to return here
+                // before any guard ran, and the letters of a name are not unique
+                // to that name. "Builda Bed" normalises to "buildabed" and so
+                // does "build a bed", so the shipping seed list turned
+                //
+                //     "I need to build a bed for the spare room"
+                //
+                // into "I need to Builda Bed for the spare room" — a sentence of
+                // ordinary English, rewritten into a brand, with every guard the
+                // corrector owns sitting downstream of the return that did it.
+                guard Self.spanCanBe(term, spanCount: spanCount) else { continue }
                 return candidate == term ? nil : term
             }
             // Letters first, then sound.
@@ -147,7 +158,22 @@ public struct VocabularyCorrector: Sendable {
             // and assembled the wrong letters out of them, so the comparison that
             // matches its failure mode is the one done on sound.
             let score = Self.similarity(normalised, target)
-            if score >= threshold, score > (best?.score ?? 0) {
+            guard Self.spanCanBe(term, spanCount: spanCount) else { continue }
+            // A span of entirely ordinary English matched against a multi-word
+            // term has to be near-exact, not merely close.
+            //
+            // "Roman design cost" scores 0.867 against "Roman Design Co" and
+            // cleared the 0.85 bar, so "the Roman design cost a lot more than I
+            // thought" became "the Roman Design Co a lot more than I thought" —
+            // the verb deleted, mid-sentence, silently. Every word in that span
+            // is a word he meant. The single-word route has refused real English
+            // since the start (below); the multi-word route had no such check at
+            // all, which is the harder half, because that is where words get
+            // deleted rather than merely respelled.
+            let ordinaryPhrase = spanCount > 1 && Self.wordCount(term) > 1
+                && Self.everyWordIsOrdinaryEnglish(candidate)
+            let bar = ordinaryPhrase ? Self.ordinaryPhraseThreshold : threshold
+            if score >= bar, score > (best?.score ?? 0) {
                 best = (term, score)
             } else if phoneticAllowed,
                       Self.phoneticSimilarity(normalised, target) >= Self.phoneticThreshold,
@@ -160,6 +186,34 @@ public struct VocabularyCorrector: Sendable {
         // A correctly spelled English word is presumed intentional.
         if spanCount == 1, Self.isRealEnglishWord(candidate) { return nil }
         return best.term
+    }
+
+    /// A multi-word term can only be spoken as that many words.
+    ///
+    /// "Builda Bed" is two words. A three-word span collapsing into it is not the
+    /// recogniser mis-hearing a name, it is a sentence. Single-word terms are
+    /// exempt, because a name arriving as several words is the exact failure this
+    /// whole pass exists for: "graphify" comes back as "graph if I", "Firestore"
+    /// as "fire store", "blockcraft" as "block craft".
+    static func spanCanBe(_ term: String, spanCount: Int) -> Bool {
+        let words = wordCount(term)
+        // A single-word span is the recogniser having GLUED the name together —
+        // "Wispr Flow" heard as "Whisperflow" — which is the same failure as
+        // splitting one, and must stay reachable.
+        return words <= 1 || spanCount == 1 || words == spanCount
+    }
+
+    static func wordCount(_ term: String) -> Int {
+        term.split(whereSeparator: { $0 == " " || $0 == "-" }).count
+    }
+
+    /// Near-exact, for spans where nothing looks misheard.
+    static let ordinaryPhraseThreshold = 0.95
+
+    static func everyWordIsOrdinaryEnglish(_ span: String) -> Bool {
+        let words = span.split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)
+        guard !words.isEmpty else { return false }
+        return words.allSatisfy { isRealEnglishWord($0) }
     }
 
     /// Words that can never be the first or last part of a name.

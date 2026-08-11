@@ -91,7 +91,10 @@ private func makeCoordinator(transcript: String) -> (DictationCoordinator, Recor
         history: HistoryStore(url: scratch.appendingPathComponent("history.json")),
         snippets: SnippetStore(inMemory: []),
         settings: pasteOnlySettings(),
-        liveTyper: LiveTyper(keyboard: SilentKeystrokes())
+        liveTyper: LiveTyper(keyboard: SilentKeystrokes()),
+        // Pinned. Reading the frontmost application would make this assertion
+        // depend on which window was focused on the machine running it.
+        context: { .prose }
     )
     return (coordinator, inserter, ai)
 }
