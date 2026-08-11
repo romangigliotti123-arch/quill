@@ -1,1 +1,0 @@
-/Users/romangigliotti/Library/Application Support/Quill/build/Quill.app

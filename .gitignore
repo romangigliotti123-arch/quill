@@ -6,5 +6,8 @@ rig/out/
 *.bin
 *.mlmodelc
 Quill.app
+# macOS hands out "Quill 2.app", "Quill 3.app" when the convenience symlink's
+# name is already taken, and those leaked into git status as untracked bundles.
+Quill?*.app
 diagnostics.txt
 .claude/worktrees/
