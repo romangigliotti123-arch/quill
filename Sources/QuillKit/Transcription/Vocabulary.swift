@@ -28,6 +28,11 @@ public struct Vocabulary: Codable, Sendable, Equatable {
         "Quill", "graphify", "Nebula", "Vesper", "blockcraft", "murmur",
         "Firestore", "Netlify", "Supabase", "SwiftUI", "SwiftPM", "Xcode",
         "TypeScript", "Playwright", "Obsidian", "Ghostty",
+        // Added after the voice corpus showed them failing in his own speech:
+        // "Wispr Flow" came back "Whisperflow" and "SQLite" came back "SQ light".
+        // Both are one edit from the term once spaces are dropped, so the
+        // corrector repairs them the moment it knows the words exist.
+        "Wispr Flow", "SQLite",
         // Business
         "nxt", "Next Fulfilment", "Roman Design Co", "Builda Bed",
         // Places and people

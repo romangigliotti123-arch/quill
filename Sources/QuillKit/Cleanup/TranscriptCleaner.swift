@@ -57,6 +57,8 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return text }
 
+        // Before anything that treats a full stop as a sentence boundary.
+        text = Self.joinSpokenDecimals(in: text)
         text = Self.applyCorrections(to: text)
         // Fuzzy pass second: the literal table above handles known phrasings
         // cheaply, this catches the ones where the recogniser split a word.
@@ -74,6 +76,54 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
     }
 
     // MARK: - Steps, each independently testable
+
+    /// Turns "one. 4 seconds" back into "1.4 seconds".
+    ///
+    /// The recogniser writes the spoken word "point" as a full stop. So "the page
+    /// loads in about one point four seconds" arrives as "one. 4 seconds", and
+    /// then sentence-casing sees a full stop and produces:
+    ///
+    ///     The page loads in about one. 4 Seconds on a cold cache.
+    ///
+    /// Two errors and a capital letter in the middle of a sentence, from one
+    /// spoken decimal. Measured on Roman's voice corpus it hit both clips that
+    /// contained a version number or a timing — and he says version numbers
+    /// constantly.
+    ///
+    /// Deliberately narrow. It only fires when the thing before the full stop is
+    /// a spelled-out number word, because that is what the recogniser actually
+    /// produces here, and because a DIGIT before a full stop is far more likely
+    /// to be a real sentence ending — "it shipped in 2020. 3 people worked on it"
+    /// must not become "2020.3". Whatever follows may itself be dotted, so
+    /// "one. 2.7" comes out "1.2.7" rather than "1.2" with an orphan.
+    static func joinSpokenDecimals(in text: String) -> String {
+        let pattern = "\\b(" + numberWords.keys.joined(separator: "|") + ")\\.\\s+(\\d+(?:\\.\\d+)*)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        else { return text }
+
+        var out = text
+        var searched = NSRange(out.startIndex..., in: out)
+        while let match = regex.firstMatch(in: out, range: searched),
+              let wordRange = Range(match.range(at: 1), in: out),
+              let digitsRange = Range(match.range(at: 2), in: out),
+              let whole = Range(match.range, in: out) {
+            guard let leading = numberWords[String(out[wordRange]).lowercased()] else { break }
+            let replacement = "\(leading).\(out[digitsRange])"
+            out.replaceSubrange(whole, with: replacement)
+            guard let resume = out.range(of: replacement)?.upperBound else { break }
+            searched = NSRange(resume ..< out.endIndex, in: out)
+        }
+        return out
+    }
+
+    /// Only the numbers anyone says before a decimal point. A version is "one
+    /// point two", a load time is "one point four" — nobody dictates "seventeen
+    /// point three" often enough to justify the extra surface for a wrong match.
+    static let numberWords: [String: String] = [
+        "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+        "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+        "ten": "10", "eleven": "11", "twelve": "12",
+    ]
 
     static func applyCorrections(to text: String) -> String {
         var out = text
@@ -110,6 +160,21 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         return out
     }
 
+    /// Sentence casing that knows a decimal point is not a full stop.
+    ///
+    /// Every full stop used to arm the next capital, and the "next capital" was
+    /// simply the next letter — however far away, and across any number of
+    /// digits. So a decimal armed it and the digits could not absorb it, and the
+    /// capital landed on the following word:
+    ///
+    ///     The page loads in about 1.4 Seconds on a cold cache.
+    ///     We cut version 2.0 Last night.
+    ///     It shipped in 2020. 3 People worked on it.
+    ///
+    /// Two rules fix all three. A full stop between two digits is a decimal and
+    /// ends nothing. And a pending capital expires when it meets a digit — after
+    /// a genuine sentence break the number itself opens the sentence, and a
+    /// number cannot be capitalised, so nothing further should be.
     static func capitaliseSentences(in text: String) -> String {
         var chars = Array(text)
         var capitaliseNext = true
@@ -118,8 +183,14 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
             if capitaliseNext, c.isLetter {
                 chars[i] = Character(c.uppercased())
                 capitaliseNext = false
+            } else if capitaliseNext, c.isNumber {
+                // The sentence has started; it just started with a number.
+                capitaliseNext = false
             } else if c == "." || c == "!" || c == "?" {
-                capitaliseNext = true
+                let previous = i > 0 ? chars[i - 1] : " "
+                let next = i + 1 < chars.count ? chars[i + 1] : " "
+                let isDecimalPoint = c == "." && previous.isNumber && next.isNumber
+                if !isDecimalPoint { capitaliseNext = true }
             }
         }
         return String(chars)
