@@ -331,6 +331,11 @@ public final class DashboardPlaceholderView: NSView {
 
 // MARK: - Window
 
+/// One mutable flag shared between an observer and the retry it can cancel.
+private final class ActivationRetry {
+    var value = false
+}
+
 /// The dashboard window.
 ///
 /// `LSUIElement` is true, which makes Quill an accessory app — and an accessory
@@ -389,23 +394,74 @@ public final class DashboardWindowController: NSWindowController, NSWindowDelega
 
     public func present() {
         guard let window else { return }
-        if DashboardWindowController.openWindows == 0 {
-            DashboardWindowController.savedMainMenu = NSApp.mainMenu
-            // A .regular app with no main menu shows an empty menu bar — worse
-            // than a Dock icon. Install one before the policy flip, not after.
-            NSApp.mainMenu = DashboardMainMenu.make()
-            NSApp.setActivationPolicy(.regular)
-        }
-        DashboardWindowController.openWindows += 1
 
-        NSApp.activate()
+        // Count windows, not calls.
+        //
+        // This incremented on every present() but only decremented in
+        // windowWillClose, so pressing the menu-bar item while the dashboard was
+        // already open pushed the count to two and closing it left one behind.
+        // The app then stayed .regular for the rest of the session: Dock icon
+        // that will not go away, and a full menu bar belonging to a window that
+        // no longer exists.
+        let wasAlreadyOpen = window.isVisible
+        if !wasAlreadyOpen {
+            if DashboardWindowController.openWindows == 0 {
+                DashboardWindowController.savedMainMenu = NSApp.mainMenu
+                // A .regular app with no main menu shows an empty menu bar —
+                // worse than a Dock icon. Install one before the policy flip.
+                NSApp.mainMenu = DashboardMainMenu.make()
+                NSApp.setActivationPolicy(.regular)
+            }
+            DashboardWindowController.openWindows += 1
+        }
+
+        // Activate ONCE.
+        //
+        // This used to activate immediately and then again on the next turn of
+        // the runloop, because a policy flip is asynchronous inside AppKit and an
+        // activation issued in the same turn is ignored. The second one fixed
+        // that and created something worse: it fires roughly a frame later, by
+        // which time the user may already have clicked another application — and
+        // it drags Quill back in front of whatever they just chose. Measured: open
+        // the dashboard, click another app 100ms later, and Quill is frontmost
+        // again. That is the window refusing to get out of the way.
+        //
+        // So it happens once, at the only moment it can work: deferred when the
+        // policy has just changed, immediate when it has not.
+        // Forceful, because an accessory app that has just become .regular is not
+        // allowed to activate politely: `NSApp.activate()` is refused and the
+        // window comes up behind whatever the user was typing in. This runs in
+        // direct response to them clicking Quill's menu-bar item, which is what
+        // the forceful variant is for.
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        // The policy change is asynchronous inside AppKit: on the first flip the
-        // activation lands before the app is regular, and the window comes up
-        // unfocused behind the previous app. Ordering front once more on the
-        // next turn of the runloop is the cheap, reliable fix.
-        DispatchQueue.main.async {
-            NSApp.activate()
+
+        // The very first flip to .regular is asynchronous inside AppKit, and even
+        // a forced activation issued in the same turn is dropped — measured, the
+        // window comes up behind the previous app every time. So there is one
+        // retry, and the retry is the part that used to be the bug: it fired
+        // unconditionally a frame or more later, by which time the user could
+        // already have clicked another application, and it hauled Quill back in
+        // front of what they had just chosen. Measured at a 100ms gap, Quill won.
+        //
+        // It now cancels itself the moment any other application becomes active.
+        // That is the difference between "the window failed to come forward" and
+        // "the user went somewhere else", which is the only thing the old code
+        // could not tell apart.
+        guard !wasAlreadyOpen, DashboardWindowController.openWindows == 1 else { return }
+        let cancelled = ActivationRetry()
+        let workspace = NSWorkspace.shared.notificationCenter
+        let me = ProcessInfo.processInfo.processIdentifier
+        let observer = workspace.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            if app?.processIdentifier != me { cancelled.value = true }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak window] in
+            workspace.removeObserver(observer)
+            guard let window, !cancelled.value, !window.isKeyWindow else { return }
+            NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
         }
     }
