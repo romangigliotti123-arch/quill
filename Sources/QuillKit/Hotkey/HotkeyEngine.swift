@@ -283,6 +283,15 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             if keyCode == hold.keyCode {
                 let isDown = flags.contains(hold.presenceMask)
                 let isolated = flags.intersection(HotkeyBinding.isolationMask) == hold.genericMask
+                // Logged before the machine sees it, because the interesting case
+                // produces no effects at all: a trigger pressed while any other
+                // modifier is down is treated as a chord and refused, and a
+                // refusal is indistinguishable from the key never arriving. That
+                // blind spot hid roughly a quarter of an eval run.
+                if Self.logsGestures {
+                    NSLog("[quill] trigger %@ isolated=%@ flags=%llx",
+                          isDown ? "DOWN" : "up", isolated ? "yes" : "NO", flags.rawValue)
+                }
                 apply(machine.handle(isDown ? .triggerDown(isolated: isolated) : .triggerUp,
                                      at: Self.now()))
             } else if keyCode == toggle.keyCode {

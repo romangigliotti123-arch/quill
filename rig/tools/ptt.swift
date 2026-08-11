@@ -259,6 +259,19 @@ case "down", "up":
         }
         postModifier(key, down: cmd == "down")
     }
+    // Do not exit the instant after posting.
+    //
+    // CGEvent.post hands the event to the window server and returns; delivery to
+    // other processes happens after. A process that exits immediately can have
+    // its event dropped in that window, and it fails silently — no error, no
+    // return value, the keystroke simply never happened.
+    //
+    // This was losing roughly a quarter of every eval run. The app would receive
+    // a key *release* with no matching press, produce no dictation, and the rig
+    // would report "Quill produced NO transcript" — a rig bug wearing an app
+    // bug's clothes, for most of a day. `ptt hold` never showed it because it
+    // sleeps between the press and the release, which is the whole difference.
+    Thread.sleep(forTimeInterval: 0.15)
 
 case "hold":
     requireAccessibility()
