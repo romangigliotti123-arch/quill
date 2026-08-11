@@ -104,4 +104,11 @@ public extension Notification.Name {
     /// to reload itself — a screen that only refreshes the part you touched is
     /// how you end up with two views disagreeing about the same data.
     static let quillDashboardNeedsReload = Notification.Name("com.romangigliotti.quill.dashboardNeedsReload")
+    /// A message for the one overlay the app owns, posted from a dashboard
+    /// section that has no reference to it. `object` is the String to show.
+    ///
+    /// A section that fails silently is worse than one that cannot act at all:
+    /// the user presses a button, nothing happens, and there is nothing on
+    /// screen to say whether it refused, is slow, or is broken.
+    static let quillOverlayMessage = Notification.Name("com.romangigliotti.quill.overlayMessage")
 }

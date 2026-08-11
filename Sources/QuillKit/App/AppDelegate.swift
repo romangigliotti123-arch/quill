@@ -17,11 +17,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image?.isTemplate = true
         statusItem = item
 
+        let overlay = OverlayController()
+        // Dashboard sections are built by a registry that has no reference to the
+        // overlay, so they say what happened through a notification rather than
+        // by failing quietly.
+        NotificationCenter.default.addObserver(
+            forName: .quillOverlayMessage, object: nil, queue: .main
+        ) { note in
+            guard let message = note.object as? String else { return }
+            MainActor.assumeIsolated {
+                overlay.show(.error(message))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { overlay.hide() }
+            }
+        }
+
         let coordinator = DictationCoordinator(
             hotkey: EventTapHotkeyEngine(),
             transcriber: SpeechAnalyzerTranscriber(),
             inserter: TextInserter(),
-            overlay: OverlayController(),
+            overlay: overlay,
             // NIMCleaner *contains* FastCleaner rather than replacing it: the fast
             // path is byte-identical and the thorough path adds spoken
             // self-correction. With no key and no network it degrades to the

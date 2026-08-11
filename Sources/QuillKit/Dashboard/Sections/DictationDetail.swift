@@ -277,20 +277,56 @@ public final class DictationDetailView: NSView {
 
     // MARK: - Actions
 
+    private static func say(_ message: String) {
+        NotificationCenter.default.post(name: .quillOverlayMessage, object: message)
+    }
+
+    /// What is on screen, or the raw transcript when nothing was inserted.
+    ///
+    /// A rescued dictation has an empty insertedText — the words exist, they just
+    /// never reached an application. Copy used to clear the clipboard and then
+    /// write that empty string, so pressing Copy on exactly the dictation most
+    /// worth rescuing destroyed whatever the user had on their clipboard and gave
+    /// them nothing in return.
+    private var copyableText: String {
+        record.insertedText.isEmpty ? record.rawText : record.insertedText
+    }
+
     private func copyToPasteboard() {
+        let text = copyableText
+        guard !text.isEmpty else {
+            Self.say("There is nothing in this dictation to copy.")
+            return
+        }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(record.insertedText, forType: .string)
+        pasteboard.setString(text, forType: .string)
     }
 
     /// Insertion targets whatever is frontmost, and while the dashboard is open
     /// that is the dashboard. Hiding first is not a flourish — without it the
     /// text lands in this window's search field.
     private func reinsert() {
-        let text = record.insertedText
+        let text = copyableText
+        guard !text.isEmpty else {
+            Self.say("There is nothing in this dictation to insert.")
+            return
+        }
         NSApp.hide(nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            _ = TextInserter().insert(text)
+            // The result was thrown away, so every failure TextInserter exists to
+            // report — no Accessibility grant, secure input, a fallback to the
+            // clipboard — arrived as nothing happening. The user hid their
+            // dashboard, watched no text appear, and had no way to tell a refusal
+            // from a slow paste.
+            switch TextInserter().insert(text) {
+            case .inserted:
+                break
+            case .fellBackToClipboard(let reason):
+                Self.say("Copied to the clipboard instead — \(reason)")
+            case .failed(let reason):
+                Self.say("Could not insert it — \(reason)")
+            }
         }
     }
 
