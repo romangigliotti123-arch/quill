@@ -208,3 +208,70 @@ private func scratchPasteboard() -> NSPasteboard {
     notes.upsert(Note(title: "first", body: "on a fresh install"))
     #expect(FileManager.default.fileExists(atPath: notesURL.path))
 }
+
+// MARK: - Restoring past a clipboard manager
+
+@Test func aClipboardManagerTouchingTheBoardDoesNotBlockTheRestore() {
+    // The guard was strict changeCount equality, and it fails on the most common
+    // setup there is. A clipboard manager polls the pasteboard and touches it —
+    // re-declaring types, adding its own, normalising contents — and every touch
+    // advances changeCount. Quill read that as "the user copied something new",
+    // declined to restore, and left the dictation on the clipboard.
+    //
+    // Measured on this Mac: after a dictation the clipboard held "Don't die." and
+    // what was there before it was gone. That would have happened on every single
+    // dictation, for anyone running a clipboard manager.
+    //
+    // The right question is about content, not the counter.
+    #expect(PasteboardSnapshot.restoreIsSafe(
+        ourChangeCount: 12, currentChangeCount: 13,
+        ourText: "the dictation", currentText: "the dictation"),
+        "refused to restore when the board still held exactly what Quill wrote")
+
+    // Unchanged counter is still the fast path and needs no text at all.
+    #expect(PasteboardSnapshot.restoreIsSafe(ourChangeCount: 12, currentChangeCount: 12))
+}
+
+@Test func somethingTheUserCopiedIsStillNeverOverwritten() {
+    // The whole reason the guard exists. If the board holds something else, the
+    // user put it there and it is not ours to destroy.
+    #expect(!PasteboardSnapshot.restoreIsSafe(
+        ourChangeCount: 12, currentChangeCount: 13,
+        ourText: "the dictation", currentText: "a bank password"))
+
+    // A board we cannot read as text is a state we cannot attribute, and the cost
+    // of guessing wrong is destroying what the user copied. Treated as unsafe.
+    #expect(!PasteboardSnapshot.restoreIsSafe(
+        ourChangeCount: 12, currentChangeCount: 13,
+        ourText: "the dictation", currentText: nil))
+    #expect(!PasteboardSnapshot.restoreIsSafe(
+        ourChangeCount: 12, currentChangeCount: 13))
+}
+
+@Test func theClipboardComesBackAfterAPasteWithAManagerRunning() {
+    // End to end against a real NSPasteboard, standing in for the manager by
+    // bumping the change count between Quill's write and its restore.
+    let board = NSPasteboard(name: NSPasteboard.Name("com.quill.test.\(UUID().uuidString)"))
+    board.clearContents()
+    board.setString("what Roman had copied", forType: .string)
+    let snapshot = PasteboardSnapshot.capture(from: board)
+    #expect(snapshot.isFaithful)
+
+    let ourCount = PasteboardSnapshot.write("the dictation", to: board, transient: true)
+    #expect(ourCount != nil)
+
+    // A clipboard manager reads it and re-declares the same content, moving the
+    // counter without the user having done anything.
+    board.declareTypes([.string], owner: nil)
+    board.setString("the dictation", forType: .string)
+    #expect(board.changeCount != ourCount)
+
+    if PasteboardSnapshot.restoreIsSafe(ourChangeCount: ourCount ?? -1,
+                                        currentChangeCount: board.changeCount,
+                                        ourText: "the dictation",
+                                        currentText: board.string(forType: .string)) {
+        snapshot.restore(to: board)
+    }
+    #expect(board.string(forType: .string) == "what Roman had copied",
+            "clipboard was left holding \(board.string(forType: .string) ?? "nothing")")
+}

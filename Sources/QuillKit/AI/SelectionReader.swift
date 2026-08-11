@@ -69,6 +69,11 @@ public enum SelectionOutcome: Sendable, Equatable {
 /// copies something else mid-poll — and none of them can be reproduced against a
 /// real pasteboard and a real focused app inside a test.
 @MainActor
+/// One string shared between the probe's read and its restore.
+final class CopiedText {
+    var value: String?
+}
+
 public struct ClipboardCopyProbe {
 
     public enum Outcome: Sendable, Equatable {
@@ -217,13 +222,25 @@ public final class SelectionReader: SelectionReading {
         }
 
         let board = pasteboard
+        // What ⌘C put on the board, remembered so the restore can tell "a
+        // clipboard manager touched this" from "the user copied something".
+        // Without it, anyone running a clipboard manager keeps the SELECTION on
+        // their clipboard and loses whatever was there — see
+        // PasteboardSnapshot.restoreIsSafe.
+        let copied = CopiedText()
         let probe = ClipboardCopyProbe(
             changeCount: { board.changeCount },
             copy: { SyntheticKeyboard.postChord(key: Self.keyC, flags: .maskCommand) },
-            readString: { board.string(forType: .string) },
+            readString: {
+                let value = board.string(forType: .string)
+                if let value { copied.value = value }
+                return value
+            },
             restore: { observed in
                 guard PasteboardSnapshot.restoreIsSafe(ourChangeCount: observed,
-                                                       currentChangeCount: board.changeCount)
+                                                       currentChangeCount: board.changeCount,
+                                                       ourText: copied.value,
+                                                       currentText: board.string(forType: .string))
                 else { return }
                 snapshot.restore(to: board)
             },

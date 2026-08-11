@@ -114,7 +114,7 @@ public final class TextInserter: TextInserting {
             )
         }
 
-        scheduleRestore(of: previous, ourChangeCount: ourChangeCount)
+        scheduleRestore(of: previous, ourChangeCount: ourChangeCount, ourText: text)
 
         // Optimistic, and openly so. CoreGraphics reports that the event was
         // posted, never that the focused app consumed it. Confirming would mean
@@ -149,7 +149,9 @@ public final class TextInserter: TextInserting {
 
     // MARK: - Restore
 
-    private func scheduleRestore(of snapshot: PasteboardSnapshot, ourChangeCount: Int) {
+    private func scheduleRestore(of snapshot: PasteboardSnapshot,
+                                 ourChangeCount: Int,
+                                 ourText: String) {
         let board = pasteboard
         DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
             // Honest about the race, because it cannot be closed: no app tells you
@@ -164,7 +166,9 @@ public final class TextInserter: TextInserting {
             // the failure somewhere harder to reproduce.
             guard PasteboardSnapshot.restoreIsSafe(
                 ourChangeCount: ourChangeCount,
-                currentChangeCount: board.changeCount
+                currentChangeCount: board.changeCount,
+                ourText: ourText,
+                currentText: board.string(forType: .string)
             ) else { return }
             snapshot.restore(to: board)
         }

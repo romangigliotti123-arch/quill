@@ -99,8 +99,34 @@ public struct PasteboardSnapshot: Equatable, Sendable {
     /// a 250 ms-old clipboard back on top of that destroys what they just copied,
     /// and they would never connect the loss to a dictation. If anyone else has
     /// touched the pasteboard, we stand down and leave our text there instead.
-    public static func restoreIsSafe(ourChangeCount: Int, currentChangeCount: Int) -> Bool {
-        currentChangeCount == ourChangeCount
+    /// Whether putting the user's clipboard back would destroy something they
+    /// have since copied.
+    ///
+    /// `changeCount` alone is the wrong question, and it fails on the most common
+    /// setup there is. Roman runs a clipboard manager; so does a large share of
+    /// anyone who dictates for a living. Those poll the pasteboard and touch it —
+    /// re-declaring types, adding their own, normalising contents — and every
+    /// touch advances `changeCount`. Quill read that as "the user copied
+    /// something new in the gap", declined to restore, and left the dictation
+    /// sitting on the clipboard. Measured on this Mac: after a dictation the
+    /// clipboard held "Don't die." and the text that was there before it was
+    /// gone, permanently, on what would have been every single dictation.
+    ///
+    /// The real question is about CONTENT. If the board still holds exactly what
+    /// Quill wrote, then whatever bumped the counter did not put anything there
+    /// the user wants — restoring is safe. If it holds something else, someone
+    /// did, and it is not ours to overwrite.
+    ///
+    /// `currentText` nil with a moved counter is treated as unsafe: an empty or
+    /// non-text clipboard is a state we cannot attribute, and the cost of being
+    /// wrong is destroying something the user copied.
+    public static func restoreIsSafe(ourChangeCount: Int,
+                                     currentChangeCount: Int,
+                                     ourText: String? = nil,
+                                     currentText: String? = nil) -> Bool {
+        if currentChangeCount == ourChangeCount { return true }
+        guard let ourText, let currentText else { return false }
+        return ourText == currentText
     }
 
     // MARK: - Writing our own text
