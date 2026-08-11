@@ -58,7 +58,11 @@ public final class VocabularyBook: @unchecked Sendable {
         // Re-read before writing: the Dictionary screen and a hand edit can both
         // be in flight, and a stale in-memory copy written back would silently
         // delete whatever the other one added.
-        var vocabulary = Vocabulary.load(from: url)
+        let (loaded, damaged) = Vocabulary.loadOutcome(from: url)
+        // Adding one word must never be the act that replaces the whole file
+        // with the shipped seed.
+        guard !damaged else { return false }
+        var vocabulary = loaded
         guard !vocabulary.contextualStrings.contains(where: {
             $0.compare(trimmed, options: .caseInsensitive) == .orderedSame
         }) else { return false }
@@ -74,7 +78,9 @@ public final class VocabularyBook: @unchecked Sendable {
     public func remove(_ term: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        var vocabulary = Vocabulary.load(from: url)
+        let (loaded, damaged) = Vocabulary.loadOutcome(from: url)
+        guard !damaged else { return false }
+        var vocabulary = loaded
         let before = vocabulary.terms.count
         vocabulary.terms.removeAll { $0.compare(term, options: .caseInsensitive) == .orderedSame }
         guard vocabulary.terms.count != before, vocabulary.save(to: url) else { return false }

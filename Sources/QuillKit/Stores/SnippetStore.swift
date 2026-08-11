@@ -104,12 +104,17 @@ public final class SnippetStore: @unchecked Sendable {
     /// here are text Roman actually retypes.
     public init(url: URL = SnippetStore.defaultURL) {
         self.url = url
-        if let data = try? Data(contentsOf: url) {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            items = (try? decoder.decode([Snippet].self, from: data)) ?? []
-        } else {
-            items = SnippetStore.seed
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        switch StoreFile.read([Snippet].self, from: url, decoder: decoder) {
+        case .missing:            items = SnippetStore.seed
+        case .decoded(let read):  items = read
+        case .unreadable:
+            // Deliberately NOT the seed. Shipping starter snippets over the top
+            // of a damaged file would look like a factory reset the user asked
+            // for, and would take their own snippets with it.
+            items = []
+            loadFailed = true
         }
     }
 
@@ -199,7 +204,11 @@ public final class SnippetStore: @unchecked Sendable {
         all.reduce(0) { $0 + $1.charactersSaved }
     }
 
+    /// See StoreFile. A snippets file that will not decode is not zero snippets.
+    private var loadFailed = false
+
     private func persist() {
+        guard !loadFailed else { return }
         guard let url else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

@@ -49,8 +49,14 @@ public final class NoteStore: @unchecked Sendable {
     /// a bug, not a shortcut.
     public init(url: URL = NoteStore.defaultURL) {
         self.url = url
-        let data = try? Data(contentsOf: url)
-        notes = (try? JSONDecoder.quill.decode([Note].self, from: data ?? Data())) ?? []
+        switch StoreFile.read([Note].self, from: url, decoder: .quill) {
+        case .missing:            notes = []
+        case .decoded(let read):  notes = read
+        case .unreadable:
+            // NOT an empty notebook. See StoreFile.
+            notes = []
+            loadFailed = true
+        }
     }
 
     public init(inMemory: [Note]) {
@@ -84,7 +90,13 @@ public final class NoteStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Set when the file exists and could not be read. While it is true nothing
+    /// is written, because the alternative is replacing notes that are probably
+    /// still recoverable with the empty list we fell back to.
+    private var loadFailed = false
+
     private func persistLocked() {
+        guard !loadFailed else { return }
         guard url.path != "/dev/null" else { return }
         guard let data = try? JSONEncoder.quill.encode(notes) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),

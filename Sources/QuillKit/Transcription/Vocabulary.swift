@@ -44,11 +44,22 @@ public struct Vocabulary: Codable, Sendable, Equatable {
     }
 
     public static func load(from url: URL = Vocabulary.defaultURL) -> Vocabulary {
-        guard
-            let data = try? Data(contentsOf: url),
-            let decoded = try? JSONDecoder().decode(Vocabulary.self, from: data)
-        else { return seed }
-        return decoded
+        loadOutcome(from: url).vocabulary
+    }
+
+    /// The same read, with the one bit callers need before they write.
+    ///
+    /// `load` cannot distinguish "no file yet" from "a file I could not read",
+    /// and both returned the shipped seed. Every writer does load → mutate →
+    /// save, so one unreadable byte meant the next word added to the dictionary
+    /// wrote thirty stock terms over everything the user had put there.
+    public static func loadOutcome(from url: URL = Vocabulary.defaultURL)
+        -> (vocabulary: Vocabulary, isDamaged: Bool) {
+        switch StoreFile.read(Vocabulary.self, from: url) {
+        case .missing:           return (seed, false)
+        case .decoded(let read): return (read, false)
+        case .unreadable:        return (seed, true)
+        }
     }
 
     @discardableResult

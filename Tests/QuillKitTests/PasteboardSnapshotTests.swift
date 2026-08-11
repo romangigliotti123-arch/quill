@@ -143,3 +143,68 @@ private func scratchPasteboard() -> NSPasteboard {
 @Test func chunkingEmptyTextProducesNothingToPost() {
     #expect(SyntheticKeyboard.chunks(of: "").isEmpty)
 }
+
+// MARK: - A damaged file is not an empty one
+
+@Test func aStoreRefusesToOverwriteAFileItCouldNotRead() throws {
+    // Every store in this app made the same mistake, and HistoryStore had already
+    // been fixed for it in isolation, which is exactly how the other three
+    // survived: a file that exists but will not decode was read as an empty
+    // collection, and the next edit atomically wrote [] over the top. One partial
+    // write during a crash and every note, snippet and dictionary word is gone,
+    // silently, at the moment the user next touched anything.
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-store-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // Notes
+    let notesURL = dir.appendingPathComponent("notes.json")
+    try Data("{ this is not json".utf8).write(to: notesURL)
+    let notes = NoteStore(url: notesURL)
+    notes.upsert(Note(title: "new", body: "written after the damage"))
+    let notesOnDisk = try String(contentsOf: notesURL, encoding: .utf8)
+    #expect(notesOnDisk == "{ this is not json", "overwrote a damaged notes file")
+
+    // Snippets
+    let snippetsURL = dir.appendingPathComponent("snippets.json")
+    try Data("[[[".utf8).write(to: snippetsURL)
+    let snippets = SnippetStore(url: snippetsURL)
+    snippets.upsert(Snippet(phrase: "brb", replacement: "be right back"))
+    #expect(try String(contentsOf: snippetsURL, encoding: .utf8) == "[[[",
+            "overwrote a damaged snippets file")
+
+    // Vocabulary — the one where the fallback is not empty but the shipped seed,
+    // so the damage would look like a factory reset rather than a deletion.
+    let vocabURL = dir.appendingPathComponent("vocabulary.json")
+    try Data("{\"terms\": ".utf8).write(to: vocabURL)
+    let book = VocabularyBook(url: vocabURL)
+    #expect(book.add("Craigieburn") == false, "wrote a term into a damaged file")
+    #expect(try String(contentsOf: vocabURL, encoding: .utf8) == "{\"terms\": ",
+            "overwrote a damaged vocabulary file")
+
+    // And a copy of what could not be read is kept, every time.
+    let salvaged = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        .filter { $0.contains("unreadable") }
+    #expect(salvaged.count == 3, "kept \(salvaged.count) salvage copies, expected 3")
+}
+
+@Test func anAbsentFileIsStillJustAnAbsentFile() throws {
+    // The guard must not fire on a fresh install, or nothing is ever saved at all.
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-store-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let vocabURL = dir.appendingPathComponent("vocabulary.json")
+    let book = VocabularyBook(url: vocabURL)
+    // Not a seed term — a missing file correctly falls back to the seed, so
+    // adding something already in it is a no-op and would prove nothing.
+    #expect(book.add("Wollongong"))
+    #expect(book.terms.contains("Wollongong"))
+
+    let notesURL = dir.appendingPathComponent("notes.json")
+    let notes = NoteStore(url: notesURL)
+    notes.upsert(Note(title: "first", body: "on a fresh install"))
+    #expect(FileManager.default.fileExists(atPath: notesURL.path))
+}
