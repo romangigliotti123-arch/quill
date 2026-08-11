@@ -105,7 +105,11 @@ public final class DictationCoordinator {
     /// model warm-up and opening the microphone — because by the time the gesture
     /// has been recognised, whatever was said in the meantime is already gone.
     private func speculativelyBegin() {
-        guard !isDictating, !isSpeculating else { return }
+        guard !isDictating, !isSpeculating else {
+            NSLog("[quill] key-down IGNORED: already %@",
+                  isDictating ? "dictating" : "speculating")
+            return
+        }
         isSpeculating = true
         sessionID += 1
         let session = sessionID
@@ -173,7 +177,16 @@ public final class DictationCoordinator {
 
         Task { [transcriber, cleaner, inserter, overlay, history, snippets, cleanupDeadline] in
             let raw = await transcriber.stop()
-            guard session == self.sessionID else { return }
+            guard session == self.sessionID else {
+                // A newer gesture started while this one was still finalising, so
+                // its text is being dropped on the floor — no insertion, and no
+                // history row either. Whether that is the right call is a separate
+                // question; the point of this line is that it used to happen in
+                // complete silence.
+                NSLog("[quill] DROPPED a finished transcript: session %d superseded by %d (%d chars)",
+                      session, self.sessionID, raw.count)
+                return
+            }
 
             self.timeline.finalTranscript = Date()
 
@@ -183,7 +196,22 @@ public final class DictationCoordinator {
                 // or the user is left with words they never spoke.
                 if self.isLive { self.liveTyper.retract() }
                 self.isLive = false
-                overlay.show(.hidden)
+
+                // Say so. This used to hide the overlay and return, which means
+                // the user held a key, spoke a sentence, let go, and watched
+                // absolutely nothing happen — indistinguishable from the app
+                // being broken, from the key not registering, and from the
+                // microphone being dead.
+                //
+                // It is not a rare path either: driving the recogniser at the
+                // edge of its endpointing produced an empty transcript in a
+                // quarter of attempts. Whatever the cause on any given day, the
+                // one thing that must never happen is silence.
+                NSLog("[quill] empty transcript after %@",
+                      self.timeline.releaseToInsertedMs.map { "\($0)ms" } ?? "an unknown wait")
+                overlay.show(.error("Nothing was heard — try again, or check the microphone in Settings."))
+                try? await Task.sleep(for: .milliseconds(1_600))
+                overlay.hide()
                 return
             }
 

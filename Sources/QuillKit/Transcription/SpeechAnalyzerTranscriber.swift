@@ -360,10 +360,37 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         // which Quill will never approach, and never triggers a download.
         await SpeechAssets.reserve(locale)
 
+        // `.fastResults` stays on, and the measurement that looked like a reason
+        // to turn it off is the reason it stays.
+        //
+        // On the frozen 50-clip corpus, fed from disk, off scored better:
+        //
+        //   on    2.81% WER (32 errors)   first partial 1.93s
+        //   off   2.46% WER (28 errors)   first partial 3.96s, never under 3.93s
+        //
+        // Four fewer errors in 1138 words looks like a clear win until the same
+        // config is driven through a microphone. Then the first partial cannot
+        // arrive before ~3.9s, and any utterance that ends before it does yields
+        // an *empty* transcript — no text, no history row, nothing on screen.
+        // Measured through the loopback: roughly a quarter of dictations produced
+        // nothing at all, against a handful with it on.
+        //
+        // So the trade is not accuracy against latency. It is four errors in a
+        // thousand words against losing one dictation in four, and there is no
+        // version of that worth taking. A wrong word can be fixed by the person
+        // reading it; a dictation that never appears is work they have to do
+        // again, and they find out by looking at an empty cursor.
+        //
+        // `QUILL_FAST_RESULTS=0` still flips it, because the experiment should
+        // stay repeatable.
+        var reporting: Set<SpeechTranscriber.ReportingOption> = [.volatileResults]
+        if ProcessInfo.processInfo.environment["QUILL_FAST_RESULTS"] != "0" {
+            reporting.insert(.fastResults)
+        }
         let module = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
-            reportingOptions: [.volatileResults, .fastResults],
+            reportingOptions: reporting,
             attributeOptions: [.audioTimeRange]
         )
 

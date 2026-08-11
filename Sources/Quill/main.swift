@@ -24,6 +24,18 @@ if let raw = ProcessInfo.processInfo.environment["QUILL_CLEAN_TEXT"] {
 // transcription path against a file and prints what it measured. Needs no
 // microphone and no TCC grant, which is what makes "the engine works, and here
 // is how fast" a checkable claim rather than an assertion.
+if ProcessInfo.processInfo.environment["QUILL_TRANSCRIBE_DIR"] != nil {
+    let done = DispatchSemaphore(value: 0)
+    Task { @MainActor in
+        _ = await TranscriptionHarness.runDirectoryIfRequested()
+        done.signal()
+    }
+    while done.wait(timeout: .now()) == .timedOut {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    exit(0)
+}
+
 if ProcessInfo.processInfo.environment["QUILL_TRANSCRIBE_FILE"] != nil {
     let done = DispatchSemaphore(value: 0)
     Task { @MainActor in

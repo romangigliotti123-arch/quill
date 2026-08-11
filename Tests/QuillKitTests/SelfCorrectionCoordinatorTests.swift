@@ -120,11 +120,13 @@ private func dictate(_ coordinator: DictationCoordinator, _ inserter: RecordingI
 
     #expect(text == "Send it to Carlo")
     #expect(ai.log.calls == 1, "the cued transcript should have been offered to the model")
-    // The model is asleep for 30 seconds. Anything in this ballpark proves the
-    // deterministic answer came back inside the race instead of being lost to it;
-    // the exact figure is scheduler noise in a parallel suite and is measured
-    // properly in NIMCleanerTests.
-    #expect(elapsed < .seconds(3), "took \(elapsed)")
+    // The model is asleep for 30 seconds and the deterministic answer takes
+    // milliseconds, so what this asserts is which of the two the race returned —
+    // not how fast the machine is. Six seconds still discriminates by 5x and
+    // stops the assertion failing because a live network test was running beside
+    // it. Actual latency is measured in NIMCleanerTests, where it is the subject
+    // rather than a proxy.
+    #expect(elapsed < .seconds(6), "took \(elapsed)")
 }
 
 @MainActor
@@ -168,8 +170,15 @@ private func dictate(_ coordinator: DictationCoordinator, _ inserter: RecordingI
     // be saturated, and scheduler jitter under load is on the order of a second.
     // A tighter bound would be measuring the CI box, not the code. The failure
     // this guards against overshot by 59 SECONDS, so a 4x margin still catches it.
+    // The gap between "bounded" and "unbounded" is what makes this test stable,
+    // not the tightness of the bound. At an 8-second operation and a 4-second
+    // assertion there were only four seconds of headroom, and a suite that runs
+    // network tests in parallel can eat that in scheduler jitter alone. Thirty
+    // seconds of work against a five-second assertion discriminates by 6x and
+    // still fails instantly on the regression it exists for, which stalled a
+    // dictation for 59 seconds.
     let deadline = Duration.milliseconds(500)
-    let operationLength = Duration.seconds(8)
+    let operationLength = Duration.seconds(30)
 
     let start = ContinuousClock.now
     let result: String? = await DictationCoordinatorTestHooks.withDeadline(deadline) {
@@ -180,7 +189,7 @@ private func dictate(_ coordinator: DictationCoordinator, _ inserter: RecordingI
     let elapsed = ContinuousClock.now - start
 
     #expect(result == nil)
-    #expect(elapsed < .seconds(4), "deadline did not bound the wait: \(elapsed)")
+    #expect(elapsed < .seconds(5), "deadline did not bound the wait: \(elapsed)")
 }
 
 @Test func aFastOperationStillWins() async {

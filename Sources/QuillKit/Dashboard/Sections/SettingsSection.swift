@@ -305,7 +305,6 @@ final class SettingsGroup: NSView {
     override var isFlipped: Bool { true }
 
     private static let rowHeight: CGFloat = 46
-    private static let detailExtra: CGFloat = 16
     private static let headingHeight: CGFloat = 24
     private static let inset: CGFloat = DashboardSpace.md
 
@@ -334,13 +333,24 @@ final class SettingsGroup: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    private func height(of row: Row) -> CGFloat {
-        Self.rowHeight + (row.detail == nil ? 0 : Self.detailExtra)
+    /// Measured, not assumed.
+    ///
+    /// This reserved a flat 16 points for a detail line, which is right for the
+    /// one-liner under "Push to talk" and wrong for Help, where a row explains a
+    /// failure in three. The extra lines drew straight through the row beneath.
+    private func height(of row: Row, width: CGFloat) -> CGFloat {
+        guard let detail = row.detail else { return Self.rowHeight }
+        let available = max(120, width - Self.inset * 2 - Self.controlGutter)
+        return Self.rowHeight + DashboardType.size(detail, width: available).height + 4
     }
 
     func fittedHeight(width: CGFloat) -> CGFloat {
-        Self.headingHeight + DashboardSpace.xs + rows.reduce(0) { $0 + height(of: $1) }
+        Self.headingHeight + DashboardSpace.xs + rows.reduce(0) { $0 + height(of: $1, width: width) }
     }
+
+    /// Room kept clear on the right for whatever control the row carries, so a
+    /// wrapped detail never runs under a switch or a button.
+    private static let controlGutter: CGFloat = 130
 
     override func layout() {
         super.layout()
@@ -351,7 +361,7 @@ final class SettingsGroup: NSView {
 
         var y: CGFloat = 0
         for (index, row) in rows.enumerated() {
-            let rowHeight = height(of: row)
+            let rowHeight = height(of: row, width: bounds.width)
             let control = row.control
             let controlSize = control.intrinsicContentSize
             let controlWidth = controlSize.width > 0 ? controlSize.width : control.frame.width
@@ -374,9 +384,10 @@ final class SettingsGroup: NSView {
                                  width: min(labelSize.width, labelWidth), height: labelSize.height)
 
             if let detail = row.detail {
-                let size = detail.fittingSize
+                let available = max(120, card.bounds.width - Self.inset * 2 - Self.controlGutter)
+                let height = DashboardType.size(detail, width: available).height
                 detail.frame = NSRect(x: Self.inset, y: label.frame.maxY + 2,
-                                      width: min(size.width, labelWidth), height: size.height)
+                                      width: available, height: height)
             }
 
             y += rowHeight

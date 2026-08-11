@@ -249,6 +249,13 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             let tap = self.tap
             lock.unlock()
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            // Logged because this is invisible from the outside and it eats
+            // keystrokes: between the disable and the next event the tap sees
+            // nothing, so a dictation started in that window never begins at all.
+            // If gestures are going missing, this line is the first thing to look
+            // for.
+            NSLog("[quill] tap disabled (%@) and re-enabled — events in that window were lost",
+                  type == .tapDisabledByTimeout ? "timeout" : "user input")
             apply(machine.handle(.tapInterrupted, at: Self.now()))
             return false
         }

@@ -111,6 +111,68 @@ public enum TranscriptionHarness {
         )
     }
 
+    /// Transcribes every `.wav` in a directory and writes one JSON object per
+    /// line: clip id, transcript, and the timings.
+    ///
+    /// This is the difference between an experiment that takes fifteen seconds
+    /// and one that takes thirty-five minutes. Word error rate is scored on the
+    /// *raw* recogniser output, so nothing downstream of the transcriber can move
+    /// it — which means comparing two recogniser configurations needs no
+    /// microphone, no loopback device, no synthetic keystrokes and no idle
+    /// machine. Batch mode runs at roughly 40x real time.
+    ///
+    /// The loopback rig is still the only way to measure *Flow*, which is a black
+    /// box. It is not the way to tune ours.
+    @MainActor
+    public static func runDirectoryIfRequested() async -> Bool {
+        let env = ProcessInfo.processInfo.environment
+        guard let dir = env["QUILL_TRANSCRIBE_DIR"] else { return false }
+        let root = URL(fileURLWithPath: (dir as NSString).expandingTildeInPath)
+        let files = ((try? FileManager.default.contentsOfDirectory(at: root,
+                                                                   includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension.lowercased() == "wav" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        let locale = env["QUILL_TRANSCRIBE_LOCALE"].map(Locale.init(identifier:))
+            ?? SpeechAssets.preferredLocale
+        // Batch feeding is ~40x faster and fine for a quick sweep, but it is not
+        // what the app does: a microphone delivers at 1x, and the recogniser's
+        // endpointing behaves differently when it is not being force-fed. Any
+        // configuration choice that ships has to be decided on realtime numbers.
+        let realtime = env["QUILL_TRANSCRIBE_REALTIME"] == "1"
+        var lines: [String] = []
+        for file in files {
+            let id = file.deletingPathExtension().lastPathComponent
+            do {
+                let report = try await run(fileURL: file, realtime: realtime, locale: locale)
+                let payload: [String: Any] = [
+                    "clip": id,
+                    "text": report.transcript,
+                    "audio_s": report.audioDuration,
+                    "wall_s": report.wallClock,
+                    "partials": report.partialCount,
+                    "finals": report.finalCount,
+                    "first_partial_s": report.firstPartial as Any,
+                    "first_final_s": report.firstFinal as Any,
+                    "realtime": realtime,
+                    "errors": report.errors,
+                ]
+                if let data = try? JSONSerialization.data(withJSONObject: payload),
+                   let line = String(data: data, encoding: .utf8) {
+                    lines.append(line)
+                }
+                FileHandle.standardError.write(Data("ok   \(id)\n".utf8))
+            } catch {
+                FileHandle.standardError.write(Data("FAIL \(id): \(error)\n".utf8))
+            }
+        }
+        let out = env["QUILL_TRANSCRIBE_OUT"].map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        let body = lines.joined(separator: "\n") + "\n"
+        if let out { try? body.write(to: out, atomically: true, encoding: .utf8) }
+        else { print(body) }
+        return true
+    }
+
     /// Launch hook: `QUILL_TRANSCRIBE_FILE=/path/to.wav` runs the harness,
     /// prints the report and returns true, so the app can exit instead of
     /// putting up a menu bar item. Returns false when the variable is unset.

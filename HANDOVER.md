@@ -144,6 +144,25 @@ QUILL_RESIZE_SWEEP=/tmp/sweep \
   "$HOME/Library/Application Support/Quill/build/Quill.app/Contents/MacOS/Quill"
 ```
 
+**The measurement instrument was broken, and that is worse than a bad number.**
+`rig/run_eval.sh` read the corpus manifest on stdin while spawning children that
+also read stdin. One of them ate a byte, so clip two arrived as
+`089-134686-0002` — leading 1 gone — and every clip after the first was either
+corrupted or skipped. A fifty-clip run silently became twenty-five and printed
+"ok" for each one. The manifest is now read on descriptor 3, every child is
+denied stdin, and the run refuses to report at all if it saw fewer clips than the
+manifest holds. It also polls for the transcript instead of sleeping four seconds
+and looking once, which was separately calling six clips in thirty-five "failed"
+while their transcripts sat in Quill's history.
+
+**Tuning our own recogniser needs no microphone.** WER is scored on raw ASR, so
+nothing downstream of the transcriber can move it — which means comparing two
+recogniser configurations needs no loopback device, no synthetic keystrokes and
+no idle machine. `QUILL_TRANSCRIBE_DIR=rig/audio/clips` runs the whole corpus
+through the real transcription path in about a minute, or ~8 minutes with
+`QUILL_TRANSCRIBE_REALTIME=1`. The loopback rig remains the only way to measure
+*Flow*, which is a black box; it is not the way to tune ours.
+
 Traps that cost real time and are documented where they bite:
 
 - Build output lives outside `~/Documents` because iCloud's `fileprovider` xattrs

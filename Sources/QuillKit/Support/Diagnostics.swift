@@ -17,6 +17,79 @@ public enum Diagnostics {
     public static let reportPath = NSString(string: "~/Documents/Work/Projects/quill/build/diagnostics.txt")
         .expandingTildeInPath
 
+    /// One check, in a shape a screen can draw and a text report can print.
+    ///
+    /// The Help section and this file's report run the *same* checks through
+    /// `run()`. Two implementations of "is the event tap installable" would drift
+    /// within a week, and the moment they disagree neither can be trusted — which
+    /// defeats the point of having a diagnostic at all.
+    public struct Check: Sendable, Equatable {
+        public enum Status: Sendable, Equatable { case pass, warn, fail }
+        public let title: String
+        public let status: Status
+        /// What is true right now.
+        public let detail: String
+        /// What to do about it. Nil when there is nothing to do.
+        public let remedy: String?
+    }
+
+    /// Runs every check and returns the findings. Cheap enough to call when a
+    /// screen appears; the event-tap probe is the only slow part and it is a
+    /// single syscall.
+    public static func run() -> [Check] {
+        var checks: [Check] = []
+
+        for permission in Permission.allCases {
+            switch Permissions.state(of: permission) {
+            case .granted:
+                checks.append(Check(title: permission.rawValue, status: .pass,
+                                    detail: "Granted.", remedy: nil))
+            case .denied:
+                checks.append(Check(title: permission.rawValue, status: .fail,
+                                    detail: "Denied — Quill needs this \(permission.whyQuillNeedsIt).",
+                                    remedy: permission.settingsPath))
+            case .notDetermined:
+                checks.append(Check(title: permission.rawValue, status: .warn,
+                                    detail: "Not asked for yet. Quill needs this \(permission.whyQuillNeedsIt).",
+                                    remedy: permission.settingsPath))
+            }
+        }
+
+        checks.append(Permissions.secureInputEnabled
+            ? Check(title: "Secure Input", status: .fail,
+                    detail: "On. While it is, macOS refuses every event tap — the dictation key cannot fire and there is no permission that fixes it.",
+                    remedy: "Quit whatever turned it on: a terminal with Secure Keyboard Entry, or a password manager that left the flag set.")
+            : Check(title: "Secure Input", status: .pass,
+                    detail: "Off, so event taps are allowed.", remedy: nil))
+
+        checks.append(canCreateTap()
+            ? Check(title: "Event tap", status: .pass,
+                    detail: "Installs. This is the real test — the one that fails silently.", remedy: nil)
+            : Check(title: "Event tap", status: .fail,
+                    detail: "The system refused it. No error is raised for this; the key simply never fires.",
+                    remedy: "Remove Quill from \(Permission.accessibility.settingsPath) and add it back — the grant is tied to the code signature."))
+
+        let device = AudioDeviceInfo.activeInputName()
+        checks.append(Check(title: "Input device", status: device == nil ? .warn : .pass,
+                            detail: device.map { "Listening to \($0)." } ?? "CoreAudio will not name an input device.",
+                            remedy: device == nil ? "Check a microphone is connected and selected in Settings." : nil))
+
+        return checks
+    }
+
+    /// The one check that cannot be inferred from a permission API: whether the
+    /// system will actually hand over a tap right now.
+    private static func canCreateTap() -> Bool {
+        let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+            eventsOfInterest: CGEventMask(mask),
+            callback: { _, _, event, _ in Unmanaged.passUnretained(event) }, userInfo: nil)
+        else { return false }
+        CFMachPortInvalidate(tap)
+        return true
+    }
+
     public static func runAndExit() -> Never {
         var out: [String] = []
         func say(_ s: String) { out.append(s) }

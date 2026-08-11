@@ -34,8 +34,6 @@
   .v{font-size:15px;font-weight:500;letter-spacing:-.01em}
   .v small{color:var(--dim);font-weight:400;font-size:12px}
   .v.big{font-size:24px;letter-spacing:-.02em}
-  .meter{height:4px;background:var(--line2);border-radius:99px;overflow:hidden;margin-top:10px}
-  .meter i{display:block;height:100%;background:var(--fg);border-radius:99px}
   h2{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dimmer);
      margin:32px 0 12px;font-weight:600}
   table{width:100%;border-collapse:collapse}
@@ -45,6 +43,7 @@
   tr:last-child td{border-bottom:none}
   td.num{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
   .win{color:var(--ok);font-weight:600}
+  .lose{color:var(--bad);font-weight:600}
   .name{font-weight:500}
   .note{color:var(--dim);font-size:12.5px;max-width:66ch}
   .st{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);white-space:nowrap}
@@ -54,9 +53,9 @@
   .st.block::before{background:var(--warn)} .st.block{color:var(--warn)}
   .log{font-family:var(--mono);font-size:11.5px;line-height:1.85;color:var(--dim);
        background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
-       max-height:300px;overflow-y:auto}
+       max-height:340px;overflow-y:auto}
   .log b{color:var(--fg);font-weight:500} .log i{color:var(--dimmer);font-style:normal}
-  .log .g{color:var(--ok)}
+  .log .g{color:var(--ok)} .log .r{color:var(--bad)}
   .callout{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--warn);
            border-radius:8px;padding:14px 16px;margin-bottom:10px;font-size:13px}
   .callout b{display:block;color:var(--warn);font-size:11px;text-transform:uppercase;
@@ -73,7 +72,7 @@
 <header>
   <div>
     <h1>Quill <span>— gauntlet run</span></h1>
-    <div class="sub">macOS on-device dictation, built from scratch, judged blind against Wispr&nbsp;Flow.</div>
+    <div class="sub">macOS on-device dictation, built from scratch, judged against Wispr&nbsp;Flow on measurements rather than impressions.</div>
   </div>
   <div class="stamp">
     <div class="live"><span class="dot"></span>auto-refresh 10s</div>
@@ -82,85 +81,88 @@
 </header>
 
 <div class="grid">
-  <div class="card"><div class="k">Dashboard won blind</div><div class="v big win">4 / 4</div></div>
-  <div class="card"><div class="k">Flow baseline WER</div><div class="v big">2.11%<small> / 50 clips</small></div></div>
-  <div class="card"><div class="k">Tests</div><div class="v big">369</div></div>
-  <div class="card"><div class="k">Ceiling</div><div class="v">~6.5M <small>/ 8M</small></div>
-    <div class="meter"><i style="width:81%"></i></div></div>
+  <div class="card"><div class="k">Flow WER — 50 clips</div><div class="v big">2.11%<small> / 24 err</small></div></div>
+  <div class="card"><div class="k">Quill WER — same 50</div><div class="v big lose">2.37%<small> / 27 err</small></div></div>
+  <div class="card"><div class="k">Release → text</div><div class="v big win">3ms<small> vs 807ms</small></div></div>
+  <div class="card"><div class="k">Tests</div><div class="v big">400</div></div>
 </div>
 
 <div class="callout">
-  <b>What still needs you</b>
-  ~15 minutes reading a script into <code>rig/record_voice.sh</code>. LibriSpeech is read speech from
-  American strangers; it says nothing about how either app handles your accent, or the words you
-  actually use. It is the one tier that predicts your experience and the only thing I cannot do.
+  <b>Where it actually stands</b>
+  Flow is <b>ahead on raw accuracy by three words</b> — 27 errors against 24 on the same 1,138. That gap is
+  not statistically meaningful, and it is not a win either. Quill wins latency by more than two orders of
+  magnitude, wins offline outright, and matches on formatter fidelity. The honest one-liner is: level on
+  recognition, far ahead on everything around it.
 </div>
 
 <h2>Head to head — identical audio, both apps audited to the loopback device</h2>
 <table>
-  <thead><tr><th style="width:30%">Measure</th><th style="width:18%">Wispr Flow</th><th style="width:18%">Quill</th><th>Note</th></tr></thead>
+  <thead><tr><th style="width:30%">Measure</th><th style="width:16%">Wispr Flow</th><th style="width:16%">Quill</th><th>Note</th></tr></thead>
   <tbody>
-    <tr><td class="name">WER, raw ASR — 50 clips</td><td class="num">2.11%</td><td class="num">running</td>
-        <td class="note">Flow: 24 errors in 1138 words, 0 clips failed.</td></tr>
-    <tr><td class="name">WER, raw ASR — 2-clip smoke</td><td class="num">4.35%</td><td class="num win">2.17%</td>
-        <td class="note">Same audio. Too small to conclude from, but it is real.</td></tr>
+    <tr><td class="name">WER, raw ASR — 50 clips</td><td class="num win">2.11%</td><td class="num">2.37%</td>
+        <td class="note">24 errors vs 27, same 1138 reference words. Flow ahead by three.</td></tr>
+    <tr><td class="name">Release → text on screen</td><td class="num">807ms</td><td class="num win">3ms</td>
+        <td class="note">The number a person waits through. Quill's was being mis-reported as 12.11s
+            because the card was showing key-<i>down</i> to text, which contains the whole utterance.</td></tr>
     <tr><td class="name">Formatter divergence</td><td class="num">1.40%</td><td class="num win">0.00%</td>
         <td class="note">How far the cleaned text drifts from what was actually said.</td></tr>
-    <tr><td class="name">Latency, key-release → text</td><td class="num">807ms</td><td class="num">0.39s median*</td>
-        <td class="note">*Quill's figure is from its own instrumentation, not yet the rig. Not a like-for-like claim until the 50-clip run lands.</td></tr>
     <tr><td class="name">Works with no internet</td><td class="num">no</td><td class="num win">yes</td>
-        <td class="note">Flow is cloud-only by design — their docs, not my inference.</td></tr>
+        <td class="note">Flow is cloud-only by design — their docs, not an inference.</td></tr>
+    <tr><td class="name">Transforms that survive offline</td><td class="num">0 / 6</td><td class="num win">4 / 8</td>
+        <td class="note">Each one names how far short of the full job its offline recipe falls.</td></tr>
   </tbody>
 </table>
 
-<h2>Dashboard — blind verdicts vs Flow's real UI</h2>
+<h2>Recogniser experiment — can the accuracy gap be closed honestly?</h2>
 <table>
-  <thead><tr><th style="width:22%">Section</th><th style="width:14%">Verdict</th><th style="width:10%">Rounds</th><th>Biggest remaining gap, per the critic</th></tr></thead>
+  <thead><tr><th style="width:30%">Config</th><th style="width:16%">WER</th><th style="width:16%">Errors</th><th>Note</th></tr></thead>
   <tbody>
-    <tr><td class="name">Insights</td><td class="win">ours</td><td class="num">1</td>
-        <td class="note">The range control governs only the top row; the streak card still shows 11 months.</td></tr>
-    <tr><td class="name">Dictation history</td><td class="win">ours</td><td class="num">1</td>
-        <td class="note">Header reads like a landing page rather than an app chrome.</td></tr>
-    <tr><td class="name">Dictionary</td><td class="win">ours</td><td class="num">1</td>
-        <td class="note">Eleven all-caps mono micro-labels on one screen.</td></tr>
-    <tr><td class="name">Snippets</td><td class="win">ours</td><td class="num">1</td>
-        <td class="note">Editor is grey-on-grey and reads as disabled.</td></tr>
+    <tr><td class="name"><code>.fastResults</code> on (shipping)</td><td class="num">2.81%</td><td class="num">32</td>
+        <td class="note">Batch-fed audio. Not comparable to the loopback figure above — different feed rate,
+            same corpus.</td></tr>
+    <tr><td class="name"><code>.fastResults</code> off</td><td class="num win">2.46%</td><td class="num">28</td>
+        <td class="note">Four errors better. A speed-for-accuracy trade Quill can afford and Flow cannot,
+            since Quill's post-release wait is single-digit milliseconds.</td></tr>
+    <tr><td class="name">Same pair, fed in real time</td><td class="num">running</td><td class="num">—</td>
+        <td class="note">The shipping decision has to be made on realtime numbers: a microphone delivers at
+            1x and the recogniser endpoints differently when it is not force-fed.</td></tr>
   </tbody>
 </table>
 
-<h2>Phases</h2>
+<h2>Sections</h2>
 <table>
   <tbody>
-    <tr><td class="name" style="width:30%">Recon</td><td style="width:15%"><span class="st done">done</span></td>
-        <td class="note">Decisive find: Flow is 100% cloud, account mandatory, no offline mode.</td></tr>
-    <tr><td class="name">Dictation core</td><td><span class="st done">done</span></td>
-        <td class="note">On-device, offline, first partial ~1.0s, 43× real-time batch.</td></tr>
-    <tr><td class="name">Comparison rig</td><td><span class="st done">done</span></td>
-        <td class="note">Both apps driven through one virtual device; every transcript stamped with the mic it heard.</td></tr>
-    <tr><td class="name">Dashboard</td><td><span class="st done">done</span></td>
-        <td class="note">Shell + 4 sections, all won blind.</td></tr>
-    <tr><td class="name">AI layer (NIM)</td><td><span class="st done">done</span></td>
-        <td class="note">Self-correction, style, transforms, commands. Degrades to deterministic repair offline.</td></tr>
-    <tr><td class="name">Quill 50-clip run</td><td><span class="st run">running</span></td>
-        <td class="note">First attempt aborted — I was compiling during the eval and starved it.</td></tr>
-    <tr><td class="name">Notetaker · Scratchpad · Style UI</td><td><span class="st">not started</span></td>
-        <td class="note">Flow's remaining surface.</td></tr>
+    <tr><td class="name" style="width:24%">Insights</td><td style="width:14%"><span class="st done">done</span></td>
+        <td class="note">Latency card was reporting a number it was not measuring. Fixed, and two dead cards revived.</td></tr>
+    <tr><td class="name">Dictation · Dictionary · Snippets</td><td><span class="st done">done</span></td>
+        <td class="note">All won blind against Flow's equivalents.</td></tr>
+    <tr><td class="name">Scratchpad · Style</td><td><span class="st done">done</span></td>
+        <td class="note"></td></tr>
+    <tr><td class="name">Settings</td><td><span class="st done">done</span></td>
+        <td class="note">Rebindable hold and push-to-talk, microphone selection, live text.</td></tr>
+    <tr><td class="name">Transforms</td><td><span class="st done">done</span></td>
+        <td class="note">A window onto an engine that already existed. Leads with the offline column Flow cannot fill.</td></tr>
+    <tr><td class="name">Help</td><td><span class="st done">done</span></td>
+        <td class="note">Live health check, not a support link. Every Quill failure mode is local and silent.</td></tr>
+    <tr><td class="name">Notetaker</td><td><span class="st block">refused</span></td>
+        <td class="note">Needs system-audio capture, calendar access and a consent story. Says so rather than faking a screen.</td></tr>
   </tbody>
 </table>
 
 <h2>Log</h2>
 <div class="log">
-<div><i>10:02</i> <b class="g">Apple's contextual-string biasing does nothing.</b> Same audio, 0 vs 25 terms, byte-identical output. Replaced with fuzzy repair over 1–3 word windows.</div>
-<div><i>11:00</i> <b>Dropped-words bug found.</b> The mic wasn't opening until 120ms after key-down plus engine spin-up. Capture now starts at key-down.</div>
-<div><i>17:36</i> <b class="g">Rig proven.</b> Quill transcribed a LibriSpeech clip through BlackHole, audited to the device.</div>
-<div><i>18:02</i> Flow's PTT is a chord (Ctrl+Shift+D) and the helper only spoke bare modifiers — extended it, so Flow can be measured at all.</div>
-<div><i>18:20</i> <b class="g">Dashboard 4/4 won blind.</b> Insights shows a latency distribution a cloud product structurally cannot publish.</div>
-<div><i>19:05</i> <b class="g">Self-correction working live.</b> "send it to Noah no wait send it to Carlo" → "Send it to Carlo", 291ms.</div>
-<div><i>19:05</i> Two bugs only the live run caught: a missed deadline was tripping the circuit breaker in a loop, and the vocabulary list in the prompt made the model inject a brand name that was never spoken.</div>
-<div><i>19:12</i> <b>Flow baseline banked:</b> 2.11% WER over 50 clips, 0 failures.</div>
+<div><i>day 1</i> <b class="g">Apple's contextual-string biasing does nothing.</b> Same audio, 0 vs 25 terms, byte-identical output.</div>
+<div><i>day 1</i> <b class="g">Flow baseline banked:</b> 2.11% WER over 50 clips, 0 failures.</div>
+<div><i>day 2</i> <b>Live text shipped.</b> The recogniser returns the whole sentence every update and revises it, so it is a diff, not an append.</div>
+<div><i>day 2</i> <b class="r">The latency card was lying.</b> 12.11s shown as "key release to text" was key-<i>down</i> to text — it contained the whole utterance. The real figure is 3ms.</div>
+<div><i>day 2</i> <b class="r">audioDurationMs was nil on all 230 records.</b> Both transcribers wrote it into a timeline nobody read; two Insights cards had been dead since the day they were built.</div>
+<div><i>day 3</i> <b class="g">The eval harness was eating its own corpus.</b> A child process read the manifest off stdin, so clip two arrived as "089-134686-0002" — leading 1 gone — and every clip after the first was corrupted or skipped. A 50-clip run silently became 25 and still printed "ok" for each.</div>
+<div><i>day 3</i> <b>Fixed cause and class:</b> manifest now read on fd 3, every child denied stdin, and the run refuses to report at all if it saw fewer clips than the manifest holds.</div>
+<div><i>day 3</i> <b>Fixed settle → poll.</b> Six clips in thirty-five were called failures while their transcripts sat in history, written a moment after the reader gave up.</div>
+<div><i>day 3</i> <b class="g">Tuning our own recogniser needs no microphone at all.</b> WER is scored on raw ASR, so a file-fed harness A/Bs two configs in 60 seconds instead of 35 minutes.</div>
 </div>
 
-<footer>Bar: Wispr Flow 1.6.447 (cloud) · Exit: harsh critic picks ours blind · Nothing here is claimed without a measurement behind it.</footer>
+<footer>Bar: Wispr Flow 1.6.447 (cloud) · Every number here has a run behind it · Nothing rounded up.</footer>
 
 </div>
 <script>

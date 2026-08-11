@@ -60,15 +60,18 @@ public final class DashboardSwitch: NSView {
     private func reflect(animated: Bool) {
         let diameter = bounds.height - Self.inset * 2
         let x = isOn ? bounds.width - Self.inset - diameter : Self.inset
+        // Ink, not accent — the rule SnippetsToggle set and this has to follow,
+        // or a screen with eight of them is a wall of colour with no hierarchy.
         let trackColor = isOn
-            ? style.accent.withAlphaComponent(isHovered ? 1 : 0.92)
+            ? (isHovered ? style.fillHover : style.fill)
             : (isHovered ? style.hairlineStrong : style.hairline)
 
         let apply = {
             self.track.frame = self.bounds
             self.track.backgroundColor = trackColor.cgColor
             self.knob.frame = NSRect(x: x, y: Self.inset, width: diameter, height: diameter)
-            self.knob.backgroundColor = (self.style.isDark ? NSColor.white : NSColor.white).cgColor
+            // On an ink track the knob has to invert, or it disappears into it.
+            self.knob.backgroundColor = (self.isOn ? self.style.onFill : NSColor.white).cgColor
             // Presses squash the knob a touch. It is the smallest possible cue
             // that the pointer is on the control and not merely over it.
             self.knob.transform = CATransform3DMakeScale(self.isPressed ? 0.9 : 1,

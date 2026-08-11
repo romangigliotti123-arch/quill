@@ -177,7 +177,7 @@ run_clip() {
     # Guard 1 of 2: the device must be right going in.
     assert_input_is_blackhole
 
-    "$READER" --mark "$MARK" >/dev/null 2>&1 \
+    "$READER" --mark "$MARK" >/dev/null 2>&1 </dev/null \
         || die "could not snapshot $APP's transcript store before the clip" \
                "Without a marker there is no way to prove the transcript is new."
 
@@ -196,7 +196,7 @@ run_clip() {
     local t0 t1
     t0="$(python3 -c 'import time; print(time.time())')"
 
-    "$PTT" down "$PTT_KEY"
+    "$PTT" down "$PTT_KEY" </dev/null
     sleep "$LEAD"
 
     # Re-resolve by NAME every clip. CoreAudio indices are positional, so a pair
@@ -223,12 +223,31 @@ run_clip() {
                 "fix: check nothing else has exclusive use of it."; }
 
     sleep "$TAIL"
-    "$PTT" up "$PTT_KEY"
+    "$PTT" up "$PTT_KEY" </dev/null
     t1="$(python3 -c 'import time; print(time.time())')"
 
     if [[ -n "$TAP_PID" ]]; then wait "$TAP_PID" 2>/dev/null || true; TAP_PID=""; fi
 
-    sleep "$SETTLE"
+    # Poll for the transcript rather than sleeping a fixed time and looking once.
+    #
+    # A fixed settle has to be wrong in one direction or the other: too short and
+    # a slow finalisation is scored as "the app produced nothing", too long and
+    # every one of fifty clips pays for the worst case. It was too short — six
+    # clips in thirty-five were declared failures while their transcripts were
+    # sitting in Quill's history, written a moment after the reader gave up.
+    #
+    # SETTLE is now a floor for the first look and a deadline for giving up, and
+    # a fast app finishes early instead of waiting to be asked again.
+    local deadline waited
+    deadline="$(python3 -c "print($SETTLE * 4)")"
+    waited=0
+    while :; do
+        sleep 0.25
+        waited="$(python3 -c "print(round($waited + 0.25, 2))")"
+        "$READER" --since "$MARK" --json --expect-device "$EXPECT_DEVICE" \
+            >/dev/null 2>/dev/null </dev/null && break
+        if (( $(python3 -c "print(1 if $waited >= $deadline else 0)") )); then break; fi
+    done
 
     # Guard 2 of 2: nothing changed the device while we were playing.
     assert_input_is_blackhole
@@ -260,7 +279,7 @@ print(json.dumps(d))' "$fp_json" "$clip_id" >> "$FPRINTS"
         fi
     fi
 
-    if ! rec="$("$READER" --since "$MARK" --json --expect-device "$EXPECT_DEVICE" 2>"$RUN_DIR/.err")"; then
+    if ! rec="$("$READER" --since "$MARK" --json --expect-device "$EXPECT_DEVICE" 2>"$RUN_DIR/.err" </dev/null)"; then
         warn "$clip_id: no valid transcript"
         sed 's/^/      /' "$RUN_DIR/.err" >&2
         python3 -c "
@@ -311,7 +330,16 @@ rule
 say "${C_BLD}run${C_RST} $RUN_ID   app=${C_BLD}$APP${C_RST}   → $RUN_DIR"
 rule
 
-while IFS=$'\t' read -r clip_id speaker source_rel words duration text; do
+# The manifest is read on descriptor 3, and every child in `run_clip` is denied
+# stdin, because this loop spawns processes that read it.
+#
+# On stdin, the symptom is not a clean failure. Clip one runs, some child
+# swallows a byte or a line, and clip two arrives as "089-134686-0002" — the
+# leading 1 eaten — which then fails as a missing file. Every clip after the
+# first is either corrupted or skipped, and a 50-clip run silently becomes a
+# 25-clip run that still prints "ok". That is the worst shape a measurement bug
+# can take: it does not look like a bug, it looks like a result.
+while IFS=$'\t' read -r clip_id speaker source_rel words duration text <&3; do
     [[ "$clip_id" == "clip_id" || "$clip_id" == \#* || -z "$clip_id" ]] && continue
     [[ -n "$ONLY" && "$clip_id" != "$ONLY" ]] && continue
     n=$((n + 1))
@@ -326,6 +354,22 @@ while IFS=$'\t' read -r clip_id speaker source_rel words duration text; do
         # The first clip failing is never bad luck — it is a broken setup, and
         # continuing would just produce 50 identical failures.
         if (( n == 1 )); then
+            # One retry before declaring the setup broken. An app launched
+            # moments ago is running but not yet listening: Quill's event tap is
+            # installed on a retry timer, so a run started four seconds after
+            # `open` loses its first clip and then reports a permissions problem
+            # that does not exist. Everything after the first clip is real
+            # flakiness and still counts against MAX_FAILURES.
+            warn "first clip produced nothing — waiting 5s and trying once more"
+            sleep 5
+            if run_clip "$clip_id" "$duration"; then
+                failed_n=$((failed_n - 1))
+                done_n=$((done_n + 1))
+                printf '%s ok (on retry)%s\n' "$C_GRN" "$C_RST" >&2
+                (( PREFLIGHT )) && break
+                sleep "$GAP"
+                continue
+            fi
             die "the FIRST clip produced no transcript — this is a setup problem, not flakiness." \
                 "Nothing further would succeed. Diagnose with:" \
                 "  rig/setup.sh" \
@@ -340,7 +384,22 @@ while IFS=$'\t' read -r clip_id speaker source_rel words duration text; do
 
     (( PREFLIGHT )) && break
     sleep "$GAP"
-done < "$MANIFEST"
+done 3< "$MANIFEST"
+
+# A run that quietly covered less of the corpus than it claims is the failure
+# this whole script exists to prevent, and it has happened: a child reading stdin
+# ate manifest lines and a 50-clip run scored 25 while printing "ok" for every
+# one of them. The fd-3 read above stops that particular cause; this stops any
+# other cause from being silent.
+if (( LIMIT == 0 )) && [[ -z "$ONLY" ]] && (( ! PREFLIGHT )); then
+    expected="$(grep -cvE '^\s*(#|clip_id|$)' "$MANIFEST")"
+    if (( n != expected )); then
+        die "the loop saw $n clips but the manifest holds $expected." \
+            "A partial run is not comparable to a full one, and the numbers in" \
+            "$RESULTS must not be reported as a corpus score." \
+            "This usually means a child process consumed the manifest on stdin."
+    fi
+fi
 
 rm -f "$RUN_DIR/.mark" "$RUN_DIR/.err"
 

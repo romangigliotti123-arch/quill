@@ -143,10 +143,23 @@ struct NIMCleanerLiveTests {
         expectWords(out, "The invoice is for 1500 dollars", "swap-number")
     }
 
-    @Test func dropsARestartedSentence() async {
+    @Test func dropsARestartedSentence() async throws {
         let out = await clean("I was going to the I mean I went to the shop")
         print("[live] restart: \(out ?? "nil")")
-        expectWords(out, "I went to the shop", "restart")
+        // Asserted as a property rather than as one exact string.
+        //
+        // Every other case in this file pins the whole sentence, and that works
+        // because there is only one sensible way to write them. This one has two
+        // — "I went to the shop" and "I went to the shop instead" both drop the
+        // abandoned clause correctly — so pinning the string tests the model's
+        // choice of phrasing rather than the behaviour the feature promises. What
+        // the feature promises is that the restarted half is gone and the
+        // intended half survives, and that is what is checked.
+        let text = try #require(out, "the model returned nothing")
+        let lower = text.lowercased()
+        #expect(lower.contains("went to the shop"), "lost the intended clause: \(out ?? "nil")")
+        #expect(!lower.contains("i mean"), "left the correction cue in: \(out ?? "nil")")
+        #expect(!lower.contains("was going to"), "kept the abandoned clause: \(out ?? "nil")")
     }
 
     @Test func dropsAFalseStart() async {
