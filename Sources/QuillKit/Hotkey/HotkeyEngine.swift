@@ -63,6 +63,24 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     private let workerFinished = NSCondition()
     private var workerRunning = false
     private var lastReportedReason: String?
+    /// What the key currently being handled would insert. Set on the tap thread
+    /// immediately before the state machine runs, read when it says to cancel.
+    private var pendingKeystroke: String = ""
+
+    /// The characters a key event inserts, or "" for one that inserts nothing.
+    /// An arrow key, a function key and a swallowed Escape all produce no text,
+    /// and treating them as one character is how live typing ends up deleting a
+    /// character of the user's own writing.
+    private static func text(of event: CGEvent) -> String {
+        var length = 0
+        var buffer = [UniChar](repeating: 0, count: 8)
+        event.keyboardGetUnicodeString(maxStringLength: 8, actualStringLength: &length, unicodeString: &buffer)
+        guard length > 0 else { return "" }
+        let text = String(utf16CodeUnits: buffer, count: length)
+        // Control characters are not something anyone can see on screen.
+        return text.allSatisfy { $0.isLetter || $0.isNumber || $0.isPunctuation || $0.isSymbol || $0 == " " }
+            ? text : ""
+    }
 
     public init(
         bindings: HotkeyBindingProviding = QuillSettings.shared,
@@ -352,6 +370,10 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
 
         case .keyDown:
             let isBare = flags.intersection(HotkeyBinding.chordMask).isEmpty
+            // Read what this key would insert BEFORE deciding anything, because
+            // after the event is passed through it is gone and live typing needs
+            // to be able to put it back.
+            pendingKeystroke = Self.text(of: event)
             return apply(machine.handle(.keyDown(keyCode: keyCode, isBare: isBare),
                                         at: Self.now()))
 
@@ -389,7 +411,9 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
                 // Escape is swallowed and never reaches the app; any other key is
                 // passed through and lands as a character the user can see.
                 let swallowed = effects.contains(.swallowEvent)
-                deliver { $0.hotkeyCancelled(userKeystrokeReachedApp: !swallowed) }
+                let typed = swallowed ? "" : pendingKeystroke
+                pendingKeystroke = ""
+                deliver { $0.hotkeyCancelled(userKeystroke: typed) }
             case let .startArmTimer(token, delay):
                 startArmTimer(token: token, delay: delay)
             case .cancelArmTimer:

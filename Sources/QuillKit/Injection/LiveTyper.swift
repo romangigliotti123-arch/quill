@@ -154,22 +154,30 @@ public final class LiveTyper {
 
     /// Takes back everything typed during this dictation. For Escape, and for a
     /// transcript that turned out to be empty.
-    /// - Parameter extraCharactersToLeave: characters that arrived after ours and
-    ///   are not ours to delete — the keystroke that cancelled the dictation,
-    ///   when it was passed through to the app rather than swallowed.
-    public func retract(extraCharactersToLeave: Int = 0) {
+    ///
+    /// - Parameter restoring: text that arrived AFTER ours and is not ours to
+    ///   delete — the keystroke that cancelled the dictation, when it was passed
+    ///   through to the app rather than swallowed.
+    ///
+    /// That text is deleted and retyped rather than spared, because it cannot be
+    /// spared. Backspaces delete from the caret backwards and the user's
+    /// character is the last thing on screen, so deleting one fewer than we typed
+    /// removes THEIR character first and leaves one of OURS behind — the precise
+    /// opposite of what the old parameter was named for, and it shipped that way.
+    public func retract(restoring: String = "") {
         cancelPending()
         guard !isAbandoned, !typed.isEmpty, focusHeld() else {
             typed = ""
             return
         }
-        // Delete fewer than we typed, never more. Leaving one of our characters
-        // behind is a visible smudge the user can remove; deleting one of theirs
-        // is us destroying their work, and they may never notice which.
-        let count = max(0, typed.count - extraCharactersToLeave)
-        if count > 0 { keyboard.backspace(times: count) }
+        let ours = typed.count
         typed = ""
+        keyboard.backspace(times: ours + restoring.count)
+        if !restoring.isEmpty { keyboard.type(restoring) }
     }
+
+    /// Whether anything is on screen that this dictation put there.
+    public var hasTypedAnything: Bool { !typed.isEmpty }
 
     public func reset() {
         cancelPending()

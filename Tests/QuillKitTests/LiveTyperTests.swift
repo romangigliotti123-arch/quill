@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import QuillKit
 
@@ -93,4 +94,78 @@ private func edit(_ from: String, _ to: String) -> (deletions: Int, insertion: S
             #expect(applied == to, "\"\(from)\" -> \"\(to)\" produced \"\(applied)\"")
         }
     }
+}
+
+// MARK: - Taking it back without eating the user's keystroke
+
+private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var screen = ""
+    private(set) var actions: [String] = []
+
+    init(existing: String = "") { screen = existing }
+
+    @discardableResult func type(_ text: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        screen += text
+        actions.append("type(\(text))")
+        return true
+    }
+
+    @discardableResult func backspace(times: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        screen = String(screen.dropLast(times))
+        actions.append("backspace(\(times))")
+        return true
+    }
+}
+
+@MainActor
+@Test func cancellingLeavesTheUsersOwnKeystrokeAndNoneOfOurs() {
+    // The old signature was `retract(extraCharactersToLeave:)` and it did the
+    // exact opposite of its name. Backspaces delete from the caret backwards and
+    // the user's character is the LAST thing on screen, so deleting one fewer
+    // than we typed removes THEIR character first and leaves one of OURS behind.
+    // There is no number of backspaces that spares it — the only correct move is
+    // to take everything back and put their character in again, which is why the
+    // delegate now carries the character instead of a boolean.
+    let keyboard = ScriptedKeystrokes()
+    let typer = LiveTyper(keyboard: keyboard)
+    typer.begin()
+    typer.update(to: "send it over")
+    #expect(keyboard.screen == "send it over")
+
+    // The user presses "x" mid-hold. It is passed through, so it lands after our
+    // text, and only then do we hear about the cancellation.
+    keyboard.type("x")
+    #expect(keyboard.screen == "send it overx")
+
+    typer.retract(restoring: "x")
+    #expect(keyboard.screen == "x", "left \(keyboard.screen.debugDescription) on screen")
+}
+
+@MainActor
+@Test func escapeTakesBackEverythingAndAddsNothing() {
+    // Escape is swallowed, so nothing of the user's is on screen and nothing is
+    // owed back.
+    let keyboard = ScriptedKeystrokes()
+    let typer = LiveTyper(keyboard: keyboard)
+    typer.begin()
+    typer.update(to: "send it over")
+    typer.retract()
+    #expect(keyboard.screen == "")
+}
+
+@MainActor
+@Test func aKeyThatInsertsNothingIsNotTreatedAsACharacter() {
+    // An arrow key cancels the dictation and is passed through, but inserts no
+    // text. Treating it as one character is how live typing deletes a character
+    // of the user's own writing that was already there.
+    let keyboard = ScriptedKeystrokes(existing: "already here ")
+    let typer = LiveTyper(keyboard: keyboard)
+    typer.begin()
+    typer.update(to: "send it over")
+    #expect(keyboard.screen == "already here send it over")
+    typer.retract(restoring: "")
+    #expect(keyboard.screen == "already here ", "ate the user's existing text")
 }

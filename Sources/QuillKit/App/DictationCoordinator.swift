@@ -392,7 +392,7 @@ public final class DictationCoordinator {
         }
     }
 
-    private func cancelDictation(userTypedACharacter: Bool = false) {
+    private func cancelDictation(userTyped: String = "") {
         // `isSpeculating` too, and this is not defensive tidying — it was a
         // permanent deadlock.
         //
@@ -414,7 +414,7 @@ public final class DictationCoordinator {
         // The cancelling keystroke, if it reached the app, is sitting at the end
         // of the text we are about to take back. Deleting our own character count
         // would eat it and leave one of ours in its place.
-        if isLive { liveTyper.retract(extraCharactersToLeave: userTypedACharacter ? 1 : 0) }
+        if isLive { liveTyper.retract(restoring: userTyped) }
         isLive = false
         Task { [transcriber, overlay] in
             await transcriber.cancel()
@@ -423,9 +423,29 @@ public final class DictationCoordinator {
     }
 
     private func fail(_ message: String) {
-        // The remaining silent path. `start()` throwing means the dictation never
-        // began at all: no audio, no transcript, no history row — and the only
-        // trace was an overlay that has already faded by the time anyone looks.
+        // Only for a dictation that never began.
+        //
+        // Failures reach here from two very different places. One is start()
+        // throwing, where there is no audio, no transcript and no history row,
+        // and the user is owed the error. The other is the analyzer being rebuilt
+        // in the background — rewarm() runs at the end of every dictation and
+        // after every cancel — and those failures arrive with no session attached
+        // and are delivered unconditionally.
+        //
+        // The second kind used to run this whole method. So a rewarm that failed
+        // while the NEXT dictation was already live and typing would call
+        // liveTyper.retract() and delete every word the user was watching appear
+        // in their own document, then set isDictating false so the key release
+        // did nothing. A background maintenance task, silently eating a sentence.
+        //
+        // If audio has been captured or words are on screen, this dictation began
+        // — whatever just failed did not stop it, and this method has no business
+        // tearing it down.
+        let began = timeline.audioFirstBuffer != nil || liveTyper.hasTypedAnything
+        if began, isDictating {
+            NSLog("[quill] ignoring a failure that arrived mid-dictation: %@", message)
+            return
+        }
         NSLog("[quill] dictation FAILED to start: %@", message)
         isDictating = false
         isSpeculating = false
@@ -502,8 +522,8 @@ extension DictationCoordinator: HotkeyEngineDelegate {
     public func hotkeyAborted() { abandonSpeculation() }
     public func hotkeyPressed() { beginDictation() }
     public func hotkeyReleased() { endDictation() }
-    public func hotkeyCancelled(userKeystrokeReachedApp: Bool) {
-        cancelDictation(userTypedACharacter: userKeystrokeReachedApp)
+    public func hotkeyCancelled(userKeystroke: String) {
+        cancelDictation(userTyped: userKeystroke)
     }
     public func hotkeyEngineUnavailable(reason: String) {
         overlay.show(.error(reason))

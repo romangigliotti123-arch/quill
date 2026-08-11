@@ -28,11 +28,17 @@ public protocol HotkeyEngineDelegate: AnyObject {
     func hotkeyReleased()
     /// Escape, or any keystroke that means "throw this dictation away".
     ///
-    /// `userKeystrokeReachedApp` is true when the cancelling key was NOT
-    /// swallowed and therefore landed in the focused app as a real character.
-    /// Live typing has to know: taking back exactly what it typed would otherwise
-    /// delete that character too and leave one of its own behind.
-    func hotkeyCancelled(userKeystrokeReachedApp: Bool)
+    /// `userKeystroke` is the text the cancelling key actually inserted into the
+    /// focused app — empty when it was swallowed, and empty for a key that
+    /// produces no character at all (an arrow, a function key).
+    ///
+    /// It has to be the text and not a boolean. Backspaces delete from the caret
+    /// backwards and that character is the LAST thing on screen, so there is no
+    /// number of backspaces that removes what Quill typed and spares it: deleting
+    /// one fewer takes the user's character first and leaves one of Quill's in
+    /// its place. The only correct move is to take everything back and put their
+    /// character in again, which needs the character.
+    func hotkeyCancelled(userKeystroke: String)
     /// The tap died or could not be created. Carries something a human can act on.
     func hotkeyEngineUnavailable(reason: String)
 }
