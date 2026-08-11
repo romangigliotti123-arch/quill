@@ -313,11 +313,14 @@ public final class InsightsLatencyPlot: NSView {
              bottom: style.accent.withAlphaComponent(0.02),
              width: 1.6, dashed: false)
 
-        // Markers.
+        // Markers. The median goes down first and keeps its place; p90 gives way
+        // if the two are close enough to touch, which is what happens as soon as
+        // the window narrows.
+        var takenLabelRects: [NSRect] = []
         drawMarker(at: markerP50, label: "median", baseline: baseline, top: plotTop,
-                   color: style.accent, emphasis: true)
+                   color: style.accent, emphasis: true, taken: &takenLabelRects)
         drawMarker(at: markerP90, label: "p90", baseline: baseline, top: plotTop,
-                   color: style.inkTertiary, emphasis: false)
+                   color: style.inkTertiary, emphasis: false, taken: &takenLabelRects)
 
         // Axis ticks. Quarter-second steps unless that would crowd the labels.
         let step: Double = bound > 1_400 ? 500 : 250
@@ -342,7 +345,7 @@ public final class InsightsLatencyPlot: NSView {
     }
 
     private func drawMarker(at ms: Double, label: String, baseline: CGFloat, top: CGFloat,
-                            color: NSColor, emphasis: Bool) {
+                            color: NSColor, emphasis: Bool, taken: inout [NSRect]) {
         let bound = upperBound
 
         // A marker past the axis has nowhere honest to sit. The old code clamped
@@ -374,6 +377,28 @@ public final class InsightsLatencyPlot: NSView {
         var labelX = tx - size.width / 2
         labelX = min(max(0, labelX), bounds.width - size.width)
         let labelY = top - 20
+
+        // At 1350pt the median sits well clear of p90. At 1060pt they collide and
+        // print as "median 0.38sp90 0.70s" — one string, unreadable, and it looks
+        // like a rendering fault rather than two labels. Slide out of the way if
+        // there is room; drop the label if there is not. The dashed line still
+        // marks the position, and a missing label reads as a chart with less on
+        // it, while an overlapping one reads as a chart that is broken.
+        var labelRect = NSRect(x: labelX, y: labelY, width: size.width, height: size.height)
+        let gap: CGFloat = 8
+        if let blocker = taken.first(where: { $0.insetBy(dx: -gap, dy: 0).intersects(labelRect) }) {
+            let toTheRight = blocker.maxX + gap
+            let toTheLeft = blocker.minX - gap - size.width
+            if toTheRight + size.width <= bounds.width {
+                labelRect.origin.x = toTheRight
+            } else if toTheLeft >= 0 {
+                labelRect.origin.x = toTheLeft
+            } else {
+                return
+            }
+            labelX = labelRect.origin.x
+        }
+        taken.append(labelRect)
 
         if emphasis {
             let pill = NSRect(x: labelX - 6, y: labelY - 3, width: size.width + 12, height: size.height + 6)

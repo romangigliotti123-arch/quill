@@ -887,6 +887,22 @@ public final class InsightsFixesCard: NSView {
         y += 13
 
         let listTitleSize = listTitle.fittingSize
+
+        // The heading is only worth its space if something can follow it. The
+        // no-data case was already handled by emptying the string; the no-ROOM
+        // case was not, so at 1060x700 the card ended with "Caught by your
+        // dictionary" and then the bottom edge — the exact failure the emptied
+        // string exists to avoid, arrived at from the other direction. The rule
+        // above goes with it: a divider before nothing divides nothing.
+        let listWouldFit = !rows.isEmpty
+            && y + listTitleSize.height + 6 + 18 <= bounds.height - 11
+        listTitle.isHidden = !listWouldFit
+        rule.isHidden = !listWouldFit
+        guard listWouldFit else {
+            rows.forEach { $0.isHidden = true }
+            return
+        }
+
         listTitle.frame = NSRect(x: pad, y: y, width: listTitleSize.width, height: listTitleSize.height)
         y += listTitleSize.height + 6
 
