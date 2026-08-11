@@ -33,15 +33,21 @@ public final class DictionarySectionView: NSView {
 
     private let list: DictionaryListView
     private var detail: DictionaryDetailView
+    /// Shown when the rows are the preview fixture rather than this user's own
+    /// history. Unlabelled sample data on a screen that exists to prove a number
+    /// is worse than an empty screen: it is a claim, and it is false.
+    private var sampleChip: DashboardChip?
 
     public override var isFlipped: Bool { true }
 
     public convenience init(style: DashboardStyle) {
+        let records = HistoryStore().all
         self.init(style: style,
-                  entries: DictionaryEntry.entries(vocabulary: .load(), records: HistoryStore().all))
+                  entries: DictionaryEntry.entries(vocabulary: .load(), records: records),
+                  isSample: records.isEmpty)
     }
 
-    public init(style: DashboardStyle, entries: [DictionaryEntry]) {
+    public init(style: DashboardStyle, entries: [DictionaryEntry], isSample: Bool = false) {
         self.style = style
         // The list is the argument, so it is sorted by the number that carries
         // it: the terms Quill has had to fix most often float to the top, and
@@ -74,6 +80,11 @@ public final class DictionarySectionView: NSView {
         addSubview(blurb)
         addSubview(importButton)
         addSubview(addButton)
+        if isSample {
+            let chip = DashboardChip(text: "Sample data", tone: .outline, style: style)
+            addSubview(chip)
+            sampleChip = chip
+        }
 
         for tile in DictionarySectionView.metrics(for: sorted, style: style) {
             addSubview(tile)
@@ -149,6 +160,12 @@ public final class DictionarySectionView: NSView {
         let importWidth = importButton.intrinsicWidth
         importButton.frame = NSRect(x: addButton.frame.minX - 10 - importWidth,
                                     y: addButton.frame.minY, width: importWidth, height: 36)
+        if let sampleChip {
+            let size = sampleChip.fittingSize
+            sampleChip.frame = NSRect(x: importButton.frame.minX - 10 - size.width,
+                                      y: (importButton.frame.midY - size.height / 2).rounded(),
+                                      width: size.width, height: size.height)
+        }
 
         y += DashboardSpace.lg + DashboardSpace.xxs
 

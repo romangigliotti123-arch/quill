@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 /// Renders any dashboard section to a PNG without launching Quill.
 ///
@@ -122,6 +123,11 @@ public enum DashboardPreviewRenderer {
         // for a window with no on-screen area. Without this spin the render
         // comes back as an empty canvas with two stray layers on it.
         RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        // Any animation still in flight would be captured mid-frame. Sections are
+        // added without one now, but a section that starts its own on appear
+        // would silently reintroduce the blank-screenshot bug, so settle the tree
+        // rather than trusting every future section to behave.
+        CATransaction.flush()
         root.layoutSubtreeIfNeeded()
         setContentsScale(scale, on: root.layer)
         setNeedsDisplay(root)
@@ -169,7 +175,54 @@ public enum DashboardPreviewRenderer {
         context.restoreGState()
 
         window.orderOut(nil)
-        return context.makeImage()!
+        let image = context.makeImage()!
+        if distinctTonesInPanel(of: image) < blankPanelThreshold {
+            FileHandle.standardError.write(Data(
+                "render check failed: \(section.rawValue) drew nothing into its panel\n".utf8))
+            exit(2)
+        }
+        return image
+    }
+
+    /// Refuses to hand back a screenshot whose content panel is empty.
+    ///
+    /// This is here because the harness spent its whole existence emitting blank
+    /// panels and reporting success. The section was added at zero opacity for a
+    /// cross-fade, AppKit never drew a transparent subtree, and out came a valid
+    /// PNG, a zero exit code, and a printed path. Nothing in the pipeline could
+    /// tell "the screen looks like this" from "the screen drew nothing", so a
+    /// section could be reviewed, signed off and shipped without one pixel of it
+    /// ever having been seen.
+    ///
+    /// The test is deliberately crude — count distinct luminance buckets inside
+    /// the panel — because it only has to separate "content" from "flat fill",
+    /// and a crude check that runs on every render is worth more than a precise
+    /// one that needs a baseline to compare against.
+    /// Fewer distinct tones than this in the content panel means it drew nothing.
+    /// Four is generous: a real section has hundreds, a flat fill has one or two,
+    /// and anti-aliasing on a lone rounded rectangle accounts for the rest.
+    static let blankPanelThreshold = 4
+
+    static func distinctTonesInPanel(of image: CGImage) -> Int {
+        let inset = 40
+        let x0 = Int(CGFloat(image.width) * 0.30) + inset
+        let y0 = inset * 3
+        let w = image.width - x0 - inset
+        let h = image.height - y0 - inset
+        guard w > 0, h > 0,
+              let cropped = image.cropping(to: CGRect(x: x0, y: y0, width: w, height: h)),
+              let data = cropped.dataProvider?.data as Data?
+        else { return Int.max }
+
+        let bytesPerPixel = cropped.bitsPerPixel / 8
+        var buckets = Set<Int>()
+        var index = 0
+        while index + bytesPerPixel <= data.count {
+            let luminance = (Int(data[index]) * 3 + Int(data[index + 1]) * 6 + Int(data[index + 2])) / 10
+            buckets.insert(luminance / 8)
+            index += bytesPerPixel * 97   // prime stride: sample the panel, not a column of it
+        }
+        return buckets.count
     }
 
     // MARK: - Chrome

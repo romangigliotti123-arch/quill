@@ -26,7 +26,13 @@ public final class DashboardSectionRegistry: DashboardSectionProvider {
         // can pass review and none of them appear.
         register(.insights) { InsightsView(style: $0) }
         register(.dictation) { DictationSectionProvider().dashboardView(for: .dictation, style: $0) }
-        register(.dictionary) { DictionarySectionView(style: $0, entries: DictionaryEntry.entries()) }
+        // Note the initialiser. `DictionaryEntry.entries()` with no records
+        // always falls through to the preview fixture, so for the entire life of
+        // this screen the shipping app rendered twenty invented terms with
+        // invented mishearing counts — on the one screen whose whole argument is
+        // "these numbers are your real dictionary firing on your real speech".
+        // The convenience init reads the history store; use it.
+        register(.dictionary) { DictionarySectionView(style: $0) }
         register(.snippets) { SnippetsSectionProvider().dashboardView(for: .snippets, style: $0) }
         register(.scratchpad) { ScratchpadSectionView(style: $0, notes: NoteStore.shared.all) }
         register(.style) { StyleSectionView(style: $0, profile: StyleStore.shared.profile) }

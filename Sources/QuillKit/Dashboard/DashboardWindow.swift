@@ -50,7 +50,9 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         addSubview(panel)
         addSubview(statusPill)
         sidebar.delegate = self
-        showSection(selection)
+        // No fade on the first paint: there is nothing to cross-fade from, and
+        // starting at zero opacity is what made offscreen renders come out blank.
+        showSection(selection, animated: false)
         observeReloads()
     }
 
@@ -69,7 +71,17 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         set { statusPill.text = newValue; needsLayout = true }
     }
 
-    public func showSection(_ section: DashboardSection) {
+    /// Swap the visible section.
+    ///
+    /// `animated` is false for the first paint and for offscreen rendering. The
+    /// offscreen case is not cosmetic: the renderer used to capture a frame of
+    /// the cross-fade, so every screenshot this project has ever taken of a
+    /// section came out as an empty panel — the fade begins at zero opacity, and
+    /// a view that is transparent when AppKit first walks the tree never gets its
+    /// layer contents drawn at all. A harness whose whole job is to show what a
+    /// screen looks like was reporting every screen as blank, and reporting it
+    /// silently, with a valid PNG and a zero exit code.
+    public func showSection(_ section: DashboardSection, animated: Bool = true) {
         let outgoing = sectionView
         let view = provider?.dashboardView(for: section, style: style)
             ?? DashboardPlaceholderView(section: section, style: style)
@@ -78,10 +90,20 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         // reads as a glitch; a slow one reads as waiting. 0.18s with a small
         // upward offset is the range where the eye registers "this replaced that"
         // without being asked to sit through it.
-        view.alphaValue = 0
+        view.alphaValue = animated ? 0 : 1
         panel.addSubview(view)
         sectionView = view
         layoutSubtreeIfNeeded()
+
+        guard animated else {
+            // Synchronously, not in a completion handler. Two showSection calls
+            // landing inside one 0.18s window left both views parented, stacked
+            // and half-transparent — which is the second reason the renders were
+            // unreadable.
+            outgoing?.removeFromSuperview()
+            needsLayout = true
+            return
+        }
 
         let rise: CGFloat = 6
         view.setFrameOrigin(NSPoint(x: view.frame.origin.x, y: view.frame.origin.y - rise))

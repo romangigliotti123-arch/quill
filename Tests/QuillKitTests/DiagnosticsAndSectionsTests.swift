@@ -141,3 +141,42 @@ import Testing
         #expect(!device.name.isEmpty)
     }
 }
+
+// MARK: - The screenshot harness must not report a blank screen as a screen
+
+@Test func aRenderedSectionThatDrewNothingIsCaught() {
+    // The harness emitted blank panels for its entire existence and called it
+    // success: the section was parented at zero opacity for a cross-fade, AppKit
+    // does not draw a transparent subtree, and out came a valid PNG with a zero
+    // exit code and a printed path. Every screen "verified by screenshot" in this
+    // project was verified against an empty rectangle.
+    //
+    // So the harness now inspects what it produced. This test holds that check
+    // honest from both directions — a flat fill has to fail it, and the real
+    // thing has to pass.
+    func image(fill: (CGContext) -> Void) -> CGImage {
+        let context = CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8,
+                                bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        fill(context)
+        return context.makeImage()!
+    }
+
+    let blank = image { context in
+        context.setFillColor(NSColor(white: 0.12, alpha: 1).cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+    }
+    #expect(DashboardPreviewRenderer.distinctTonesInPanel(of: blank)
+              < DashboardPreviewRenderer.blankPanelThreshold)
+
+    let drawn = image { context in
+        context.setFillColor(NSColor(white: 0.12, alpha: 1).cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+        for row in 0 ..< 30 {
+            context.setFillColor(NSColor(white: 0.2 + Double(row) * 0.02, alpha: 1).cgColor)
+            context.fill(CGRect(x: 0, y: row * 10, width: 400, height: 6))
+        }
+    }
+    #expect(DashboardPreviewRenderer.distinctTonesInPanel(of: drawn)
+              >= DashboardPreviewRenderer.blankPanelThreshold)
+}
