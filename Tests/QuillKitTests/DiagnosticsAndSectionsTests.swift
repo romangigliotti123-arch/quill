@@ -180,3 +180,21 @@ import Testing
     #expect(DashboardPreviewRenderer.distinctTonesInPanel(of: drawn)
               >= DashboardPreviewRenderer.blankPanelThreshold)
 }
+
+@Test func aLoopbackInputIsAWarningAndNotATick() {
+    // An eval run left this Mac's system input on BlackHole 2ch. Every dictation
+    // after it recorded perfect digital silence, the app said "nothing was heard,
+    // try again", and the one check that could have explained it — the input
+    // device — showed a green OK and the words "Listening to BlackHole 2ch."
+    //
+    // A loopback carries what other applications play into it. Pointing dictation
+    // at one is not a marginal setup; it is a microphone that cannot hear.
+    #expect(AudioDeviceInfo.isLoopback("BlackHole 2ch"))
+    #expect(AudioDeviceInfo.isLoopback("Loopback Audio"))
+    #expect(AudioDeviceInfo.isLoopback("Soundflower (2ch)"))
+    #expect(AudioDeviceInfo.isLoopback("VB-Cable"))
+
+    #expect(!AudioDeviceInfo.isLoopback("MacBook Air Microphone"))
+    #expect(!AudioDeviceInfo.isLoopback("AirPods Pro"))
+    #expect(!AudioDeviceInfo.isLoopback("Shure MV7"))
+}

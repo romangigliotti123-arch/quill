@@ -16,6 +16,8 @@ public final class DictationCoordinator {
     private let inserter: TextInserting
     private let overlay: OverlayPresenting
     private let cleaner: TranscriptCleaning
+    /// Loudest input level seen during the current dictation.
+    private var peakLevel: Float = 0
     private let history: HistoryStore
     private let snippets: SnippetStore
     private let settings: QuillSettings
@@ -97,12 +99,25 @@ public final class DictationCoordinator {
                        self.isDictating || self.isSpeculating {
                         self.timeline.audioFirstBuffer = Date()
                     }
+                    // The loudest thing the microphone heard. Kept so that an
+                    // empty transcript can tell the user which of the two very
+                    // different things went wrong.
+                    self.peakLevel = max(self.peakLevel, level)
                     guard self.isDictating else { return }
                     self.overlay.show(.listening(level: level))
                 }
             }
         }
     }
+
+    /// Below this the input is not quiet, it is not connected to anything.
+    ///
+    /// Ordinary room tone on the built-in microphone sits around 0.01–0.03 even
+    /// with nobody speaking; a loopback device with no app playing into it
+    /// returns exact zeros. The floor is set under the quietest real room and
+    /// well above digital silence, so the specific message only appears when the
+    /// device genuinely delivered nothing.
+    static let silenceFloor: Float = 0.005
 
     @discardableResult
     public func start() -> Bool { hotkey.start() }
@@ -132,6 +147,9 @@ public final class DictationCoordinator {
         // itself makes, so the stamp never claims a microphone that recorded
         // nothing.
         capturedInputDevice = AudioDeviceInfo.activeInputName(uid: settings.inputDeviceUID)
+        // Per dictation, not per launch: last time's loud sentence must not vouch
+        // for this time's dead microphone.
+        peakLevel = 0
 
         Task { [transcriber] in
             await transcriber.prepare()
@@ -248,9 +266,24 @@ public final class DictationCoordinator {
                 // edge of its endpointing produced an empty transcript in a
                 // quarter of attempts. Whatever the cause on any given day, the
                 // one thing that must never happen is silence.
-                NSLog("[quill] empty transcript after %@",
-                      self.timeline.releaseToInsertedMs.map { "\($0)ms" } ?? "an unknown wait")
-                overlay.show(.error("Nothing was heard — try again, or check the microphone in Settings."))
+                NSLog("[quill] empty transcript after %@ (peak level %.3f)",
+                      self.timeline.releaseToInsertedMs.map { "\($0)ms" } ?? "an unknown wait",
+                      self.peakLevel)
+                // Two very different failures wear the same face here, and only
+                // one of them is the user's to fix. If the microphone delivered
+                // buffers that never rose off the floor, the recogniser did not
+                // mishear anything — nothing reached it. That is what a loopback
+                // device selected as the system input looks like from in here,
+                // and it is not hypothetical: an eval run left this Mac's input
+                // on BlackHole 2ch, and every dictation after it recorded silence
+                // while the app said "nothing was heard, try again".
+                //
+                // Telling someone to try again, when trying again cannot work, is
+                // worse than saying nothing.
+                let device = self.capturedInputDevice ?? "Your microphone"
+                overlay.show(.error(self.peakLevel < DictationCoordinator.silenceFloor
+                    ? "\(device) sent no sound at all. Pick a different microphone in Settings."
+                    : "Nothing was heard — try again, or check the microphone in Settings."))
                 try? await Task.sleep(for: .milliseconds(1_600))
                 overlay.hide()
                 return

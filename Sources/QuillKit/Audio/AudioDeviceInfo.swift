@@ -45,6 +45,28 @@ public enum AudioDeviceInfo {
     /// "Can record" is decided by asking for the input stream configuration and
     /// counting channels — `kAudioDevicePropertyStreams` alone lists speakers,
     /// which would put "MacBook Air Speakers" in a microphone menu.
+    /// Whether a device is a virtual loopback rather than something with a
+    /// microphone in it.
+    ///
+    /// These carry only what other applications play into them, so selecting one
+    /// as the dictation input produces perfect, unbroken digital silence — and
+    /// silence is indistinguishable from "the recogniser did not understand you"
+    /// at every layer above this one. It is not a corner case here: an eval run
+    /// left this Mac's system input on BlackHole 2ch, and every dictation after
+    /// it recorded nothing while the app reported that it had heard nothing.
+    ///
+    /// Matched by name because that is what these drivers give us — there is no
+    /// CoreAudio property for "this is a loopback".
+    public static func isLoopback(_ name: String) -> Bool {
+        let lowered = name.lowercased()
+        return loopbackNames.contains { lowered.contains($0) }
+    }
+
+    static let loopbackNames = [
+        "blackhole", "soundflower", "loopback", "aggregate", "multi-output",
+        "ishowu", "vb-cable", "existential audio",
+    ]
+
     public static func inputDevices() -> [InputDevice] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,

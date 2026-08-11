@@ -70,9 +70,22 @@ public enum Diagnostics {
                     remedy: "Remove Quill from \(Permission.accessibility.settingsPath) and add it back — the grant is tied to the code signature."))
 
         let device = AudioDeviceInfo.activeInputName()
-        checks.append(Check(title: "Input device", status: device == nil ? .warn : .pass,
-                            detail: device.map { "Listening to \($0)." } ?? "CoreAudio will not name an input device.",
-                            remedy: device == nil ? "Check a microphone is connected and selected in Settings." : nil))
+        let loopback = device.map(AudioDeviceInfo.isLoopback) ?? false
+        // A loopback selected as the input used to report "OK". It carries only
+        // what other apps play into it, so every dictation through one records
+        // silence — a green tick on the single check that would have explained
+        // the failure.
+        checks.append(Check(
+            title: "Input device",
+            status: device == nil ? .warn : (loopback ? .warn : .pass),
+            detail: device.map {
+                loopback
+                    ? "\($0) is a loopback device. It carries what other apps play, not your voice, so dictation will record silence."
+                    : "Listening to \($0)."
+            } ?? "CoreAudio will not name an input device.",
+            remedy: device == nil
+                ? "Check a microphone is connected and selected in Settings."
+                : (loopback ? "Pick a real microphone in Settings, or change the system input in Sound." : nil)))
 
         return checks
     }
