@@ -261,3 +261,25 @@ import Testing
     // and the casing, not the individual words.
     #expect(VocabularyHarvest.candidate(from: "roman-design-co") == "roman design co")
 }
+
+@Test func anEditorKeepsSentenceCasingBecauseItIsMostlyAChatPanel() {
+    // Read straight out of Roman's own history: four consecutive sentences
+    // dictated to me through VS Code, every one of them lower-cased.
+    //
+    //   raw "One thing I want you to do is…"  ->  "one thing I want you to do is…"
+    //   raw "Try to change this so that…"     ->  "try to change this so that…"
+    //
+    // The rule was right about code and wrong about the place he actually uses
+    // it. The costs are not symmetrical either: an unwanted capital inside a
+    // string literal is one keystroke and impossible to miss, a missing capital
+    // on every sentence you dictate is invisible while you speak and arrives in
+    // front of whoever you are writing to.
+    let sentence = "One thing I want you to do is change the app."
+    #expect(AppContextFormatter.apply(sentence, context: .code) == sentence)
+    #expect(AppContextFormatter.apply(sentence, context: .prose) == sentence)
+
+    // A terminal still gets neither, which is where suppression earns its place.
+    #expect(AppContextFormatter.apply("Git status.", context: .terminal) == "git status")
+    // And a search field still loses the full stop but is not a command.
+    #expect(AppContextFormatter.apply("Melbourne weather.", context: .query) == "melbourne weather")
+}

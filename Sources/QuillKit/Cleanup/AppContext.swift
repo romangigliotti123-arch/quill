@@ -25,8 +25,10 @@ public enum AppContext: String, Sendable, CaseIterable {
     /// A search field, address bar, or anything else where the text is a query.
     /// Queries do not end in full stops.
     case query
-    /// A code editor. Sentence casing is wrong more often than right, and a
-    /// trailing full stop inside a string literal or an identifier is noise.
+    /// A code editor — which, measured on real use, is mostly a chat panel that
+    /// happens to live inside one. Treated exactly like prose today; the case is
+    /// kept because it is honest about what the app detected and because a future
+    /// rule may want to distinguish an editor pane from the panels around it.
     case code
     /// Ordinary prose: mail, chat, documents, notes. Full punctuation.
     case prose
@@ -66,10 +68,29 @@ public enum AppContext: String, Sendable, CaseIterable {
     // MARK: - What each context wants
 
     /// Whether a sentence should be given a capital letter at the front.
+    ///
+    /// A code editor keeps its capitals, and that is a reversal.
+    ///
+    /// The reasoning for suppressing them was sound and the evidence against it
+    /// is better. An editor is not only an editor: Roman dictates prose into a
+    /// chat panel inside VS Code all day, and every sentence he sent came out
+    /// lower-cased — "one thing I want you to do is…", "try to change this so
+    /// that…", four in a row, read straight out of his own history. The rule was
+    /// right about code and wrong about the place he actually uses it.
+    ///
+    /// The costs are not symmetrical. An unwanted capital inside a string literal
+    /// is one keystroke to remove and impossible to miss. A missing capital on
+    /// every sentence you dictate is invisible while you speak, arrives in front
+    /// of whoever you are writing to, and there is nothing on screen to tell you
+    /// the app did it on purpose.
+    ///
+    /// A terminal still gets none, because that is where suppression earns its
+    /// place: `Git status` is not a command, and the capital has to be deleted by
+    /// hand every single time.
     public var capitalisesSentences: Bool {
         switch self {
-        case .terminal, .code, .query: return false
-        case .prose: return true
+        case .terminal, .query: return false
+        case .code, .prose: return true
         }
     }
 
@@ -100,7 +121,7 @@ public enum AppContext: String, Sendable, CaseIterable {
         switch self {
         case .terminal: return "No capital, no full stop — a command is not a sentence."
         case .query:    return "No full stop; a query does not end in one."
-        case .code:     return "Punctuation kept, no sentence casing."
+        case .code:     return "Full punctuation and sentence casing — an editor is not only code."
         case .prose:    return "Full punctuation and sentence casing."
         }
     }
