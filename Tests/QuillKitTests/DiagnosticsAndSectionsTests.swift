@@ -126,3 +126,18 @@ import Testing
                 "\(section.rawValue) has no view registered")
     }
 }
+
+// MARK: - Input devices
+
+@Test func theMicrophonePickerNeverOffersCoreAudiosOwnScratchDevices() {
+    // `CADefaultDeviceAggregate-47292-0` turned up in the picker on this Mac,
+    // offered as something to choose. It is an aggregate CoreAudio builds for
+    // itself while an app is recording — real device ID, real input channels, a
+    // process ID in the middle of its name, and no use whatsoever to a person.
+    for device in AudioDeviceInfo.inputDevices() {
+        #expect(!device.name.hasPrefix("CADefaultDeviceAggregate"),
+                "system scratch device offered to the user: \(device.name)")
+        #expect(!device.uid.hasPrefix("~"), "private aggregate offered: \(device.uid)")
+        #expect(!device.name.isEmpty)
+    }
+}

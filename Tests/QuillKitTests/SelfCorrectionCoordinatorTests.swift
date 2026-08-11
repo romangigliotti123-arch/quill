@@ -113,6 +113,16 @@ private func dictate(_ coordinator: DictationCoordinator, _ inserter: RecordingI
 
 // MARK: - Tests
 
+/// The two assertions in this file that are about *time* rather than about text.
+///
+/// Serialized, because they were failing while the code was fine: the suite runs
+/// live network tests in parallel, a wall-clock bound competes with them for the
+/// machine, and a red test that says nothing about the code is worse than no test
+/// — it trains you to re-run instead of to look. Widening the bound twice was
+/// treating the symptom.
+@Suite(.serialized)
+struct DeadlineTests {
+
 @MainActor
 @Test func aSelfCorrectionIsFixedEvenWhenTheModelNeverAnswers() async {
     let (coordinator, inserter, ai) = makeCoordinator(transcript: "send it to Noah no wait send it to Carlo")
@@ -127,6 +137,8 @@ private func dictate(_ coordinator: DictationCoordinator, _ inserter: RecordingI
     // it. Actual latency is measured in NIMCleanerTests, where it is the subject
     // rather than a proxy.
     #expect(elapsed < .seconds(6), "took \(elapsed)")
+}
+
 }
 
 @MainActor
@@ -164,6 +176,8 @@ private func dictate(_ coordinator: DictationCoordinator, _ inserter: RecordingI
 // a slow operation that ignored cancellation held the dictation hostage until
 // its own network timeout expired. It presented as "it just didn't paste".
 
+@Suite(.serialized)
+struct SlowOperationTests {
 @Test func aSlowOperationThatIgnoresCancellationCannotHoldUpInsertion() async {
     // The property under test is "bounded by the deadline, not by the operation".
     // The threshold is generous on purpose: this suite runs while the machine may
@@ -189,7 +203,13 @@ private func dictate(_ coordinator: DictationCoordinator, _ inserter: RecordingI
     let elapsed = ContinuousClock.now - start
 
     #expect(result == nil)
-    #expect(elapsed < .seconds(5), "deadline did not bound the wait: \(elapsed)")
+    // Ten seconds against a thirty-second operation. The regression this guards
+    // against is *unbounded* waiting — it stalled a dictation for 59 seconds —
+    // so any ceiling comfortably under the operation length proves the deadline
+    // is doing its job, and a wide one stops the assertion reporting the state of
+    // the machine instead of the state of the code.
+    #expect(elapsed < .seconds(10), "deadline did not bound the wait: \(elapsed)")
+}
 }
 
 @Test func aFastOperationStillWins() async {

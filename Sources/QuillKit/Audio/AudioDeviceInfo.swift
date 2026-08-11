@@ -64,11 +64,49 @@ public enum AudioDeviceInfo {
 
         return ids.compactMap { id in
             guard inputChannelCount(of: id) > 0,
+                  !isHidden(id),
                   let name = name(of: id),
-                  let uid = uid(of: id)
+                  let uid = uid(of: id),
+                  !isPrivateAggregate(name: name, uid: uid)
             else { return nil }
             return InputDevice(id: id, uid: uid, name: name)
         }
+    }
+
+    /// CoreAudio's own "do not show this to a person" flag.
+    ///
+    /// Counting input channels is not enough to decide what belongs in a
+    /// microphone menu. The system builds aggregate devices of its own while
+    /// apps are recording, and they have input channels, real device IDs and
+    /// names like `CADefaultDeviceAggregate-47292-0` — a process ID in the
+    /// middle of it. One of those appeared in Quill's picker, offered to the user
+    /// as something to choose.
+    private static func isHidden(_ deviceID: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyIsHidden,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var hidden: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &hidden) == noErr
+        else { return false }
+        return hidden != 0
+    }
+
+    /// Belt and braces for the ones that are not flagged hidden.
+    ///
+    /// `IsHidden` is the correct check and it is not always set on these — the
+    /// aggregate seen in the picker was not hidden at all. The name is a
+    /// documented CoreAudio convention rather than a guess, and matching on it
+    /// costs nothing. Deliberately narrow: BlackHole is also a virtual device and
+    /// is a perfectly legitimate thing to record from, so this excludes only what
+    /// the system built for itself.
+    private static func isPrivateAggregate(name: String, uid: String) -> Bool {
+        name.hasPrefix("CADefaultDeviceAggregate")
+            || uid.hasPrefix("CADefaultDeviceAggregate")
+            // Private aggregates get a tilde-prefixed UID.
+            || uid.hasPrefix("~")
     }
 
     /// nil when the saved device is gone — callers fall back to the default.

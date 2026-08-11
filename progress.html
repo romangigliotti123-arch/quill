@@ -113,6 +113,14 @@
   </tbody>
 </table>
 
+<div class="callout">
+  <b>Reversed, and worth saying twice</b>
+  Dropping <code>.fastResults</code> scores better on file-fed audio and is a disaster through a microphone:
+  the first partial cannot arrive before ~3.9s, so any utterance ending before then returns an
+  <b>empty</b> transcript — roughly one dictation in four produced nothing at all. It stays on, and
+  Quill does not win on WER. A benchmark win that costs a quarter of your dictations is not a win.
+</div>
+
 <h2>Recogniser experiment — can the accuracy gap be closed honestly?</h2>
 <table>
   <thead><tr><th style="width:30%">Config</th><th style="width:16%">WER</th><th style="width:16%">Errors</th><th>Note</th></tr></thead>
@@ -123,9 +131,12 @@
     <tr><td class="name"><code>.fastResults</code> off</td><td class="num win">2.46%</td><td class="num">28</td>
         <td class="note">Four errors better. A speed-for-accuracy trade Quill can afford and Flow cannot,
             since Quill's post-release wait is single-digit milliseconds.</td></tr>
-    <tr><td class="name">Same pair, fed in real time</td><td class="num">running</td><td class="num">—</td>
-        <td class="note">The shipping decision has to be made on realtime numbers: a microphone delivers at
-            1x and the recogniser endpoints differently when it is not force-fed.</td></tr>
+    <tr><td class="name">Same pair, fed in real time</td><td class="num">2.81 / 2.46%</td><td class="num">32 / 28</td>
+        <td class="note">Identical to the batch figures — so the accuracy claim held up. What did not
+            survive was driving the "better" config through a microphone.</td></tr>
+    <tr><td class="name">Off, through the loopback</td><td class="num lose">~25% lost</td><td class="num">—</td>
+        <td class="note">First partial never arrives before 3.93s, so short utterances end before the
+            recogniser has said anything and the transcript comes back empty.</td></tr>
   </tbody>
 </table>
 
@@ -160,6 +171,11 @@
 <div><i>day 3</i> <b>Fixed cause and class:</b> manifest now read on fd 3, every child denied stdin, and the run refuses to report at all if it saw fewer clips than the manifest holds.</div>
 <div><i>day 3</i> <b>Fixed settle → poll.</b> Six clips in thirty-five were called failures while their transcripts sat in history, written a moment after the reader gave up.</div>
 <div><i>day 3</i> <b class="g">Tuning our own recogniser needs no microphone at all.</b> WER is scored on raw ASR, so a file-fed harness A/Bs two configs in 60 seconds instead of 35 minutes.</div>
+<div><i>day 3</i> <b class="r">Reversed the accuracy win.</b> Better on files, lost a quarter of dictations through a microphone. Shipped config unchanged; both numbers reported.</div>
+<div><i>day 3</i> <b class="g">Live text proven live</b> — the target document sampled mid-speech, growing at t=5s and t=7s, with the final pass adding the commas the live stream lacked.</div>
+<div><i>day 3</i> <b>An empty transcript is no longer silent.</b> It used to hide the overlay and return, which is indistinguishable from a dead mic, a dead key and a dead app.</div>
+<div><i>day 3</i> <b>Transforms and Help built.</b> No section is a placeholder now except Notetaker, which still refuses rather than fakes.</div>
+<div><i>day 3</i> <b class="r">Unfound:</b> a residual 8-15%% of clips fail to read back through run_eval. Every silent path in the app was instrumented and stayed quiet while a dictation completed each time, so it is the rig — but unfound is unfound.</div>
 </div>
 
 <footer>Bar: Wispr Flow 1.6.447 (cloud) · Every number here has a run behind it · Nothing rounded up.</footer>
