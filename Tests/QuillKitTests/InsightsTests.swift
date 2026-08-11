@@ -354,3 +354,23 @@ private final class InsightsOnlyProvider: DashboardSectionProvider {
             "the heatmap should still draw its full window — only the ratio is scoped")
     #expect(metrics.firstRecord != nil)
 }
+
+@Test func aClipPlayedThroughALoopbackIsNotADictation() {
+    // 684 of the 696 records on this Mac are eval clips fed through BlackHole.
+    // Insights counted every one, and told Roman he had dictated 14,145 words in
+    // thirty days, at 81 wpm, saving 3h 59m against typing — statistics about a
+    // test harness, presented as facts about him.
+    func record(device: String?) -> DictationRecord {
+        DictationRecord(id: UUID(), date: Date(), rawText: "a b c", insertedText: "A b c.",
+                        wordCount: 3, inputDevice: device,
+                        timings: .init(timeToFirstWordMs: 200, finalToInsertedMs: 10,
+                                       endToEndMs: 900, audioDurationMs: 1200,
+                                       usedThoroughCleanup: false, releaseToInsertedMs: 30))
+    }
+    #expect(record(device: "BlackHole 2ch").isMeasurement)
+    #expect(record(device: "Loopback Audio").isMeasurement)
+    #expect(!record(device: "MacBook Air Microphone").isMeasurement)
+    // No device recorded is not evidence of a loopback, and guessing against the
+    // user here would quietly delete real dictations from their own statistics.
+    #expect(!record(device: nil).isMeasurement)
+}

@@ -23,6 +23,24 @@ public struct DictationRecord: Codable, Sendable, Equatable {
     public let inputDevice: String?
     public let timings: Timings
 
+    /// Whether this record is a measurement rather than something the user said.
+    ///
+    /// The eval rig feeds audio files through a loopback device, and it writes to
+    /// the same history file the app does. On this Mac that is 684 of 696
+    /// records — so Insights was reporting "14,145 words dictated in the last 30
+    /// days", "81 wpm median pace over 696 dictations" and "3h 59m saved against
+    /// typing it out", every one of them a statistic about a test harness,
+    /// presented to Roman as a fact about himself.
+    ///
+    /// A dictation is words a person spoke into a microphone. Audio played into a
+    /// loopback is a measurement, and the two must not be added together on a
+    /// screen whose only job is to be trusted. The history *log* still lists them
+    /// — that is a record of what the app did — but nothing that says "you"
+    /// counts them.
+    public var isMeasurement: Bool {
+        inputDevice.map(AudioDeviceInfo.isLoopback) ?? false
+    }
+
     public struct Timings: Codable, Sendable, Equatable {
         public let timeToFirstWordMs: Int?
         public let finalToInsertedMs: Int?
@@ -55,7 +73,15 @@ public struct DictationRecord: Codable, Sendable, Equatable {
 
 public final class HistoryStore: @unchecked Sendable {
 
+    /// Overridable so a measurement run does not write into the user's history.
+    ///
+    /// 684 of the 696 records on this Mac are eval clips fed through a loopback,
+    /// not things Roman said. See `DictationRecord.isMeasurement` for what that
+    /// cost on the statistics screen.
     public static let defaultURL: URL = {
+        if let override = ProcessInfo.processInfo.environment["QUILL_HISTORY_FILE"], !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("Quill/history.json")
     }()

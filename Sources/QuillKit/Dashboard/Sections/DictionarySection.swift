@@ -43,6 +43,16 @@ public final class DictionarySectionView: NSView {
     public override var isFlipped: Bool { true }
 
     public convenience init(style: DashboardStyle) {
+        // Deliberately NOT filtered by `isMeasurement`, unlike Insights.
+        //
+        // The line is what the screen claims. Insights says "you dictated 14,145
+        // words" and "you saved 3h 59m", which are claims about Roman, so a clip
+        // played through a loopback must not count. This screen says "the word
+        // 'graphify' was repaired six times, here is one of them" — and the eval
+        // corpus is his own voice reading his own sentences, so those repairs
+        // happened and those receipts are real. Dropping them would empty the
+        // screen back to a fixture in order to be more honest, which is the wrong
+        // direction.
         let records = HistoryStore().all
         self.init(style: style,
                   entries: DictionaryEntry.entries(vocabulary: .load(), records: records),

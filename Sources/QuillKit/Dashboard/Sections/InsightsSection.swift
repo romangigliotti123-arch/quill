@@ -51,7 +51,8 @@ public final class InsightsView: NSView {
     // MARK: - Init
 
     public convenience init(style: DashboardStyle) {
-        let history = HistoryStore().all
+        // Measurements are not dictations. See DictationRecord.isMeasurement.
+        let history = HistoryStore().all.filter { !$0.isMeasurement }
         let vocabulary = Vocabulary.load()
         // Below the floor the percentiles are noise and the heatmap is empty —
         // and an empty statistics screen is the one state where showing nothing
@@ -79,9 +80,19 @@ public final class InsightsView: NSView {
                                       font: DashboardType.eyebrow, color: style.inkTertiary)
         heading = DashboardType.label("Insights",
                                       font: DashboardType.display, color: style.ink)
-        blurb = DashboardType.label("",
-                                    font: DashboardType.body, color: style.inkSecondary,
-                                    lines: 2, lineHeight: 20)
+        // A chip in the corner is the least a sample screen owes the reader. This
+        // page shows a 23-day streak and 5,169 words; someone glancing at it will
+        // believe those are theirs unless the page says otherwise in words, near
+        // the title, where the eye already is. It also says what to do about it,
+        // because "this is not yours" without "here is how it becomes yours" is
+        // just an apology.
+        let realSoFar = HistoryStore().all.filter { !$0.isMeasurement }.count
+        blurb = DashboardType.label(
+            isSample
+                ? "These are example figures. Your own appear once you have dictated \(InsightsFixture.minimumRealRecords) times — \(realSoFar) so far."
+                : "",
+            font: DashboardType.body, color: style.inkSecondary,
+            lines: 2, lineHeight: 20)
         segmented = InsightsSegmented(titles: InsightsRange.allCases.map(\.title),
                                       selectedIndex: InsightsRange.allCases.firstIndex(of: range) ?? 1,
                                       style: style)
