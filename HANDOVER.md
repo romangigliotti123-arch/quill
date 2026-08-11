@@ -53,6 +53,22 @@ separates this from a plausible-sounding table.
 
 Corpus: a frozen, checksummed 50-utterance slice of LibriSpeech test-clean.
 
+**A residual ~8-15% of clips still fail to read back through `run_eval.sh`, and
+that is unfound.** The app produces a transcript for every gesture — verified by
+instrumenting every silent path in the coordinator and the event tap, all of
+which stayed quiet while the app logged a completed dictation each time — so this
+is a rig problem, not a product one. Until it is chased down, corpus numbers come
+from a simpler hand-rolled loop (mark → `ptt hold` → `ffmpeg -re` → poll →
+`read_quill.sh --since`) that has run 50/50 twice.
+
+**Do not chase accuracy through `.fastResults`.** Dropping it scores better on
+file-fed audio — 2.46% against 2.81%, four fewer errors — and is a disaster
+through a microphone: the first partial cannot arrive before ~3.9s, so any
+utterance ending before then returns an empty transcript, and roughly a quarter
+of dictations produced nothing at all. The experiment is repeatable with
+`QUILL_FAST_RESULTS=0`; the conclusion is that a benchmark win costing one
+dictation in four is not a win.
+
 **Flow is ahead on raw accuracy, by three words.** 27 errors against 24, on the
 same 1138 reference words, every transcript audited to the loopback device. That
 gap is not statistically meaningful at this sample size — but it is not a win

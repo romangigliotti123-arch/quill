@@ -221,6 +221,7 @@ err="$(printf '%s' "$RESULT" | python3 -c 'import json,sys; print(json.load(sys.
 case "$err" in
     no_new_record)
         die "Quill produced NO new transcript for this utterance." \
+            "history held $(printf '%s' "$RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("count","?"))') records, none of them unseen since the mark." \
             "Likely causes, in order:" \
             "  1. Quill was not running, or its hotkey listener is not installed" \
             "  2. Accessibility / Microphone permission is missing — check with:" \

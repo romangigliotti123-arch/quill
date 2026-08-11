@@ -328,6 +328,10 @@ public final class DictationCoordinator {
     }
 
     private func fail(_ message: String) {
+        // The remaining silent path. `start()` throwing means the dictation never
+        // began at all: no audio, no transcript, no history row — and the only
+        // trace was an overlay that has already faded by the time anyone looks.
+        NSLog("[quill] dictation FAILED to start: %@", message)
         isDictating = false
         isSpeculating = false
         if isLive { liveTyper.retract() }

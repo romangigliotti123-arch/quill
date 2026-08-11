@@ -310,8 +310,20 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
         }
     }
 
+    /// Off unless asked for. A line per gesture is noise in normal use and the
+    /// only way to see anything when a gesture silently fails to become a
+    /// dictation — the state machine is the one part of this path with no other
+    /// evidence, because a gesture that never arms produces no transcript, no
+    /// history row and no overlay to notice.
+    private static let logsGestures =
+        ProcessInfo.processInfo.environment["QUILL_LOG_HOTKEY"] == "1"
+
     @discardableResult
     private func apply(_ effects: [HotkeyStateMachine.Effect]) -> Bool {
+        if Self.logsGestures, !effects.isEmpty {
+            NSLog("[quill] hotkey %@ -> %@", String(describing: machine.state),
+                  effects.map { String(describing: $0) }.joined(separator: ","))
+        }
         var swallow = false
         for effect in effects {
             switch effect {
