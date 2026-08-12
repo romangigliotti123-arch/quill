@@ -45,6 +45,32 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         "swift ui": "SwiftUI",
         "mac os": "macOS",
         "i os": "iOS",
+
+        // Observed manglings of his own speech that the fuzzy corrector CANNOT
+        // reach, and why each is unreachable rather than merely missed:
+        //
+        //   "course"    for CORS   — "course" is real English, so the guard that
+        //                            stops the corrector rewriting words he meant
+        //                            refuses it, correctly.
+        //   "vespa"     for Vesper — same; "vespa" is a word.
+        //   "sq light"  for SQLite — scores 0.57 against the term, far below the
+        //                            0.85 bar, and lowering that bar is exactly
+        //                            what let "build a bed" become "Builda Bed".
+        //   "neglified" for Netlify — 0.56 by letters and no closer by sound.
+        //
+        // A literal table can fix all four because it asks a different question:
+        // not "is this span near a term" but "is this exact string one I have
+        // watched the recogniser produce for him". The two that are real English
+        // are anchored on the word that followed them in his actual dictation, so
+        // they cannot fire on the ordinary meaning — "of course" and "a Vespa"
+        // are untouched, only "course headers" and "vespa is the" move.
+        "course headers": "CORS headers",
+        "no course policy": "no CORS policy",
+        "vespa is the": "Vesper is the",
+        "sq light": "SQLite",
+        "sq lite": "SQLite",
+        "neglified": "Netlify",
+        "netterfly": "Netlify",
     ]
 
     private let vocabulary: VocabularyCorrector

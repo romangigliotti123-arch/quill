@@ -159,3 +159,44 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
     #expect(VocabularyCorrector.spanCanBe("graphify", spanCount: 3))
     #expect(VocabularyCorrector.spanCanBe("Firestore", spanCount: 2))
 }
+
+// MARK: - Manglings the fuzzy corrector cannot reach
+
+@Test func anchoredCorrectionsFixWhatTheGuardsCorrectlyRefuse() {
+    // Three of the proper-noun errors in Roman's corpus are unreachable by the
+    // fuzzy corrector, and each for a good reason:
+    //
+    //   "course" for CORS   — "course" is real English, so the guard that stops
+    //                         the corrector rewriting words he meant refuses it.
+    //   "vespa"  for Vesper — same; "vespa" is a word.
+    //   "SQ light" for SQLite — 0.57 against the term, far below the 0.85 bar,
+    //                         and lowering that bar is what let "build a bed"
+    //                         become "Builda Bed" this morning.
+    //
+    // A literal table reaches them because it asks a different question: not "is
+    // this span near a term" but "is this the exact string I have watched the
+    // recogniser produce for him".
+    let cleaner = FastCleaner()
+    #expect(cleaner.cleanFast("the API has no course headers").contains("CORS headers"))
+    #expect(cleaner.cleanFast("a local SQ light database").contains("SQLite"))
+    #expect(cleaner.cleanFast("Vespa is the lunar style rapper").hasPrefix("Vesper"))
+    #expect(cleaner.cleanFast("push it to neglified tonight").contains("Netlify"))
+}
+
+@Test func theOrdinaryMeaningsOfThoseWordsSurvive() {
+    // The whole reason the two real-English ones are anchored on the word that
+    // followed them in his actual dictation. An unanchored "course" -> "CORS"
+    // would rewrite "of course" every time he said it, which is a far commoner
+    // sentence than anything about headers.
+    let cleaner = FastCleaner()
+    for sentence in [
+        "of course I will send it tomorrow",
+        "the course was harder than I expected",
+        "he rode a Vespa around Rome",
+        "turn the light off please",
+    ] {
+        let out = cleaner.cleanFast(sentence)
+        let expected = sentence.prefix(1).uppercased() + sentence.dropFirst()
+        #expect(out == expected, "rewrote an ordinary sentence: \(out)")
+    }
+}
