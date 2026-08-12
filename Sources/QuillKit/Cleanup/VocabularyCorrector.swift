@@ -176,6 +176,18 @@ public struct VocabularyCorrector: Sendable {
             if score >= bar, score > (best?.score ?? 0) {
                 best = (term, score)
             } else if phoneticAllowed,
+                      // Sound is only evidence when the spelling is at least in
+                      // the same neighbourhood.
+                      //
+                      // "y t dlp" — the recogniser spelling out yt-dlp — was
+                      // being replaced by "Netlify". They share 0.143 of their
+                      // letters. A genuine mishearing of a name still LOOKS
+                      // something like the name: the cases this route exists for
+                      // score 0.57 ("net a fly"), 0.67 ("Netterfly") and 0.73
+                      // ("Craigie Bear"). Nothing real lands near zero, so a
+                      // floor well below every observed repair costs nothing and
+                      // stops sound alone carrying a match it cannot support.
+                      Self.similarity(normalised, target) >= Self.phoneticLettersFloor,
                       Self.phoneticSimilarity(normalised, target) >= Self.phoneticThreshold,
                       Self.phoneticSimilarity(normalised, target) > (best?.score ?? 0) {
                 best = (term, Self.phoneticSimilarity(normalised, target))
@@ -209,6 +221,11 @@ public struct VocabularyCorrector: Sendable {
 
     /// Near-exact, for spans where nothing looks misheard.
     static let ordinaryPhraseThreshold = 0.95
+
+    /// How alike two strings must LOOK before their sounds are allowed to decide.
+    /// Set below every repair this route has ever made (the lowest is 0.57) and
+    /// far above the collisions it has caused (0.143).
+    static let phoneticLettersFloor = 0.45
 
     static func everyWordIsOrdinaryEnglish(_ span: String) -> Bool {
         let words = span.split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)

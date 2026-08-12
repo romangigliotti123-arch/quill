@@ -34,19 +34,28 @@ public struct Vocabulary: Codable, Sendable, Equatable {
     /// Seeded from the names that actually appear in Roman's dictation. Editable
     /// on disk; the file is the source of truth once it exists.
     public static let seed = Vocabulary(terms: [
-        // Projects and tools
+        // Projects and tools he says out loud
         "Quill", "graphify", "Nebula", "Vesper", "blockcraft", "murmur",
-        "Firestore", "Netlify", "Supabase", "SwiftUI", "SwiftPM", "Xcode",
-        "TypeScript", "Playwright", "Obsidian", "Ghostty",
-        // Added after the voice corpus showed them failing in his own speech:
-        // "Wispr Flow" came back "Whisperflow" and "SQLite" came back "SQ light".
-        // Both are one edit from the term once spaces are dropped, so the
-        // corrector repairs them the moment it knows the words exist.
-        "Wispr Flow", "SQLite",
+        "mediadeck", "originkit", "shadcn", "yt-dlp", "tmux", "xterm", "node-pty",
+        "Hammerspoon", "pytest", "venv", "CPython", "codesign", "subagent", "MCP",
+        // Services and platforms
+        "Firebase", "Firestore", "Netlify", "Supabase", "SQLite", "Wispr Flow",
+        "Airtasker", "JB Hi-Fi", "Baymard",
+        // Apple, languages, type
+        "SwiftUI", "SwiftPM", "Xcode", "TypeScript", "Playwright", "Obsidian",
+        "Ghostty", "Sulkan", "Fraunces", "Space Grotesk",
         // Business
-        "nxt", "Next Fulfilment", "Roman Design Co", "Builda Bed",
-        // Places and people
-        "Craigieburn", "Melbourne", "Rosehill", "Noah Kass", "Carlo",
+        "nxt", "Next Fulfilment", "Roman Design Co", "Roman Design Studio",
+        "Builda Bed", "ABN", "3PL", "glassmorphism", "colourway", "colourways",
+        // Upholstery — the Builda Bed quoting vocabulary
+        "Warwick", "Kvadrat", "Maharam", "Martindale", "Halgate",
+        // Places
+        "Craigieburn", "Melbourne", "Rosehill", "Rosehill Secondary College",
+        "Flinders Street",
+        // People
+        "Gigliotti", "Carlo", "Carlo Gigliotti", "Noah Kass", "Kass", "Morello",
+        "Ashwin Gupta", "Ben McMullin", "McMullin", "Sara Chamberlain",
+        "Rob Pisano", "Lofree Hyzen",
     ])
 
     public init(terms: [String]) {

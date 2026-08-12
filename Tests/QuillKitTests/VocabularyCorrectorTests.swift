@@ -200,3 +200,38 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
         #expect(out == expected, "rewrote an ordinary sentence: \(out)")
     }
 }
+
+// MARK: - The harvested dictionary
+
+@Test func soundIsOnlyEvidenceWhenTheSpellingAgrees() {
+    // "y t dlp" — the recogniser spelling out yt-dlp — was being replaced by
+    // "Netlify". The two share 0.143 of their letters. Sound alone carried a
+    // match that spelling could not support, and the guards above never saw it
+    // because the input is his jargon rather than ordinary English, so the
+    // damage half of the scoring harness could not catch it either.
+    //
+    // Every repair this route actually exists for looks at least somewhat like
+    // its target: 0.57 for "net a fly", 0.67 for "Netterfly", 0.73 for
+    // "Craigie Bear". A floor at 0.45 sits below all of them and far above the
+    // collision.
+    let corrector = VocabularyCorrector(vocabulary: .seed)
+    #expect(corrector.correct("run y t dlp on that playlist") == "run y t dlp on that playlist")
+
+    // and every phonetic repair still fires
+    #expect(corrector.correct("push it to Netterfly tonight").contains("Netlify"))
+    #expect(corrector.correct("until Craig Eburn is done").contains("Craigieburn"))
+    #expect(corrector.correct("the grapify workspace").contains("graphify"))
+}
+
+@Test func theHarvestedTermsRepairTheSplitCompoundFailure() {
+    // The recogniser's signature failure on a name it has never heard is to
+    // split it — "blockcraft" as "block craft", "Firestore" as "fire store",
+    // "graphify" as "graph if I". These terms were harvested from his machine
+    // and have never appeared in the scored corpus, so this is the only evidence
+    // available that they will do anything when they finally turn up in speech.
+    let corrector = VocabularyCorrector(vocabulary: .seed)
+    #expect(corrector.correct("open the media deck sidebar").contains("mediadeck"))
+    #expect(corrector.correct("the t mux panes persist").contains("tmux"))
+    #expect(corrector.correct("check the shad cn components").contains("shadcn"))
+    #expect(corrector.correct("the space grotesk heading").contains("Space Grotesk"))
+}
