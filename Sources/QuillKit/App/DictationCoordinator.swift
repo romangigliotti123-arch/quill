@@ -115,6 +115,15 @@ public final class DictationCoordinator {
                     // empty transcript can tell the user which of the two very
                     // different things went wrong.
                     self.peakLevel = max(self.peakLevel, level)
+                    // The moment speech actually starts, as distinct from the
+                    // moment the microphone opened. Uses the same floor that
+                    // decides "that device sent no sound at all", so the two
+                    // cannot disagree about what counts as audible.
+                    if self.timeline.firstAudibleBuffer == nil,
+                       level >= DictationCoordinator.silenceFloor,
+                       self.isDictating || self.isSpeculating {
+                        self.timeline.firstAudibleBuffer = Date()
+                    }
                     guard self.isDictating else { return }
                     self.overlay.show(.listening(level: level))
                 }
@@ -381,7 +390,10 @@ public final class DictationCoordinator {
                     endToEndMs: self.timeline.endToEndMs,
                     audioDurationMs: self.timeline.audioDurationMs,
                     usedThoroughCleanup: usedThorough,
-                    releaseToInsertedMs: self.timeline.releaseToInsertedMs
+                    releaseToInsertedMs: self.timeline.releaseToInsertedMs,
+                    micOpenMs: self.timeline.micOpenMs,
+                    speechOnsetMs: self.timeline.speechOnsetMs,
+                    recogniserFirstWordMs: self.timeline.recogniserFirstWordMs
                 )
             ))
 

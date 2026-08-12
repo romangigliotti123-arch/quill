@@ -124,6 +124,15 @@ public protocol OverlayPresenting: AnyObject {
 public struct DictationTimeline: Sendable {
     public var hotkeyDown: Date?
     public var audioFirstBuffer: Date?
+    /// The first buffer with speech in it, rather than the first buffer.
+    ///
+    /// Without this, "time to first word" is one number covering three very
+    /// different things: opening the microphone (ours), the pause before the
+    /// person actually starts talking (theirs, and not a defect), and the
+    /// recogniser deciding it has heard enough to guess (the model's). Measured
+    /// on Roman's real dictations that number is 1216ms, and optimising it blind
+    /// would mean trying to make him breathe faster.
+    public var firstAudibleBuffer: Date?
     public var firstPartial: Date?
     /// The moment the key came back up — i.e. the moment the user stopped
     /// speaking and started waiting. Everything after this is latency they feel.
@@ -168,9 +177,18 @@ public struct DictationTimeline: Sendable {
     /// only one of them belongs in an answer to "how long should I wait?".
     public var micOpenMs: Int? { ms(hotkeyDown, audioFirstBuffer) }
 
+    /// Microphone open → the user actually starts speaking. Not a defect and not
+    /// ours to fix; recorded so it stops being counted as though it were.
+    public var speechOnsetMs: Int? { ms(audioFirstBuffer, firstAudibleBuffer) }
+
+    /// Speech starts → the recogniser's first guess. THIS is the model latency,
+    /// and the only part of "time to first word" that is worth tuning.
+    public var recogniserFirstWordMs: Int? { ms(firstAudibleBuffer, firstPartial) }
+
     public var logLine: String {
         let f = { (v: Int?) in v.map(String.init) ?? "—" }
-        return "micOpen=\(f(micOpenMs))ms ttfw=\(f(timeToFirstWordMs))ms "
+        return "micOpen=\(f(micOpenMs))ms onset=\(f(speechOnsetMs))ms "
+            + "recog=\(f(recogniserFirstWordMs))ms ttfw=\(f(timeToFirstWordMs))ms "
             + "release→insert=\(f(releaseToInsertedMs))ms "
             + "final→insert=\(f(finalToInsertedMs))ms e2e=\(f(endToEndMs))ms"
     }

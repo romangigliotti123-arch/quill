@@ -54,19 +54,36 @@ public struct DictationRecord: Codable, Sendable, Equatable {
         /// synthesised decoder treats a missing optional as nil rather than
         /// failing, so an old history file still loads.
         public let releaseToInsertedMs: Int?
+        /// Key-down → microphone delivering audio. Ours.
+        public let micOpenMs: Int?
+        /// Microphone open → the user starts speaking. Theirs, and not a defect.
+        public let speechOnsetMs: Int?
+        /// Speech starts → the recogniser's first guess. The model's, and the
+        /// only part of "time to first word" worth tuning.
+        ///
+        /// All three are optional because every record written before they
+        /// existed does not have them, and the synthesised decoder treats a
+        /// missing optional as nil rather than failing to load the history.
+        public let recogniserFirstWordMs: Int?
 
         public init(timeToFirstWordMs: Int?,
                     finalToInsertedMs: Int?,
                     endToEndMs: Int?,
                     audioDurationMs: Int?,
                     usedThoroughCleanup: Bool,
-                    releaseToInsertedMs: Int? = nil) {
+                    releaseToInsertedMs: Int? = nil,
+                    micOpenMs: Int? = nil,
+                    speechOnsetMs: Int? = nil,
+                    recogniserFirstWordMs: Int? = nil) {
             self.timeToFirstWordMs = timeToFirstWordMs
             self.finalToInsertedMs = finalToInsertedMs
             self.endToEndMs = endToEndMs
             self.audioDurationMs = audioDurationMs
             self.usedThoroughCleanup = usedThoroughCleanup
             self.releaseToInsertedMs = releaseToInsertedMs
+            self.micOpenMs = micOpenMs
+            self.speechOnsetMs = speechOnsetMs
+            self.recogniserFirstWordMs = recogniserFirstWordMs
         }
     }
 }

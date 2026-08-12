@@ -460,6 +460,35 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         if ProcessInfo.processInfo.environment["QUILL_FAST_RESULTS"] != "0" {
             reporting.insert(.fastResults)
         }
+        // DICTATION TRANSCRIBER: measured, rejected, do not re-run this.
+        //
+        // `SpeechTranscriber` holds a fixed window of audio before it will say
+        // anything. Measured with the leading silence trimmed off six clips:
+        // 1027, 1024, 1027, 1022, 1025, 1026ms. A 5ms spread across six different
+        // speakers is not content-dependent, it is an internal buffer — and it is
+        // about 85% of Quill's time to first word (1216ms median on Roman's own
+        // dictations, of which 155ms is opening the microphone and the rest is
+        // this).
+        //
+        // The SDK's other module looks purpose-built for the difference:
+        // `DictationTranscriber` with `.shortForm` and `.progressiveShortDictation`,
+        // where this one is built for long-form transcription. It IS faster. On
+        // 20 clips, both with punctuation on, both fed at 1x:
+        //
+        //   SpeechTranscriber       1.98% WER  ( 9 errors)   first result 1028ms
+        //   DictationTranscriber    9.23% WER  (42 errors)   first result  826ms
+        //
+        // 202ms for four and a half times the errors. That is the same trade as
+        // the `.fastResults` one above and it fails for the same reason: the
+        // latency is a fifth of a second nobody is timing, and the errors are in
+        // the text he sends to clients. The other two presets, `.shortDictation`
+        // and `.phrase`, are not progressive at all — they returned nothing until
+        // the audio ended, 10.5s in.
+        //
+        // So the ~1s window stays, and time to first word is not a number this
+        // app can move. The probe that produced these figures is standalone; the
+        // two modules have different Result types and integrating one to find
+        // that out would have been a refactor before the measurement.
         let module = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
