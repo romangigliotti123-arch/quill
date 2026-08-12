@@ -16,7 +16,17 @@ public struct Vocabulary: Codable, Sendable, Equatable {
 
     public var terms: [String]
 
+    /// Overridable, so a candidate dictionary can be scored against the corpus
+    /// without being installed over the user's real one.
+    ///
+    /// Adding terms is not free: every entry is a standing chance to rewrite a
+    /// word he meant, which is how "build a bed" became "Builda Bed". A change to
+    /// this list has to be measured in both directions before it ships, and that
+    /// is impossible if the only list the app can read is the live one.
     public static let defaultURL: URL = {
+        if let override = ProcessInfo.processInfo.environment["QUILL_VOCABULARY_FILE"], !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("Quill/vocabulary.json")
     }()
