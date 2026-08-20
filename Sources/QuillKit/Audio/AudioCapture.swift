@@ -104,6 +104,13 @@ public final class AudioCapture: AudioSource {
     /// A sample rate of zero is how the engine reports "there is no usable
     /// input device", not an error — asking it to start in that state throws
     /// something unreadable about kAudioUnitErr_FormatNotSupported.
+    ///
+    /// That guard reads better against this property than the one it replaced.
+    /// Measured: after an `AudioUnitSetProperty` that FAILS (device id refused,
+    /// -10851), `inputFormat` reports 0 and `outputFormat` still reports 44100.
+    /// The old code would have carried on with a plausible number describing a
+    /// device the unit is not on; this returns nil and the caller throws
+    /// `noInputDevice`, which is the truth.
     public var captureFormat: AVAudioFormat? {
         let format = engine.inputNode.inputFormat(forBus: 0)
         return format.sampleRate > 0 ? format : nil
