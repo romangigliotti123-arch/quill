@@ -65,11 +65,47 @@ public final class AudioCapture: AudioSource {
         self.settings = settings
     }
 
+    /// The format the tap must be installed with: the input node's INPUT side.
+    ///
+    /// `inputFormat`, not `outputFormat`. On the input node these are two
+    /// different formats and only one of them is the hardware's:
+    ///
+    ///   - `inputFormat(forBus:0)`  — what the device is actually producing.
+    ///   - `outputFormat(forBus:0)` — what the node hands the rest of the graph,
+    ///     which stays on whatever rate the engine was built against.
+    ///
+    /// They are equal whenever the selected device happens to run at the engine's
+    /// rate, which is why this read the wrong one for so long: with the built-in
+    /// microphone (44100) both say 44100 and everything works. Point the unit at
+    /// a device running at a different rate — BlackHole at 48000, the eval rig's
+    /// loopback — and they diverge:
+    ///
+    ///     device's own nominal rate     48000
+    ///     inputNode.inputFormat         48000   <- the hardware
+    ///     inputNode.outputFormat        44100   <- the graph, unchanged
+    ///
+    /// `installTap` validates its `format` against the hardware side and throws
+    /// an Objective-C exception when they disagree — uncatchable from Swift, so
+    /// the process aborts:
+    ///
+    ///     required condition is false: format.sampleRate == inputHWFormat.sampleRate
+    ///
+    /// That was a hard crash on every dictation whenever a non-44100 device was
+    /// selected. It looks like a race — the CoreAudio logs show the device
+    /// renegotiating for ~300ms after the switch — and it is not one: waiting,
+    /// polling until two reads agree, `engine.reset()`, and listening for
+    /// `AVAudioEngineConfigurationChange` were all tried and all failed, because
+    /// `outputFormat` is not stale, it is a different and stable number that was
+    /// never the right one to ask for.
+    ///
+    /// Proven with a standalone harness against BlackHole: `outputFormat` throws,
+    /// `inputFormat` installs and delivers 48000 frames in one second.
+    ///
+    /// A sample rate of zero is how the engine reports "there is no usable
+    /// input device", not an error — asking it to start in that state throws
+    /// something unreadable about kAudioUnitErr_FormatNotSupported.
     public var captureFormat: AVAudioFormat? {
-        let format = engine.inputNode.outputFormat(forBus: 0)
-        // A sample rate of zero is how the engine reports "there is no usable
-        // input device", not an error — asking it to start in that state throws
-        // something unreadable about kAudioUnitErr_FormatNotSupported.
+        let format = engine.inputNode.inputFormat(forBus: 0)
         return format.sampleRate > 0 ? format : nil
     }
 
