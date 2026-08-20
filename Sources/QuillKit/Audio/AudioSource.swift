@@ -15,6 +15,20 @@ public protocol AudioSource: AnyObject {
 
     /// The format buffers will arrive in. Only meaningful once `start()` has
     /// been called, because the microphone's format is decided by the device.
+    ///
+    /// "Will arrive in" is the whole contract and it is easy to get wrong. On
+    /// `AVAudioEngine`'s input node there are two formats and only one of them
+    /// is this one: `inputFormat(forBus:)` is what the hardware produces,
+    /// `outputFormat(forBus:)` is what the node hands the rest of the graph and
+    /// stays on the rate the engine was built against. They agree whenever the
+    /// selected device happens to run at that rate — the built-in microphone
+    /// does — and diverge the moment it does not.
+    ///
+    /// `AudioCapture` returned the wrong one for months. It crashed the process
+    /// on every dictation through a 48kHz device, because `installTap` asserts
+    /// the format it is handed matches the hardware and throws an Objective-C
+    /// exception, which Swift cannot catch. `AudioFileSource` had it right all
+    /// along by returning the file's `processingFormat`.
     var captureFormat: AVAudioFormat? { get }
 
     /// Allocate whatever is expensive, without opening the mic. Called on
