@@ -137,17 +137,39 @@ root/route, sail/sale, sea/see, seam/seem, sew/so/sow, shore/sure, sight/site,
 son/sun, stair/stare, steal/steel, suite/sweet, team/teem, tide/tied, toe/tow,
 vain/vane/vein, vary/very, wear/where, wood/would, yoke/yolk.
 
-**Cost:** this is a second model round-trip on the critical path, which `CleanupPrompt`
-notes is a ~250ms budget. Two ways to avoid paying it on every dictation:
-1. Only run the pass when the transcript actually *contains* a word from the pair list
-   — a cheap set-membership check over the tokens. Most dictations will contain
-   at least one (to/too, your/you're are everywhere), so this helps less than it looks.
-2. Better: fold it into the existing cleanup call as a second instruction with its own
-   output field, so it is one round trip, and validate the two contracts separately on
-   the way back. The delete-only checker keeps operating on the deletion output; a new
-   pair-list checker operates on the substitution output.
+**Cost — and the thing that makes this harder than it first looks.**
 
-Option 2 is the one worth building.
+My first draft of this section proposed folding the homophone question into the
+existing cleanup call as a second output field, so it costs no extra round trip. That
+does not work, and the reason is worth stating because it is the whole difficulty:
+
+**The model pass almost never runs.** `NIMCleaner.cleanThorough` gates on
+`SelfCorrection.needsModelPass(tidy)`, which is true only when the transcript contains
+a retraction cue ("no wait", "actually", "I mean") or an immediate repetition.
+Ordinary dictation never reaches the model at all — there is a test named
+`ordinaryDictationNeverReachesTheModelThroughTheCoordinator` asserting exactly that.
+So a homophone instruction added to that call would fire only on the small subset of
+dictations that happen to contain a self-correction, which is not where the homophones
+are.
+
+A homophone pass therefore needs its **own** trigger, and that means genuinely paying
+for it. The options, honestly:
+
+1. **Gate on the pair list.** Only call the model when the transcript contains a word
+   from the list. Cheap to check, but "to", "your", "its", "there" are in every other
+   sentence, so in practice this fires constantly and the gate saves little.
+2. **Gate on a narrower list.** Drop the ultra-common function words and keep the pairs
+   that are both frequently misheard and rarely ambiguous in context — flour/flower,
+   dew/due, hay/hey, formally/formerly, emigration/immigration, principal/principle,
+   discreet/discrete, stationary/stationery, complement/compliment. That fires on a
+   small minority of dictations, which makes the latency affordable.
+3. **Do it deterministically where the context is a fixed phrase.** "hay fever",
+   "flour and water", "formally organised" — the same anchored-literal trick
+   `FastCleaner.corrections` already uses for "course headers" -> "CORS headers".
+   Free, no model, no latency, and no risk. Covers less, but covers it perfectly.
+
+**Option 3 first, then option 2 for what is left.** Option 3 costs nothing and can
+ship immediately; option 2 is the one that needs the bench below.
 
 **How to prove it works before shipping it:** the bench harness already exists in the
 shape of `rig/selfcorrect_bench.py`. The same method applies — a corpus that is
@@ -185,9 +207,12 @@ Low priority.
 
 ## Suggested order of work
 
-1. **Homophone pass, option 2** — the biggest measurable accuracy win available. It
-   would address 7 of the scorer's 27 errors — about a quarter of the WER — and it is the
-   only item here with a clear design and an existing bench methodology to prove it.
+1. **Homophones, option 3 then option 2** — the biggest measurable accuracy win
+   available, 7 of the scorer's 27 errors, about a quarter of the WER. Option 3 (fixed
+   phrases in `FastCleaner.corrections`) is free and can ship today. Option 2 (a gated
+   model pass on a narrow pair list) needs the bench below, because the model pass does
+   not currently run on ordinary dictation at all and giving it its own trigger means
+   paying real latency.
 2. Sentence splitting — cosmetic, free in WER terms, visible to the user.
 3. Onset — understood but not cheaply actionable (see above). Re-measure before
    spending anything on it.

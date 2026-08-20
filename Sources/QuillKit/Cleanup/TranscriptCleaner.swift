@@ -132,23 +132,52 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         "in air table": "in Airtable",
         "air table base": "Airtable base",
 
-        // Homophones are deliberately NOT in this table. See ACCURACY_ANALYSIS.md:
-        // they are the largest single error class in the eval corpus, seven of
-        // twenty-seven word errors, and nothing downstream can fix them —
-        // VocabularyCorrector presumes a correctly spelled English word is
-        // intentional, and the model pass may only delete, never swap.
+        // Homophones, but only where the phrase decides the answer.
         //
-        // The temptation is to anchor each one the way "course headers" is
-        // anchored and paste the corpus's own failures in here: "peppered
-        // flower" -> "peppered flour", "the dues were" -> "the dews were". That
-        // would move the benchmark and change nothing for Roman, who is not
-        // dictating nineteenth-century prose about mutton. A table entry earns
-        // its place by being a phrase HE says; these are LibriSpeech's.
+        // Homophones are the largest single error class in the eval corpus —
+        // seven of twenty-seven word errors — and nothing downstream can fix
+        // them: VocabularyCorrector presumes a correctly spelled English word is
+        // intentional, and the model pass may only delete, never swap. See
+        // ACCURACY_ANALYSIS.md.
         //
-        // The general fix is a pass restricted to a fixed pair list, described in
-        // ACCURACY_ANALYSIS.md. Doing it properly means a bench that is half
-        // non-homophone text, to measure the damage rather than only the hits —
-        // the discipline CleanupPrompt.swift already established.
+        // Two rules for what may go in here, both learned the hard way.
+        //
+        // First, ANCHORED ONLY. A bare "flower" -> "flour" would rewrite every
+        // sentence about flowers. Each key below is a fixed phrase where one
+        // spelling is simply wrong: nobody writes "hey fever" or "principle
+        // developer". Where the phrase does not decide it, it does not belong
+        // here — that is what the gated model pass in ACCURACY_ANALYSIS.md is
+        // for.
+        //
+        // Second, PHRASES HE SAYS. The corpus's own failures are not eligible:
+        // "peppered flower" -> "peppered flour" and "the dues were" -> "the dews
+        // were" would move the benchmark and change nothing for anyone who is not
+        // dictating nineteenth-century prose about mutton. The entries below are
+        // ordinary English or the vocabulary of a developer quoting jobs.
+        "hey fever": "hay fever",
+        "principle developer": "principal developer",
+        "principle engineer": "principal engineer",
+        "principle amount": "principal amount",
+        "in principal": "in principle",
+        "discrete about": "discreet about",
+        "stationary shop": "stationery shop",
+        "complimentary colours": "complementary colours",
+        "complimentary colors": "complementary colors",
+        "compliments each other": "complements each other",
+        "affect on the": "effect on the",
+        "affect of the": "effect of the",
+        "the affect was": "the effect was",
+        "no affect on": "no effect on",
+        "side affects": "side effects",
+        "your welcome": "you're welcome",
+        "loosing the": "losing the",
+        // Deliberately absent, and each for a reason:
+        //   "loose the" -> "lose the"      — "loose the reins" is correct English.
+        //   "peace/piece of mind"          — both are real phrases with different
+        //                                    meanings; the audio cannot tell them
+        //                                    apart and neither can a table.
+        //   "led"/"lead", "its"/"it's"     — decided by grammar, not by a fixed
+        //                                    phrase. That is the model pass's job.
     ]
 
     private let vocabulary: VocabularyCorrector
