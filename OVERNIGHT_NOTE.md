@@ -41,15 +41,24 @@ a rate the buffers were not in.
 
 ## Verified
 
-- 50/50 clips captured, 0 failed (`rig/out/20260820-225558-quill`).
-- 2.81% WER vs 2.37% on the pre-fix run. **That gap is inside the rig's own stated
-  noise floor for 50 utterances — it is a tie, not a regression.** 42 of 50
-  transcripts are word-identical between the runs; the 8 that differ are ordinary
-  recogniser variance on hard proper nouns (Tintoret, chiaroscurists, Pegrine), and
-  one of them got *better*: `260-123286-0002` went "oh my danger" -> "all my danger",
-  which matches the reference.
-- Both devices proven directly: built-in mic (44100/1ch) and BlackHole (48000/2ch)
-  each install a tap and deliver audio.
+- **Two** clean 50-clip runs, 0 failures each (`20260820-225558`, `20260820-232914`).
+  100 dictations through the path that used to abort on the first one.
+- Both score **2.81% WER, 32/1138, byte-identical to each other**. Pre-fix baseline
+  was 2.37%. That gap is inside the rig's own stated noise floor for 50 utterances —
+  a tie, not a regression — and two identical runs are better evidence that 2.81% is
+  the steady state than either figure alone. 42 of 50 transcripts are word-identical
+  across runs; the 8 that differ are recogniser variance on hard proper nouns
+  (Tintoret, chiaroscurists, Pegrine), and one got *better*: `260-123286-0002` went
+  "oh my danger" -> "all my danger", matching the reference.
+- **No crash since the fix landed.** Newest report in DiagnosticReports is 22:29;
+  the fix went in at 22:45 and everything above ran after it.
+- `rig/bin/device_switch_probe`: 8 device switches, both directions, 4 rounds, all
+  install a tap and capture. Every BlackHole iteration reports `in=48000 out=44100
+  [DIFFER]` — each one would have aborted the old code.
+- 462 tests pass. (One flake, `aSelfCorrectionIsFixedEvenWhenTheModelNeverAnswers`,
+  when the suite is run *while* an eval is saturating the machine. Its own comment
+  documents that it is wall-clock bound and competes with the live network tests.
+  Green on an idle machine.)
 
 ## Also done
 
@@ -78,16 +87,31 @@ Homophones are the largest single class (7 of 27) and neither correction layer c
 fix them by design. Proposal and the reason not to just loosen the existing contract
 are in that file.
 
-## State
+## State — ready to use
 
-Quill is running, pointed at the built-in microphone, with the new vocabulary loaded.
-`settings.json` was left on BlackHole by the eval and has been put back — worth
-checking after any eval run, because dictation silently hears nothing otherwise.
+Rebuilt from the latest commit and left running:
+
+- system input **MacBook Air Microphone**, Quill's own `inputDeviceUID`
+  **BuiltInMicrophoneDevice** — both put back after the evals. Worth checking after
+  any eval run: leave Quill on BlackHole and dictation silently hears nothing, which
+  cost hours tonight before it was understood.
+- `vocabulary.json` 142 terms, verified to decode rather than silently falling back
+  to the seed.
+- Just hold Right Option and talk.
 
 ## Next
 
-1. **Homophone pass.** Biggest accuracy win left, ~a quarter of remaining errors.
-   Design in `ACCURACY_ANALYSIS.md`. Do not do it by loosening the cleanup contract;
-   `CleanupPrompt.swift` documents the bench where that was already tried and lost.
-2. **The TestingMacros plugin problem**, so the whole suite runs rather than a filter.
-3. Re-score against a second post-fix run before quoting any WER delta as real.
+1. **The model-backed half of the homophone work.** The free half shipped: fixed
+   phrases in `FastCleaner.corrections`, and `hay fever` is verified fixed on real
+   audio. The rest — flour/flower, dews/dues, read/red, where only the sentence
+   decides — needs a gated model pass. `ACCURACY_ANALYSIS.md` has the design and the
+   two traps: do not loosen the cleanup contract (`CleanupPrompt.swift` documents the
+   bench where that was tried and lost), and note the model pass does not currently
+   run on ordinary dictation at all, so it needs its own trigger and has to pay for it.
+2. **Say a sentence with a new vocabulary term in it.** 142 terms are in the file and
+   none has been through a real dictation — the reasoning is sound and the compound
+   table is tested, but that is not the same as evidence.
+3. **The TestingMacros plugin race.** The full suite runs, but a narrowed `--filter`
+   build sometimes drops `libTestingMacros` from `-load-resolved-plugin` and fails.
+   Rerunning clears it. Understanding it would remove the last rough edge in
+   `Scripts/test.sh`.
