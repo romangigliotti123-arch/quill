@@ -40,6 +40,19 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         "vesper": "Vesper",
         "block craft": "blockcraft",
         "fire store": "Firestore",
+        // Heard from Roman's own voice, 21 Aug: "a Firestore backend" came back
+        // as "a fire stall back end". "fire store" was already here; the vowel
+        // moves depending on how fast he says it, and neither "fire stall" nor
+        // "fire store" is a phrase with an ordinary meaning to protect.
+        "fire stall": "Firestore",
+        // Same dictation: "the old Node.js version" -> "the old no.JS version".
+        // The recogniser writes the spoken "node" as the abbreviation "no.".
+        // Anchored on "version" and "server" because a bare "no js" could be
+        // someone answering a question about JavaScript.
+        "no. js version": "Node.js version",
+        "no js version": "Node.js version",
+        "no. js server": "Node.js server",
+        "no js server": "Node.js server",
         "net lify": "Netlify",
         "craigie burn": "Craigieburn",
         "swift ui": "SwiftUI",

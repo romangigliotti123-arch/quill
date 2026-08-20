@@ -65,3 +65,25 @@ private func clean(_ s: String) -> String { FastCleaner.applyCorrections(to: s) 
         #expect(clean(sentence) == sentence, "rewrote: \(sentence)")
     }
 }
+
+// Heard in a real dictation on 21 Aug 2026, in Roman's own voice, reading a
+// paragraph written to exercise this table. These are the two misses from that
+// run that a literal entry can fix without guessing.
+@Test func repairsTheManglingsFromTheFirstRealVoiceRun() {
+    #expect(clean("with a fire stall back end") == "with a Firestore back end")
+    #expect(clean("the old no. js version") == "the old Node.js version")
+    #expect(clean("the old no js version") == "the old Node.js version")
+    #expect(clean("a no js server") == "a Node.js server")
+}
+
+@Test func doesNotTurnAnOrdinaryNoIntoNode() {
+    // "no" answering a question about JavaScript is why those entries are
+    // anchored on "version" and "server" rather than matching "no js" alone.
+    let untouched = [
+        "no js is not required here",
+        "the answer is no",
+    ]
+    for sentence in untouched {
+        #expect(clean(sentence) == sentence, "rewrote: \(sentence)")
+    }
+}
