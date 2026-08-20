@@ -158,9 +158,30 @@ PY
 
 # A stuck modifier is the worst thing this script could leave behind — the user
 # would find every keystroke silently modified. Release on ANY exit path.
+#
+# The tap gets SIGINT here for the same reason it does on the normal path: it is
+# an ffmpeg blocked on a CoreAudio read, and a bare kill (SIGTERM) can leave it
+# alive holding the loopback device open. A survivor is not a tidy-up problem, it
+# is the NEXT run failing — "playback to device index 0 failed / the device
+# exists but would not accept audio" — with nothing on screen connecting that to
+# a run that died minutes earlier. Observed exactly once, which was enough.
+#
+# The wait bounds it: SIGINT, give it a moment to close the file, then SIGKILL
+# whatever is still there. Nothing downstream needs the WAV from an aborted run.
+#
+# Written as `if` rather than `[[ … ]] && kill`, because under `set -e` that form
+# returns the status of the test when TAP_PID is empty, and a cleanup that exits
+# non-zero on the ordinary path masks the script's real exit code.
 cleanup() {
     "$PTT" up "$PTT_KEY" 2>/dev/null || true
-    [[ -n "${TAP_PID:-}" ]] && kill "$TAP_PID" 2>/dev/null || true
+    if [[ -n "${TAP_PID:-}" ]]; then
+        kill -INT "$TAP_PID" 2>/dev/null || true
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            kill -0 "$TAP_PID" 2>/dev/null || break
+            sleep 0.1
+        done
+        kill -9 "$TAP_PID" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT INT TERM
 
