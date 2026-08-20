@@ -71,6 +71,84 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         "sq lite": "SQLite",
         "neglified": "Netlify",
         "netterfly": "Netlify",
+
+        // Compound tool names the recogniser splits into two ordinary words.
+        //
+        // The fuzzy corrector cannot reach these: every piece is real English, so
+        // the single-word guard refuses them, and a two-word span of ordinary
+        // English is held to a near-exact bar that "get hub" does not clear
+        // against "github" by letters alone.
+        //
+        // Split into two groups, because the two halves are not equally safe.
+        //
+        // SAFE UNANCHORED — the split form is not a phrase anyone says with its
+        // ordinary meaning. "git hub" and "gethub" are not English; "post gres",
+        // "cloud flare", "chat gpt", "web pack", "vs code", "node js" do not
+        // occur outside the tool name.
+        "git hub": "GitHub",
+        "gethub": "GitHub",
+        "post gres": "Postgres",
+        "cloud flare": "Cloudflare",
+        "chat gpt": "ChatGPT",
+        "chat g p t": "ChatGPT",
+        "web pack": "webpack",
+        "vs code": "VS Code",
+        "node js": "Node.js",
+        "next js": "Next.js",
+        "three js": "Three.js",
+
+        // NEEDS AN ANCHOR — the split form IS ordinary English, so the bare pair
+        // would rewrite sentences he meant. Each of these was caught firing on
+        // real prose before the anchor was added:
+        //
+        //     "I need to get hub caps for the car" -> "I need to GitHub caps…"
+        //     "you tube of toothpaste"             -> "YouTube of toothpaste"
+        //     "a tail wind helped the flight"      -> "a Tailwind helped…"
+        //     "the air table was covered in dust"  -> "the Airtable was covered…"
+        //     "type script tags by hand"           -> "TypeScript tags by hand"
+        //     "sync thing up later"                -> "Syncthing up later"
+        //
+        // The anchor is the word he actually says next when he means the tool.
+        // A miss costs a correction; a false fire costs a sentence.
+        // "to get hub" is deliberately absent: it fires inside "I need to get
+        // hub caps for the car". The anchors below are the ones that cannot.
+        "on get hub": "on GitHub",
+        "get hub repo": "GitHub repo",
+        "get hub actions": "GitHub actions",
+        "get hub pages": "GitHub pages",
+        "push to get hub": "push to GitHub",
+        "pushed to get hub": "pushed to GitHub",
+        "it to get hub": "it to GitHub",
+        "up to get hub": "up to GitHub",
+        "in type script": "in TypeScript",
+        "type script file": "TypeScript file",
+        "to you tube": "to YouTube",
+        "you tube video": "YouTube video",
+        "linked in profile": "LinkedIn profile",
+        "sink thing": "Syncthing",
+        "sync thing is": "Syncthing is",
+        "with tail wind": "with Tailwind",
+        "tail wind css": "Tailwind CSS",
+        "in air table": "in Airtable",
+        "air table base": "Airtable base",
+
+        // Homophones are deliberately NOT in this table. See ACCURACY_ANALYSIS.md:
+        // they are the largest single error class in the eval corpus, seven of
+        // twenty-seven word errors, and nothing downstream can fix them —
+        // VocabularyCorrector presumes a correctly spelled English word is
+        // intentional, and the model pass may only delete, never swap.
+        //
+        // The temptation is to anchor each one the way "course headers" is
+        // anchored and paste the corpus's own failures in here: "peppered
+        // flower" -> "peppered flour", "the dues were" -> "the dews were". That
+        // would move the benchmark and change nothing for Roman, who is not
+        // dictating nineteenth-century prose about mutton. A table entry earns
+        // its place by being a phrase HE says; these are LibriSpeech's.
+        //
+        // The general fix is a pass restricted to a fixed pair list, described in
+        // ACCURACY_ANALYSIS.md. Doing it properly means a bench that is half
+        // non-homophone text, to measure the damage rather than only the hits —
+        // the discipline CleanupPrompt.swift already established.
     ]
 
     private let vocabulary: VocabularyCorrector
