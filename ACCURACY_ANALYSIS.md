@@ -8,6 +8,19 @@ The error table below was built by reading all 50 transcripts against the manife
 The **rate** comes from `rig/score.py`, which applies OpenAI's `EnglishTextNormalizer`
 to both sides — the same normaliser Whisper's published numbers use.
 
+> **Update, same night.** The crash fix landed and two clean 50-clip runs followed
+> (`20260820-225558`, `20260820-232914`), both scoring **2.81% WER, 32/1138 errors,
+> byte-identical to each other**. Against the 2.37% pre-fix baseline that is +0.44
+> points, which the rig itself calls a tie inside the noise floor for 50 utterances —
+> and two identical runs suggest 2.81% is the honest steady state rather than either
+> number being luck.
+>
+> One error in the table below is now **fixed and verified end to end**: clip
+> `121-121726-0003` still transcribes as "Hey fever", and the text actually inserted
+> is now "hay fever". Same audio, same recogniser output, different result — the
+> homophone entry in `FastCleaner.corrections` firing on a real dictation rather than
+> in a test.
+
 ## Headline
 
     clips scored                        50
