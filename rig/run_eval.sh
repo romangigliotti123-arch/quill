@@ -181,11 +181,40 @@ run_clip() {
         || die "could not snapshot $APP's transcript store before the clip" \
                "Without a marker there is no way to prove the transcript is new."
 
+    # How long the poll further down is willing to wait for a transcript. Computed
+    # here because the verification tap has to outlive it — see immediately below.
+    local deadline
+    deadline="$(python3 -c "print($SETTLE * 4)")"
+
     TAP_PID=""
     local tap_wav="$RUN_DIR/tap/$clip_id.wav"
     if (( TAP )); then
+        # The tap is a SECOND CoreAudio client on the loopback device, and the
+        # moment it CLOSES that device is not free: a client leaving can make
+        # CoreAudio renegotiate the device format, which stops an AVAudioEngine
+        # that is not handling AVAudioEngineConfigurationChange.
+        #
+        # This used to be sized `dur + LEAD + TAIL + 1.0`, which put the tap's
+        # exit ~500ms AFTER the hotkey came up — precisely inside the window where
+        # the app is finalising the transcript it is about to save. The `wait`
+        # that used to sit right after the key release then made the script block
+        # until exactly that happened, every clip.
+        #
+        # That is the one structural difference between this script and the
+        # hand-rolled loop that never lost a clip, and it fits the symptom: an
+        # intermittent failure, only under run_eval, with the app's own logs
+        # staying quiet because a route change is not an error path.
+        #
+        # So -t is now only a ceiling that stops a runaway recording if this
+        # script dies. The tap is stopped explicitly AFTER the transcript has been
+        # read, when releasing the device can no longer disturb anything.
+        #
+        # Trailing silence is free: fingerprint.py anchors its hash to the first
+        # audible sample and takes a fixed 3.0s window, so a longer recording
+        # cannot change the fingerprint — it can only make the short-tap
+        # truncation path less likely.
         local tap_dur
-        tap_dur="$(python3 -c "print(f'{$dur + $LEAD + $TAIL + 1.0:.2f}')")"
+        tap_dur="$(python3 -c "print(f'{$dur + $LEAD + $TAIL + $deadline + 2.0:.2f}')")"
         ffmpeg -hide_banner -nostdin -v error -y \
             -f avfoundation -i ":$AV_INDEX" -t "$tap_dur" \
             -ar 48000 -ac 2 -c:a pcm_s16le "$tap_wav" >/dev/null 2>&1 &
@@ -226,7 +255,9 @@ run_clip() {
     "$PTT" up "$PTT_KEY" </dev/null
     t1="$(python3 -c 'import time; print(time.time())')"
 
-    if [[ -n "$TAP_PID" ]]; then wait "$TAP_PID" 2>/dev/null || true; TAP_PID=""; fi
+    # The tap deliberately keeps running here. Waiting for it at this point is
+    # what used to release the loopback device while the app was still finalising;
+    # it is stopped after the poll below instead.
 
     # Poll for the transcript rather than sleeping a fixed time and looking once.
     #
@@ -238,8 +269,7 @@ run_clip() {
     #
     # SETTLE is now a floor for the first look and a deadline for giving up, and
     # a fast app finishes early instead of waiting to be asked again.
-    local deadline waited
-    deadline="$(python3 -c "print($SETTLE * 4)")"
+    local waited
     waited=0
     while :; do
         sleep 0.25
@@ -248,6 +278,20 @@ run_clip() {
             >/dev/null 2>/dev/null </dev/null && break
         if (( $(python3 -c "print(1 if $waited >= $deadline else 0)") )); then break; fi
     done
+
+    # The transcript is in (or the deadline passed), so the app is no longer
+    # finalising and the loopback device can be released safely.
+    #
+    # SIGINT rather than SIGTERM or a bare kill: ffmpeg finishes the WAV header on
+    # an interrupt. A truncated header decodes as an empty recording, which
+    # fingerprint.py then correctly reports as "the tap heard nothing" — voiding a
+    # clip that was actually fine, and doing it in the one way this rig treats as
+    # fatal to the whole run.
+    if [[ -n "$TAP_PID" ]]; then
+        kill -INT "$TAP_PID" 2>/dev/null || true
+        wait "$TAP_PID" 2>/dev/null || true
+        TAP_PID=""
+    fi
 
     # Guard 2 of 2: nothing changed the device while we were playing.
     assert_input_is_blackhole
@@ -282,10 +326,36 @@ print(json.dumps(d))' "$fp_json" "$clip_id" >> "$FPRINTS"
     if ! rec="$("$READER" --since "$MARK" --json --expect-device "$EXPECT_DEVICE" 2>"$RUN_DIR/.err" </dev/null)"; then
         warn "$clip_id: no valid transcript"
         sed 's/^/      /' "$RUN_DIR/.err" >&2
-        python3 -c "
-import json,sys
-print(json.dumps({'clip_id':'$clip_id','app':'$APP','ok':False,
-                  'error':open('$RUN_DIR/.err').read().strip()[:500]}))" >> "$RESULTS"
+
+        # Ask ONE more time, later, and record the answer.
+        #
+        # "the app never produced this" and "it arrived after we stopped looking"
+        # are opposite problems — a dropped dictation versus a settle time that is
+        # too short — and they leave an identical results file. The rig's own
+        # notes could not tell them apart: the row was in history.json by the time
+        # a human went looking, which is not evidence that it was there when the
+        # reader gave up. Decide it here instead of leaving it to interpretation.
+        local late=no
+        sleep 3
+        if "$READER" --since "$MARK" --json --expect-device "$EXPECT_DEVICE" \
+                >/dev/null 2>&1 </dev/null; then
+            late=yes
+            warn "$clip_id: the transcript DID land, past the ${deadline}s deadline."
+            warn "        The app is not dropping dictations — raise --settle."
+        fi
+
+        # argv, never interpolated into the program text — same rule as the
+        # fingerprint writer above.
+        python3 - "$clip_id" "$APP" "$RUN_DIR/.err" "$late" <<'PY' >> "$RESULTS"
+import json, sys
+clip_id, app, err_path, late = sys.argv[1:5]
+try:
+    err = open(err_path).read().strip()[:500]
+except Exception:
+    err = ""
+print(json.dumps({"clip_id": clip_id, "app": app, "ok": False,
+                  "error": err, "arrived_late": late == "yes"}))
+PY
         return 1
     fi
 

@@ -18,7 +18,14 @@ BIN_DIR="$RIG_DIR/bin"
 MANIFEST="${QUILL_MANIFEST:-$RIG_DIR/corpus_manifest.tsv}"
 
 FLOW_APP="/Applications/Wispr Flow.app"
-QUILL_APP="$REPO_DIR/build/Quill.app"
+
+# Scripts/build.sh writes the bundle to ~/Library/Application Support/Quill/build,
+# NOT into the repo: iCloud stamps com.apple.fileprovider xattrs on anything under
+# ~/Documents and codesign then refuses the bundle. This has to track that path and
+# honour the same QUILL_BUILD_DIR override, or setup.sh checks a directory that can
+# never exist and reports a correctly built app as "not built yet" — which it did,
+# because this still pointed at $REPO_DIR/build after the build moved.
+QUILL_APP="${QUILL_APP:-${QUILL_BUILD_DIR:-$HOME/Library/Application Support/Quill/build}/Quill.app}"
 
 # Overridable so the rig's own tests can run against fixtures. A harness must
 # never write into a real app's data directory, not even for a "safe" read test.

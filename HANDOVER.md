@@ -53,13 +53,49 @@ separates this from a plausible-sounding table.
 
 Corpus: a frozen, checksummed 50-utterance slice of LibriSpeech test-clean.
 
-**A residual ~8-15% of clips still fail to read back through `run_eval.sh`, and
-that is unfound.** The app produces a transcript for every gesture — verified by
-instrumenting every silent path in the coordinator and the event tap, all of
-which stayed quiet while the app logged a completed dictation each time — so this
-is a rig problem, not a product one. Until it is chased down, corpus numbers come
-from a simpler hand-rolled loop (mark → `ptt hold` → `ffmpeg -re` → poll →
-`read_quill.sh --since`) that has run 50/50 twice.
+**A residual ~8-15% of clips still fail to read back through `run_eval.sh`.** The
+app produces a transcript for every gesture — verified by instrumenting every
+silent path in the coordinator and the event tap, all of which stayed quiet while
+the app logged a completed dictation each time — so this is a rig problem, not a
+product one. Until it is confirmed fixed, corpus numbers come from a simpler
+hand-rolled loop (mark → `ptt hold` → `ffmpeg -re` → poll → `read_quill.sh
+--since`) that has run 50/50 twice.
+
+### 2026-08-20 — a candidate cause, patched but NOT yet verified on hardware
+
+Read on Linux, so nothing below has been run. Treat it as a hypothesis with a
+patch attached, not a result.
+
+The verification tap is a **second CoreAudio client on the loopback device**, and
+it was sized `dur + LEAD + TAIL + 1.0` — which put its exit ~500ms *after* the
+hotkey came up, i.e. inside the window where the app is finalising the transcript
+it is about to save. The `wait "$TAP_PID"` sitting immediately after the key
+release then made the script block until precisely that happened, on every clip.
+A client leaving a shared device can trigger a CoreAudio format renegotiation,
+which stops an `AVAudioEngine` that is not handling
+`AVAudioEngineConfigurationChange`.
+
+That is the **one structural difference** between this script and the hand-rolled
+loop that never lost a clip — the hand loop has no tap. It also explains the shape
+of the failure: intermittent, `run_eval`-only, and invisible to the app's own
+instrumentation, because a route change is not an error path.
+
+The patch keeps the tap alive across finalisation and stops it (SIGINT, so ffmpeg
+finishes the WAV header) only once the transcript has been read. `-t` is now just
+a runaway ceiling. Trailing silence is free here: `fingerprint.py` anchors its
+hash to the first audible sample over a fixed 3.0s window, so a longer recording
+cannot change a fingerprint.
+
+`run_eval.sh` also now re-reads once, 3s after any failure, and records
+`arrived_late` in `results.jsonl`. That settles the question this note could not:
+"the app never produced it" and "it arrived after we stopped looking" are opposite
+problems that leave an identical results file, and a row sitting in `history.json`
+by the time a human looks is *not* evidence it was there when the reader gave up.
+
+**To verify, on the Mac:** run the corpus and check that `failed_clips` is empty.
+If clips still fail, `grep arrived_late rig/out/<run-id>/results.jsonl` now says
+which problem you have — `true` means raise `--settle`, `false` means the tap
+theory is wrong and the app really is dropping dictations.
 
 **Do not chase accuracy through `.fastResults`.** Dropping it scores better on
 file-fed audio — 2.46% against 2.81%, four fewer errors — and is a disaster

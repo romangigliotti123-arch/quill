@@ -11,3 +11,7 @@ Quill.app
 Quill?*.app
 diagnostics.txt
 .claude/worktrees/
+
+# Written fresh by `handoff receive` on each machine; it is a local artifact,
+# not repo content, and committing it would fight the next handoff.
+HANDOFF.md
