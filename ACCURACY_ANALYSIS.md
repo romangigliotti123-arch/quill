@@ -1,8 +1,8 @@
 # Quill accuracy analysis — where the remaining errors actually are
 
 Written 2026-08-20 overnight, from the frozen 50-clip LibriSpeech run in
-`rig/out/20260810-quill-50/transcripts.tsv` scored by hand against
-`rig/corpus_manifest.tsv`.
+`rig/out/20260810-quill-50`, scored with `rig/score.py` and classified by reading
+every transcript against `rig/corpus_manifest.tsv`.
 
 The error table below was built by reading all 50 transcripts against the manifest.
 The **rate** comes from `rig/score.py`, which applies OpenAI's `EnglishTextNormalizer`
@@ -52,11 +52,11 @@ listed. What is left is words that are genuinely different words.
 | 260-123286-0002 | ALL my danger | **Oh,** my danger | onset misrecognition |
 | 7127-75946-0003 | TO your posts | **do** your posts | onset misrecognition |
 
-Also worth noting, not scored as word errors: `1320-122612-0001` and several others
-show a sentence split inserted mid-utterance ("...in the forest. When the travellers
-resumed their journey.") where the reference is one clause. The normaliser removes the
-punctuation so it costs nothing in WER, but it is visible in inserted text and is a
-real quality signal for prose dictation.
+Not scored as word errors: sentence splits inserted mid-utterance, like
+`1320-122612-0001`'s "...in the forest. When the travellers resumed their journey."
+where the reference is one clause. The normaliser removes punctuation so these cost
+nothing in WER. Counted and dismissed further down — most of them turn out to be
+correct.
 
 ## The finding
 
@@ -202,8 +202,17 @@ signal turns into a wrong word. That means it is **not** cheaply fixable in the 
 path, and the homophone pass below is the better investment. Worth re-checking the 6%
 against a second scored run before treating it as settled — 3 events is a thin sample.
 
-**Sentence splitting mid-clause.** Free to fix in WER terms but visible to the user.
-Low priority.
+**Sentence splitting mid-clause.** Counted properly: 11 of 50 transcripts contain an
+internal sentence break. Reading them, **most are correct** — "the door I think is like
+the gate. It is never opened" and "Saturday, August 15. The sea unbroken all round. No
+land in sight" are genuinely separate sentences and the reference simply has no
+punctuation at all, being LibriSpeech.
+
+Only two or three are real mis-splits, of the "as colourists. Sometimes as
+chiaroscurists" kind. That is a weak enough signal that changing the punctuation logic
+would risk making the common case worse to fix the rare one, and the decision is the
+recogniser's rather than Quill's in the first place. **Not worth acting on.** Recorded
+so the next person does not re-derive it from the same eleven hits.
 
 ## Suggested order of work
 
@@ -213,7 +222,7 @@ Low priority.
    model pass on a narrow pair list) needs the bench below, because the model pass does
    not currently run on ordinary dictation at all and giving it its own trigger means
    paying real latency.
-2. Sentence splitting — cosmetic, free in WER terms, visible to the user.
+2. Sentence splitting — measured and dismissed; most of the splits are correct.
 3. Onset — understood but not cheaply actionable (see above). Re-measure before
    spending anything on it.
 
