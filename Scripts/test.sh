@@ -23,14 +23,18 @@
 #      ~/Documents or iCloud stamps fileprovider xattrs on the products and
 #      codesign refuses the test bundle.
 #
-# Known limitation: some test files still fail to compile under CLT with
-# "plugin for module 'TestingMacros' not found". It is not consistent — the same
-# files compile when a --filter narrows the build — so it looks like a plugin
-# loading race rather than a missing file (the plugin is present at
-# CLT/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib). Until that is
-# understood, pass a --filter to run a subset:
+# A note on "plugin for module 'TestingMacros' not found", because it will come
+# back and it is a red herring. It shows up on a cold or half-populated build
+# directory and stops once the plugin has been loaded once — the plugin is there
+# the whole time, at CLT/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib.
+# If you hit it, run the script again rather than going looking for a missing file.
+#
+# Takes the same arguments as `swift test`:
 #
 #     Scripts/test.sh --filter repairsCompoundNames
+#
+# Full suite is 457 tests in 3 suites, about 25 seconds. The NIM live tests talk
+# to the real endpoint, so a run needs network and a key.
 #
 set -euo pipefail
 
