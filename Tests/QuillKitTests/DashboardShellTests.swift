@@ -75,10 +75,18 @@ import Testing
     root.frame = NSRect(origin: .zero, size: DashboardMetrics.windowSize)
     root.layoutSubtreeIfNeeded()
 
-    func wordmarkColour() -> NSColor? {
-        let labels = root.sidebar.subviews.compactMap { $0 as? NSTextField }
-        let wordmark = labels.first { $0.attributedStringValue.string == "Quill" }
-        return wordmark?.attributedStringValue
+    // The nav labels, not the wordmark. The wordmark is gone — the app's own
+    // icon and name inside its own window is a website header, and no Apple app
+    // does it. The rail's static text is now the row labels, so they are what
+    // this has to hold.
+    func railTextColour() -> NSColor? {
+        func labels(in view: NSView) -> [NSTextField] {
+            view.subviews.flatMap { ($0 as? NSTextField).map { [$0] } ?? labels(in: $0) }
+        }
+        let named = labels(in: root.sidebar).first {
+            $0.attributedStringValue.string == DashboardSection.dictation.title
+        }
+        return named?.attributedStringValue
             .attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
     }
 
@@ -87,8 +95,8 @@ import Testing
     // The palette now takes its text colours from the system — `.labelColor` and
     // friends — so the light and dark styles hold the SAME NSColor, and comparing
     // them as values says "nothing changed" while the screen plainly does. What
-    // this test is actually about is whether the wordmark renders differently in
-    // the two appearances, so that is what it now asks.
+    // this test is actually about is whether the rail's text renders differently
+    // in the two appearances, so that is what it now asks.
     //
     // The original concern has not gone away, it has moved: a dynamic colour
     // follows the appearance only where AppKit resolves it at draw time. Anything
@@ -102,14 +110,14 @@ import Testing
         return out
     }
 
-    let colour = try #require(wordmarkColour())
+    let colour = try #require(railTextColour())
     let inLight = try #require(rgb(colour, .aqua))
     let inDark = try #require(rgb(colour, .darkAqua))
-    #expect(inLight != inDark, "the wordmark renders identically in both appearances")
+    #expect(inLight != inDark, "the rail's text renders identically in both appearances")
 
     // And the rail still rebuilds on a theme change rather than going stale.
     root.apply(.dark)
-    #expect(wordmarkColour() != nil)
+    #expect(railTextColour() != nil)
 }
 
 @Test @MainActor func previewRendersAtFlowsExactWindowSize() throws {

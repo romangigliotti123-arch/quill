@@ -129,8 +129,6 @@ public final class SidebarView: NSView {
     public var style: DashboardStyle { didSet { applyStyle() } }
 
     private var rows: [DashboardSection: SidebarRowView] = [:]
-    private let mark: DashboardMark
-    private let wordmark: NSTextField
     private let rule: DashboardRule
     /// One pill for the whole rail, moved between rows, rather than a pill drawn
     /// by whichever row happens to be selected. Nine rows each drawing their own
@@ -143,15 +141,10 @@ public final class SidebarView: NSView {
     public init(style: DashboardStyle, selection: DashboardSection = .dictation) {
         self.style = style
         self.selection = selection
-        mark = DashboardMark(style: style)
-        wordmark = DashboardType.label("Quill", font: .systemFont(ofSize: 17, weight: .semibold),
-                                       color: style.ink, tracking: -0.3)
         rule = DashboardRule(color: style.hairline)
         selectionPill = SidebarSelectionPill(style: style)
         super.init(frame: .zero)
 
-        addSubview(mark)
-        addSubview(wordmark)
         // Below every row, so the pill is a surface the icon and label sit on
         // rather than a rectangle covering them.
         addSubview(selectionPill)
@@ -199,8 +192,6 @@ public final class SidebarView: NSView {
     /// cosmetic bug — it is white text on a white card the instant the system
     /// flips to light, which is what an eagerly-resolved palette costs.
     private func applyStyle() {
-        mark.apply(style)
-        DashboardType.recolor(wordmark, style.ink)
         rows.values.forEach { $0.style = style }
         selectionPill.style = style
         rule.color = style.hairline
@@ -213,16 +204,11 @@ public final class SidebarView: NSView {
         let inset = DashboardMetrics.sidebarInset
         let width = bounds.width
 
-        // Header sits on the vertical centre of the titlebar strip's lower half,
-        // clear of the traffic lights.
-        let headerY = DashboardMetrics.titlebarHeight + 14
-        mark.frame = NSRect(x: inset + 4, y: headerY, width: 26, height: 26)
-        let wordSize = wordmark.fittingSize
-        wordmark.frame = NSRect(x: inset + 4 + 26 + 9,
-                                y: headerY + ((26 - wordSize.height) / 2).rounded(),
-                                width: wordSize.width, height: wordSize.height)
-
-        var y = headerY + 26 + 30
+        // The nav starts just below the traffic lights. There is no header any
+        // more: the app's own icon and name used to sit here, which is a website
+        // pattern rather than a Mac one — no Apple app labels its own window.
+        // The strip above is left to the traffic lights, which is what it is for.
+        var y = DashboardMetrics.titlebarHeight + 14
         for section in DashboardSection.primary {
             rows[section]?.frame = NSRect(x: inset, y: y,
                                           width: width - inset * 2,
