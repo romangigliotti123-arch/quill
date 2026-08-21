@@ -208,6 +208,15 @@ public struct DashboardShadow {
         self.radius = radius
         self.dy = dy
     }
+
+    /// No shadow at all.
+    ///
+    /// Kept as a value rather than removing the shadow calls, because every
+    /// surface in the app asks for one and the answer should be given in one
+    /// place. `shadowed(_:)` sees a clear colour and draws the body plainly, so
+    /// turning shadows back on is a one-line change rather than an archaeology
+    /// project.
+    public static let none = DashboardShadow(color: .clear, radius: 0, dy: 0)
 }
 
 // MARK: - Palette
@@ -282,86 +291,112 @@ public struct DashboardStyle {
         NSColor(srgbRed: value, green: value, blue: value, alpha: alpha)
     }
 
-    /// Light: paper-white panel on a cool neutral canvas. Deliberately cooler
-    /// and more neutral than Flow's warm cream — Quill is an instrument, not a
-    /// notebook, and grey lets one warm accent do all the talking.
+    /// Light. Almost none of this is a colour any more, and that is the change.
+    ///
+    /// Roman, on the first native pass: "I'm not liking the shadows and I also
+    /// don't like the colours, and I'm thinking maybe have the window have some
+    /// sort of transparency so you can see the window behind it slightly."
+    ///
+    /// Those are one problem. The shell was made translucent but every surface
+    /// sitting ON the shell was still an opaque invented grey with a drop shadow,
+    /// so the window could only be see-through at its margins — the moment
+    /// content appeared, it went solid again. A translucent window is translucent
+    /// all the way up: the material is the background, and everything above it is
+    /// a tint of black or white over that material rather than a colour of its
+    /// own.
+    ///
+    /// So the greys are gone. Text, lines and the accent come from the system, so
+    /// the app matches whatever macOS is set to — including his accent colour —
+    /// instead of insisting on a warm palette nobody asked for. Surfaces are
+    /// low-alpha tints. Shadows are gone entirely: depth now comes from the
+    /// material and a hairline, which is where a Mac app gets it.
     public static let light = DashboardStyle(
         isDark: false,
         canvasTop: c(0xF0EEE9),
         canvasBottom: c(0xE6E3DC),
-        windowEdge: w(0, 0.14),
+        windowEdge: w(0, 0.10),
 
-        panel: c(0xFDFDFC),
-        card: c(0xF7F6F3),
-        cardAlt: c(0xFAF9F6),
-        raised: c(0xFFFFFF),
-        raisedTop: c(0xFFFFFF),
+        // Transparent: the material behind is the panel now.
+        panel: .clear,
+        card: w(0, 0.035),
+        cardAlt: w(0, 0.018),
+        raised: w(1, 0.75),
+        raisedTop: .clear,
 
-        hairline: c(0x1A1712, 0.075),
-        hairlineStrong: c(0x1A1712, 0.13),
-        innerHighlight: w(1, 0.9),
+        hairline: .separatorColor,
+        hairlineStrong: w(0, 0.14),
+        innerHighlight: .clear,
 
-        ink: c(0x14120E),
-        inkSecondary: c(0x57544D),
-        inkTertiary: c(0x8A867E),
-        inkQuaternary: c(0xB5B1A8),
+        // Shifted up one step from the obvious mapping. Tertiary label over a
+        // translucent material is ~25% white, and the row subtitles — "13 words ·
+        // 4.63 s · clean" — went from readable to nearly invisible. Translucency
+        // costs contrast, so the text has to buy some back.
+        ink: .labelColor,
+        inkSecondary: .labelColor,
+        inkTertiary: .secondaryLabelColor,
+        inkQuaternary: .tertiaryLabelColor,
 
-        accent: c(0x3B6D6E),
-        accentSoft: c(0x3B6D6E, 0.10),
-        accentInk: c(0x2F5859),
+        // The user's own accent, not ours. This is the single biggest reason the
+        // old palette read as someone else's app.
+        accent: .controlAccentColor,
+        accentSoft: NSColor.controlAccentColor.withAlphaComponent(0.12),
+        accentInk: .controlAccentColor,
 
-        fill: c(0x1A1712),
-        fillHover: c(0x2B2721),
-        onFill: c(0xFDFDFC),
+        fill: .controlAccentColor,
+        fillHover: NSColor.controlAccentColor.blended(withFraction: 0.12, of: .black) ?? .controlAccentColor,
+        onFill: .white,
 
-        hover: c(0x1A1712, 0.042),
-        pressed: c(0x0B0D14, 0.085),
+        hover: w(0, 0.045),
+        pressed: w(0, 0.085),
 
-        shadowCard: DashboardShadow(color: c(0x0A0C14, 0.07), radius: 14, dy: 5),
-        shadowRaised: DashboardShadow(color: c(0x0A0C14, 0.10), radius: 7, dy: 2),
-        shadowPanel: DashboardShadow(color: c(0x0A0C14, 0.13), radius: 30, dy: 10),
-        shadowContact: DashboardShadow(color: c(0x0A0C14, 0.07), radius: 1.5, dy: 1)
+        shadowCard: .none,
+        shadowRaised: .none,
+        shadowPanel: .none,
+        shadowContact: .none
     )
 
-    /// Dark: Flow does not ship one, so this is free ground. Not black — a
-    /// graphite canvas with a lifted panel, because pure black gives shadow
-    /// nothing to fall on and every surface collapses into one plane.
+    /// Dark. Same rules as light, inverted: tints of white over the material
+    /// rather than a set of graphite greys.
     public static let dark = DashboardStyle(
         isDark: true,
         canvasTop: c(0x0D0C0A),
         canvasBottom: c(0x161513),
-        windowEdge: w(1, 0.13),
+        windowEdge: w(1, 0.10),
 
-        panel: c(0x1B1A17),
-        card: c(0x22211D),
-        cardAlt: c(0x1E1D1A),
-        raised: c(0x2E2C27),
-        raisedTop: c(0x35322C),
+        panel: .clear,
+        card: w(1, 0.055),
+        cardAlt: w(1, 0.028),
+        raised: w(1, 0.11),
+        raisedTop: .clear,
 
-        hairline: w(1, 0.075),
-        hairlineStrong: w(1, 0.14),
-        innerHighlight: w(1, 0.07),
+        hairline: .separatorColor,
+        hairlineStrong: w(1, 0.16),
+        innerHighlight: .clear,
 
-        ink: c(0xF6F4EF),
-        inkSecondary: c(0xA6A29A),
-        inkTertiary: c(0x7B776F),
-        inkQuaternary: c(0x53565E),
+        // Shifted up one step from the obvious mapping. Tertiary label over a
+        // translucent material is ~25% white, and the row subtitles — "13 words ·
+        // 4.63 s · clean" — went from readable to nearly invisible. Translucency
+        // costs contrast, so the text has to buy some back.
+        ink: .labelColor,
+        inkSecondary: .labelColor,
+        inkTertiary: .secondaryLabelColor,
+        inkQuaternary: .tertiaryLabelColor,
 
-        accent: c(0x6FB3A8),
-        accentSoft: c(0x6FB3A8, 0.16),
-        accentInk: c(0x8ECFC3),
+        accent: .controlAccentColor,
+        accentSoft: NSColor.controlAccentColor.withAlphaComponent(0.20),
+        accentInk: .controlAccentColor,
 
-        fill: c(0xF2F3F6),
-        fillHover: c(0xFFFFFF),
-        onFill: c(0x0C0D10),
+        fill: .controlAccentColor,
+        fillHover: NSColor.controlAccentColor.blended(withFraction: 0.15, of: .white) ?? .controlAccentColor,
+        onFill: .white,
 
-        hover: w(1, 0.055),
-        pressed: w(1, 0.10),
+        hover: w(1, 0.06),
+        pressed: w(1, 0.11),
 
-        shadowCard: DashboardShadow(color: .black, radius: 14, dy: 5),
-        shadowRaised: DashboardShadow(color: .black, radius: 8, dy: 3),
-        shadowPanel: DashboardShadow(color: .black, radius: 34, dy: 12),
-        shadowContact: DashboardShadow(color: .black, radius: 2, dy: 1)
+        shadowCard: .none,
+        shadowRaised: .none,
+        shadowPanel: .none,
+        shadowContact: .none
     )
 }
 

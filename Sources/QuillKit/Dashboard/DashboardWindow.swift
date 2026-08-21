@@ -26,8 +26,16 @@ public final class DashboardRootView: NSView, SidebarDelegate {
     /// The translucent plate the sidebar sits on. Behind-window blending, so it
     /// picks up the desktop rather than a colour we invented.
     private let sidebarMaterial: DashboardMaterialView
-    /// The content area. Within-window blending: it should read as part of the
-    /// window, not as another hole through it.
+    /// The content area, also behind-window.
+    ///
+    /// It was `.contentBackground` within-window, which blurs what is inside the
+    /// window and therefore blurs nothing — the window was see-through at the
+    /// sidebar and solid everywhere else, which is exactly what Roman noticed.
+    /// `.windowBackground` behind-window is the material a translucent Mac window
+    /// uses for its body. NOT `.underWindowBackground`, which was tried first and
+    /// is the most transparent material AppKit has: he asked to see the window
+    /// behind "slightly", and through that one the desktop competes with the text
+    /// rather than sitting behind it.
     private let panel: DashboardMaterialView
     private let statusPill: DashboardStatusPill
     private var sectionView: NSView?
@@ -43,9 +51,9 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         sidebarMaterial = DashboardMaterialView(material: .sidebar,
                                                 blending: .behindWindow,
                                                 fallback: style.canvasBottom)
-        panel = DashboardMaterialView(material: .contentBackground,
-                                      blending: .withinWindow,
-                                      fallback: style.panel)
+        panel = DashboardMaterialView(material: .windowBackground,
+                                      blending: .behindWindow,
+                                      fallback: style.canvasTop)
         statusPill = DashboardStatusPill(style: style)
         super.init(frame: NSRect(origin: .zero, size: DashboardMetrics.windowSize))
         // Clip the section to the panel's corners so a scrolling list stops at
@@ -162,7 +170,7 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         style = newStyle
         sidebar.style = newStyle
         sidebarMaterial.restyle(fallback: newStyle.canvasBottom)
-        panel.restyle(fallback: newStyle.panel)
+        panel.restyle(fallback: newStyle.canvasTop)
         statusPill.style = newStyle
         // Not animated. A theme change is not a navigation, and cross-fading here
         // leaves two section views parented for 0.18s — which the offscreen

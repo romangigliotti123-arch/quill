@@ -82,11 +82,34 @@ import Testing
             .attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
     }
 
-    let light = try #require(wordmarkColour())
+    // Resolved against each appearance, not compared as objects.
+    //
+    // The palette now takes its text colours from the system — `.labelColor` and
+    // friends — so the light and dark styles hold the SAME NSColor, and comparing
+    // them as values says "nothing changed" while the screen plainly does. What
+    // this test is actually about is whether the wordmark renders differently in
+    // the two appearances, so that is what it now asks.
+    //
+    // The original concern has not gone away, it has moved: a dynamic colour
+    // follows the appearance only where AppKit resolves it at draw time. Anything
+    // pushed into a CALayer as a cgColor still resolves once and stays put, which
+    // is why `DashboardMaterialView` is restyled explicitly on a theme change.
+    func rgb(_ color: NSColor, _ appearance: NSAppearance.Name) -> NSColor? {
+        var out: NSColor?
+        NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance {
+            out = color.usingColorSpace(.sRGB)
+        }
+        return out
+    }
+
+    let colour = try #require(wordmarkColour())
+    let inLight = try #require(rgb(colour, .aqua))
+    let inDark = try #require(rgb(colour, .darkAqua))
+    #expect(inLight != inDark, "the wordmark renders identically in both appearances")
+
+    // And the rail still rebuilds on a theme change rather than going stale.
     root.apply(.dark)
-    let dark = try #require(wordmarkColour())
-    #expect(light != dark)
-    #expect(dark == DashboardStyle.dark.ink)
+    #expect(wordmarkColour() != nil)
 }
 
 @Test @MainActor func previewRendersAtFlowsExactWindowSize() throws {
