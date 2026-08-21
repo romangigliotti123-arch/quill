@@ -188,7 +188,7 @@ public final class DictionarySectionView: NSView {
                                 accent: false, style: style),
             DashboardMetricTile(value: "\(repairs)", unit: "repairs",
                                 caption: "words put back into your text",
-                                accent: true, style: style),
+                                accent: false, style: style),
             DashboardMetricTile(value: "\(unused)", unit: "unused",
                                 caption: "never fired since you added them",
                                 accent: false, style: style),
@@ -1255,9 +1255,15 @@ final class DictionaryDetailView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        DashboardDraw.raisedSurface(bounds, radius: DashboardRadius.card,
-                                    fillColor: style.raised, topColor: style.raisedTop,
-                                    style: style, shadow: style.shadowCard, flipped: true)
+        // Sunken, like the list beside it and every card in Insights.
+        //
+        // It drew with `raisedSurface`, which in dark mode is 11% white — #5C5C5C
+        // against a #252525 list — so the inspector was the single lightest panel
+        // in the app and read as a different material from the card it sits next
+        // to. `raisedSurface` is right for the things it was built for (the
+        // sidebar pill, buttons, the slider thumb); it is not right for a panel.
+        DashboardDraw.sunkenSurface(bounds, radius: DashboardRadius.card,
+                                    style: style, flipped: true)
     }
 }
 

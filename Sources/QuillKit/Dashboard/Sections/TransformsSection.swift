@@ -15,6 +15,9 @@ import AppKit
 /// in, so it is the one this screen leads with.
 public final class TransformsSectionView: NSView {
 
+    /// Same spirit as Dictation's cap: past this a hero has stopped being a hero.
+    private static let heroMaxHeight: CGFloat = 340
+
     private let style: DashboardStyle
     private let store: TransformStore
     private var transforms: [Transform]
@@ -25,6 +28,9 @@ public final class TransformsSectionView: NSView {
     private var header: DashboardSectionHeader!
     private let listRule: DashboardRule
     private var hero: TransformDetailView?
+    /// The tallest any transform's hero wants to be at the current width, so the
+    /// rule and the list below it do not move when you pick a different one.
+    private var heroFloor: (width: CGFloat, height: CGFloat)?
     private var rows: [TransformRowView] = []
 
     public override var isFlipped: Bool { true }
@@ -50,18 +56,11 @@ public final class TransformsSectionView: NSView {
     // MARK: - Build
 
     private func build() {
-        // How many of them survive with no network. The one number on this screen
-        // worth putting in the header, because it is the claim Flow cannot make.
-        //
-        // It used to be constrained to the title's trailing edge and its baseline,
-        // which put it halfway across the window on a line of its own, aligned to
-        // nothing — the shared header carries it as a meta line now, in the same
-        // place every other section puts one.
-        let offlineCount = transforms.filter(\.worksOffline).count
-        header = DashboardSectionHeader(
-            title: "Transforms",
-            meta: "\(transforms.count) transforms  \u{00B7}  \(offlineCount) work offline",
-            style: style)
+        // No meta line. "8 transforms · 4 work offline" restated the list
+        // directly beneath it — every row carries its own "offline" tag and the
+        // list is its own count — and it cost 21 points of list height to do so.
+        // No other section carries one, either.
+        header = DashboardSectionHeader(title: "Transforms", style: style)
         addSubview(header)
 
         scroll.drawsBackground = false
@@ -156,7 +155,25 @@ public final class TransformsSectionView: NSView {
         // a hero sized to what is in it, and the list underneath takes whatever
         // height is left and can never leave a hole.
         if let hero {
-            let height = hero.fittingHeight(width: width)
+            // Sized to the TALLEST transform, not to the selected one.
+            //
+            // Otherwise the divider and the entire list jump every time you click
+            // a different row — the thing you are reading moves out from under the
+            // pointer to make room for the thing you just opened. The measure is
+            // taken across the whole set at this width and cached, because the
+            // heights differ by width as well as by transform: the tallest
+            // built-in is 276pt at 1350 and 295pt at 1060, so a constant would be
+            // wrong at one size or the other.
+            //
+            // The line caps inside `build()` bound how tall that maximum can get,
+            // so this cannot bring back the half-window void the hero replaced.
+            if heroFloor?.width != width {
+                let tallest = transforms
+                    .map { TransformDetailView(transform: $0, style: style).fittingHeight(width: width) }
+                    .max() ?? 0
+                heroFloor = (width, min(TransformsSectionView.heroMaxHeight, tallest))
+            }
+            let height = max(hero.fittingHeight(width: width), heroFloor?.height ?? 0)
             hero.frame = NSRect(x: padX, y: y, width: width, height: height)
             y += height + DashboardSpace.xl
         }
@@ -285,7 +302,7 @@ final class TransformRowView: NSView {
         // outlined BOX rather than a highlighted row, in light mode only.
         let body = bounds.insetBy(dx: 0, dy: 1)
         if isSelected {
-            DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.raised)
+            DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.rowSelected)
             NSGraphicsContext.saveGraphicsState()
             DashboardDraw.path(body, DashboardRadius.row).addClip()
             style.accent.setFill()
@@ -424,9 +441,12 @@ final class TransformDetailView: NSView {
             // Named plainly. A transform that silently does nothing offline is
             // worse than one that refuses, and this is the screen where the user
             // finds out which they have.
+            // The fact, not the argument for it. What the user decides on this
+            // line is refuses-versus-silently-degrades; the reasoning behind the
+            // choice belongs in the code, and it is in the code.
             add(DashboardType.label(
-                "This one refuses. There is no honest deterministic version of it, so offline it says so rather than returning something close.",
-                font: DashboardType.callout, color: style.inkTertiary, lines: 3, lineHeight: 19))
+                "Refuses. There is no offline version of this one.",
+                font: DashboardType.callout, color: style.inkTertiary, lines: 2, lineHeight: 19))
         }
 
         // The "Guards" section is gone, and this is the cut Roman asked for by
@@ -463,9 +483,16 @@ final class TransformDetailView: NSView {
 
     /// The height this transform wants, so the page can size the hero to it
     /// rather than stretching it to fill a half-window card.
+    /// The same measure the Dictation record uses. Full-bleed prose across a
+    /// thousand points is a wall, and at 1350 the hero's text ran to 976 while the
+    /// card's right two-thirds stayed empty. The cap has to be applied in BOTH this
+    /// and `layout()` or the page sizes the card from one measure and fills it at
+    /// another.
+    static let textMaxWidth: CGFloat = 760
+
     func fittingHeight(width: CGFloat) -> CGFloat {
         let pad = DashboardSpace.lg
-        let inner = max(40, width - pad * 2)
+        let inner = min(TransformDetailView.textMaxWidth, max(40, width - pad * 2))
         var height = pad
         for (index, block) in blocks.enumerated() {
             if block.isHeading, index > 0 { height += DashboardSpace.md }
@@ -488,7 +515,7 @@ final class TransformDetailView: NSView {
     override func layout() {
         super.layout()
         let pad = DashboardSpace.lg
-        let width = max(0, bounds.width - pad * 2)
+        let width = min(TransformDetailView.textMaxWidth, max(0, bounds.width - pad * 2))
         var y = pad
         for (index, block) in blocks.enumerated() {
             let height = DashboardType.size(block.view, width: width).height

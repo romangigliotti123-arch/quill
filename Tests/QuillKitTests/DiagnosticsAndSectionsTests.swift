@@ -65,7 +65,11 @@ import Testing
     let refusing = TransformDetailView(transform: online, style: .dark)
     refusing.frame = NSRect(x: 0, y: 0, width: 620, height: 700)
     refusing.layoutSubtreeIfNeeded()
-    #expect(text(refusing).contains("refuses"))
+    // Case-insensitive: the claim this pins is that the screen SAYS the transform
+    // refuses, not where the sentence happens to start. The copy was shortened
+    // from a paragraph of rationale to "Refuses. There is no offline version of
+    // this one." and a literal lowercase match turned a copy edit into a failure.
+    #expect(text(refusing).lowercased().contains("refuses"))
 }
 
 // MARK: - Help

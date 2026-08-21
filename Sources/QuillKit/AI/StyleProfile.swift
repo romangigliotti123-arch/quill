@@ -491,6 +491,17 @@ public enum SpellingConvention: String, Codable, Sendable, CaseIterable {
     case british
     case american
 
+    /// For display in a table of values. Separate from `shortName` because that
+    /// one is a sentence fragment ("British spelling") that `summaryLine` builds
+    /// on, and under a column headed "Spelling" it reads "Spelling ... British
+    /// spelling".
+    public var title: String {
+        switch self {
+        case .british:  return "British"
+        case .american: return "American"
+        }
+    }
+
     public var shortName: String {
         switch self {
         case .british:  return "British spelling"
@@ -513,6 +524,17 @@ public enum Formality: String, Codable, Sendable, CaseIterable {
     case casual
     case neutral
     case formal
+
+    /// Sentence case, for a column of values. Interpolating the enum prints the
+    /// raw case name, which put "casual" and "british" in a table where every
+    /// other value was written like English.
+    public var title: String {
+        switch self {
+        case .casual:  return "Casual"
+        case .neutral: return "Neutral"
+        case .formal:  return "Formal"
+        }
+    }
 }
 
 /// A value a trait can hold. Traits store votes keyed by a stable string rather

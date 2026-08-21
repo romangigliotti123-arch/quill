@@ -209,7 +209,7 @@ public final class DictationSectionView: NSView {
             // with a paragraph floating in the middle of it.
             let view = DashboardMessageView(symbol: "waveform",
                                             title: "Nothing dictated yet",
-                                            body: "Quill listens while you hold the key and types when you let go. Nothing is uploaded, and everything you say lands here.",
+                                            body: "Nothing is uploaded, and everything you say lands here.",
                                             steps: ["Hold \u{2325} anywhere \u{2014} any app, any text field.",
                                                     "Say it. The overlay shows what Quill is hearing.",
                                                     "Let go. It types where your cursor already is."],
@@ -458,9 +458,13 @@ final class DictationGroupHeader: NSView {
 
     override func layout() {
         super.layout()
+        // Inset to the row's own gutter, so "Today" sits over the time column
+        // rather than 12 points to its left. Only the label moves — the top rule
+        // stays full width, where it lines up with the list rule above it.
         let size = label.fittingSize
-        label.frame = NSRect(x: 0, y: (bounds.height - size.height).rounded() - 6,
-                             width: min(size.width, bounds.width), height: size.height)
+        let inset = DashboardSpace.sm
+        label.frame = NSRect(x: inset, y: (bounds.height - size.height).rounded() - 6,
+                             width: min(size.width, bounds.width - inset), height: size.height)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -606,7 +610,7 @@ final class DictationRowView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let body = bounds.insetBy(dx: 0, dy: 1)
         if isSelected {
-            DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.raised)
+            DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.rowSelected)
             // A stub of accent on the leading edge. The fill already says
             // "selected"; this says which of eight identical fills, at a glance,
             // from across the room.

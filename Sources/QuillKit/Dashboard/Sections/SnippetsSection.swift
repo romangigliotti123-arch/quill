@@ -47,7 +47,6 @@ public final class SnippetsSectionView: NSView {
 
     // Header
     private var header: DashboardSectionHeader!
-    private let stat: NSTextField
     private let newButton: DashboardButton
 
     // Library
@@ -73,7 +72,6 @@ public final class SnippetsSectionView: NSView {
         self.store = store
         self.style = style
 
-        stat = NSTextField(labelWithString: "")
         newButton = DashboardButton(title: "New snippet", symbol: "plus", kind: .primary, style: style)
 
         listCard = DashboardCardView(style: style, elevation: .sunken, radius: DashboardRadius.card)
@@ -96,7 +94,6 @@ public final class SnippetsSectionView: NSView {
         // eyebrow and an empty blurb to do it.
         header = DashboardSectionHeader(title: "Snippets", trailing: [newButton], style: style)
         addSubview(header)
-        addSubview(stat)
         addSubview(listCard)
         addSubview(editor)
         addSubview(emptyState)
@@ -156,11 +153,7 @@ public final class SnippetsSectionView: NSView {
         editor.isHidden = empty
         // The button stays. An empty state whose only way forward is a link
         // inside the illustration is an empty state that has hidden its own
-        // primary action. "0 characters not typed" is the part that goes.
-        stat.isHidden = empty
-
-        stat.attributedStringValue = Self.statLine(charactersSaved: store.totalCharactersSaved,
-                                                   style: style)
+        // primary action.
         reloadRows()
         if let selected = snippets.first(where: { $0.id == selectedID }) {
             editor.load(selected)
@@ -230,24 +223,6 @@ public final class SnippetsSectionView: NSView {
         reload(select: next)
     }
 
-    /// Not a vanity metric: every character here is one the user did not type,
-    /// derived from the replacement length and the firing count. It is also the
-    /// only number on the screen, which is what keeps it readable.
-    private static func statLine(charactersSaved: Int, style: DashboardStyle) -> NSAttributedString {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        let value = formatter.string(from: NSNumber(value: charactersSaved)) ?? "\(charactersSaved)"
-        let line = NSMutableAttributedString(string: value, attributes: [
-            .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
-            .foregroundColor: style.ink,
-            .kern: -0.2,
-        ])
-        line.append(NSAttributedString(string: "  characters not typed", attributes: [
-            .font: DashboardType.callout,
-            .foregroundColor: style.inkTertiary,
-        ]))
-        return line
-    }
 
     // MARK: - Layout
 
@@ -259,15 +234,13 @@ public final class SnippetsSectionView: NSView {
 
         header.frame = NSRect(x: padX, y: padY, width: width, height: header.height)
 
-        // The stat sits under the button, right-aligned, on the meta line's own
-        // row. It used to hang off an empty blurb's baseline, which meant its
-        // position depended on a label with no text in it.
-        let statSize = stat.fittingSize
-        stat.frame = NSRect(x: bounds.width - padX - statSize.width,
-                            y: padY + header.height + 6,
-                            width: statSize.width, height: statSize.height)
-
-        var y = DashboardSectionHeader.contentTop(for: header) + statSize.height
+        // Title, actions, content — the same three things in the same order as
+        // every other section. This one alone carried "24,683 characters not
+        // typed" as a third header element, and paid for it by pushing the whole
+        // page down by its own height. If the aggregate is worth keeping it
+        // belongs beside "54m saved against typing it out" in Insights, which is
+        // the screen that exists for numbers like it.
+        var y = DashboardSectionHeader.contentTop(for: header)
 
         let columnHeight = max(240, bounds.height - y - padY)
         // The library is capped rather than fixed: at the window's minimum size a
@@ -476,7 +449,6 @@ final class SnippetEditorView: NSView {
 
     private let matchCaption: NSTextField
     private let modeControl: SnippetsSegmented
-    private let matchHint: NSTextField
 
     private let previewPanel: SnippetsPreviewPanel
 
@@ -495,7 +467,9 @@ final class SnippetEditorView: NSView {
         phraseField = SnippetsField(style: style, placeholder: "what you say",
                                     font: .systemFont(ofSize: 14, weight: .medium),
                                     badgeSymbol: "waveform")
-        enabledLabel = DashboardType.label("Enabled", font: DashboardType.caption, color: style.inkSecondary)
+        // Matched to `phraseCaption` exactly. It was a step louder than the label
+        // of the field it sits above, which inverts the hierarchy of the header.
+        enabledLabel = DashboardType.label("Enabled", font: DashboardType.micro, color: style.inkTertiary)
         enabledToggle = SnippetsToggle(isOn: true, style: style)
 
         replacementCaption = DashboardType.label("What it types", font: DashboardType.micro,
@@ -508,14 +482,6 @@ final class SnippetEditorView: NSView {
                                            color: style.inkTertiary)
         modeControl = SnippetsSegmented(titles: Snippet.Mode.allCases.map(\.title),
                                         selectedIndex: 0, style: style)
-        // The guarantee, said out loud. It is the difference between a feature
-        // people trust with a client quote and one they turn off after it fires
-        // once in the wrong sentence.
-        matchHint = DashboardType.label("Matched word for word. A near miss never fires.",
-                                        font: .systemFont(ofSize: 11.5, weight: .regular),
-                                        color: style.inkTertiary, tracking: 0,
-                                        lines: 2, lineHeight: 15)
-
         previewPanel = SnippetsPreviewPanel(style: style)
 
         footerRule = DashboardRule(color: style.hairline)
@@ -528,7 +494,7 @@ final class SnippetEditorView: NSView {
         addSubview(card)
         [phraseCaption, phraseField, enabledLabel, enabledToggle,
          replacementCaption, lengthLabel, replacementArea,
-         matchCaption, modeControl, matchHint, previewPanel,
+         matchCaption, modeControl, previewPanel,
          footerRule, meta, saveButton, deleteButton].forEach(card.addSubview)
 
         phraseField.onChange = { [weak self] _ in self?.markDirty() }
@@ -682,11 +648,6 @@ final class SnippetEditorView: NSView {
         let modeWidth = min(inner, 360)
         modeControl.frame = NSRect(x: padX, y: modeY, width: modeWidth, height: 32)
         matchCaption.frame = NSRect(x: padX, y: modeY - 8 - captionHeight, width: 200, height: captionHeight)
-        let hintX = padX + modeWidth + 18
-        let hintWidth = max(0, width - padX - hintX)
-        let hintHeight = DashboardType.size(matchHint, width: hintWidth).height
-        matchHint.frame = NSRect(x: hintX, y: modeY + ((32 - hintHeight) / 2).rounded(),
-                                 width: hintWidth, height: hintHeight)
 
         let replacementHeight = max(90, matchCaption.frame.minY - 22 - replacementTop)
         replacementArea.frame = NSRect(x: padX, y: replacementTop, width: inner, height: replacementHeight)

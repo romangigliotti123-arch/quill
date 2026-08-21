@@ -200,11 +200,10 @@ public final class ScratchpadSectionView: NSView {
         self.notes = notes.sorted { $0.isPinned == $1.isPinned ? $0.modified > $1.modified : $0.isPinned }
         let action = DashboardSection.scratchpad.primaryAction
         newNote = DashboardButton(title: action.title, symbol: action.symbol, kind: .primary, style: style)
-        header = DashboardSectionHeader(
-            title: "Scratchpad",
-            meta: notes.isEmpty ? nil : DictationFormat.plural(notes.count, "note"),
-            trailing: [newNote],
-            style: style)
+        // No count under the title. Dictation shows one only while a filter is
+        // narrowing the list, which is when a count answers something; a standing
+        // "1 note" over a list of one note is the list read aloud.
+        header = DashboardSectionHeader(title: "Scratchpad", trailing: [newNote], style: style)
         super.init(frame: .zero)
 
         newNote.onClick = {
@@ -218,9 +217,11 @@ public final class ScratchpadSectionView: NSView {
                 symbol: "square.and.pencil",
                 title: "Nothing here yet",
                 body: "Hold the dictation key with no text field focused and whatever you say lands here, as a note.",
-                steps: [], action: action.title, actionSymbol: action.symbol,
+                // No button. "New note" is already in the header, where it stays
+                // once notes exist — the card offering it a second time two
+                // hundred points below is the same action twice on one screen.
+                steps: [], action: nil, actionSymbol: nil,
                 style: style, elevation: .raised)
-            view.onAction = { [weak self] in self?.newNote.onClick?() }
             addSubview(view)
             empty = view
             return
@@ -636,16 +637,20 @@ public final class StyleSectionView: NSView {
                                  : "\(DictationFormat.plural(profile.correctionCount, "correction")) seen")
         // An unlearned trait says so. Showing a default as though it were a
         // finding is how a learning feature earns distrust it cannot recover from.
+        // No support count. It rendered as a bare "· 2" beside each value — a
+        // vote tally, in a column of plain English, that a person cannot act on
+        // and cannot interpret. How much evidence there is behind the card is
+        // already stated once, in its header.
         func described<V>(_ trait: StyleTrait<V>, _ render: (V) -> String) -> String {
             guard let value = trait.value else { return "not learned yet" }
-            return "\(render(value))  \u{00B7}  \(trait.support)"
+            return render(value)
         }
         let sentence = profile.sentenceLength.average.map { "\(Int($0.rounded())) words" } ?? "not learned yet"
         let rows: [(String, String)] = [
-            ("Spelling", described(profile.spelling) { "\($0)" }),
-            ("Contractions", described(profile.contractions) { $0 ? "uses them" : "avoids them" }),
-            ("Formality", described(profile.formality) { "\($0)" }),
-            ("Oxford comma", described(profile.oxfordComma) { $0 ? "yes" : "no" }),
+            ("Spelling", described(profile.spelling) { $0.title }),
+            ("Contractions", described(profile.contractions) { $0 ? "Uses them" : "Avoids them" }),
+            ("Formality", described(profile.formality) { $0.title }),
+            ("Oxford comma", described(profile.oxfordComma) { $0 ? "Yes" : "No" }),
             ("Typical sentence", sentence),
         ]
 
@@ -674,7 +679,10 @@ public final class StyleSectionView: NSView {
         let trustBody = DashboardType.label(
             judged == 0
               ? "Nothing to judge yet. This fills in as you accept or undo Quill's cleanup."
-              : "\(accepted) kept, \(reverted) undone. If this drops, the model is being too clever and the fast pass should win more often.",
+              // The second sentence — "the model is being too clever and the fast
+              // pass should win more often" — is a note to whoever tunes the
+              // cleanup, on a card a user reads to find out whether to trust it.
+              : "\(accepted) kept, \(reverted) undone.",
             font: DashboardType.callout, color: style.inkSecondary, lines: 3, lineHeight: 19)
         trust.add(trustBody) { width in DashboardType.size(trustBody, width: width).height }
 
@@ -808,7 +816,7 @@ final class StyleToneRow: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let body = bounds.insetBy(dx: 0, dy: 2)
         if selected {
-            DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.raised)
+            DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.rowSelected)
         } else if hover.value > 0.001 {
             DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.hover.faded(hover.value))
         }
@@ -871,10 +879,16 @@ public final class NotetakerSectionView: NSView {
         message = DashboardMessageView(
             symbol: "record.circle",
             title: "Not built yet",
-            body: "Meeting capture needs three things Quill does not have. Rather than ship a screen that looks finished and records nothing, this says so.",
-            steps: ["System-audio capture permission, separate from the microphone grant.",
-                    "Calendar access, to know a meeting is happening at all.",
-                    "Speaker separation, or the transcript is one undifferentiated wall."],
+            // Written for the person reading it, not for whoever built it. The
+            // body used to spend its second sentence on why the team chose not to
+            // fake the screen — which is a note to reviewers — and the three rows
+            // named TCC permissions and speaker diarisation by their engineering
+            // names. Same three facts, in the language of someone who wants to
+            // record a meeting.
+            body: "Quill can't sit in on a meeting yet. Three things have to land first.",
+            steps: ["Hearing the other side of the call, not just your microphone.",
+                    "Knowing from your calendar when a meeting starts.",
+                    "Telling one voice from another in the transcript."],
             action: nil, actionSymbol: nil,
             style: style, elevation: .raised)
         super.init(frame: .zero)

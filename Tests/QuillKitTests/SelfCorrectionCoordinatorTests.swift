@@ -206,12 +206,21 @@ struct SlowOperationTests {
     let elapsed = ContinuousClock.now - start
 
     #expect(result == nil)
-    // Ten seconds against a thirty-second operation. The regression this guards
-    // against is *unbounded* waiting — it stalled a dictation for 59 seconds —
-    // so any ceiling comfortably under the operation length proves the deadline
-    // is doing its job, and a wide one stops the assertion reporting the state of
-    // the machine instead of the state of the code.
-    #expect(elapsed < .seconds(10), "deadline did not bound the wait: \(elapsed)")
+    // Measured against the OPERATION, not against a wall-clock constant.
+    //
+    // The regression this guards against is *unbounded* waiting — it stalled a
+    // dictation for 59 seconds — so what has to be proved is that the deadline
+    // returned before the operation did. A fixed ten-second ceiling looks tighter
+    // and is worse: it fails on a loaded machine, which is the assertion reporting
+    // the state of the box rather than the state of the code. Observed at 12.8s
+    // under a build and a dozen other processes, on unmodified code, twice.
+    //
+    // Swift's cooperative pool can be starved for many seconds when every core is
+    // busy, and nothing about that says the deadline is broken. Five seconds of
+    // headroom under a thirty-second operation still cannot pass if the wait is
+    // unbounded.
+    #expect(elapsed < operationLength - .seconds(5),
+            "deadline did not bound the wait: \(elapsed) against a \(operationLength) operation")
 }
 }
 

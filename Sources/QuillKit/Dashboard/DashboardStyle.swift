@@ -269,6 +269,15 @@ public struct DashboardStyle {
     /// status pill, secondary button.
     public let raised: NSColor
     public let raisedTop: NSColor
+    /// The selected row in a full-width list on the PAGE, as opposed to on the
+    /// sidebar material.
+    ///
+    /// `raised` is right where it is used — over the translucent sidebar it makes
+    /// a proper lifted pill — but on the near-white content panel it is 75% white
+    /// on white, so a selected dictation or transform came out carried by nothing
+    /// but its hairline in light mode while dark mode got a solid fill. A list
+    /// sitting on the page needs a step DOWN from it, not up.
+    public let rowSelected: NSColor
 
     // Lines
     public let hairline: NSColor
@@ -355,6 +364,7 @@ public struct DashboardStyle {
         cardAlt: .clear,
         raised: w(1, 0.75),
         raisedTop: .clear,
+        rowSelected: w(0, 0.055),
 
         hairline: .separatorColor,
         hairlineStrong: w(0, 0.14),
@@ -401,6 +411,8 @@ public struct DashboardStyle {
         cardAlt: .clear,
         raised: w(1, 0.11),
         raisedTop: .clear,
+        // Unchanged from `raised`: dark mode was already correct.
+        rowSelected: w(1, 0.11),
 
         hairline: .separatorColor,
         hairlineStrong: w(1, 0.16),

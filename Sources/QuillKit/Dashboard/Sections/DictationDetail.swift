@@ -144,14 +144,16 @@ public final class DictationRecordView: NSView {
         // The legend and the change summary only exist when something changed.
         // On a clean dictation they were a rule, a heading and a sentence saying
         // nothing happened — three rows of furniture to report an absence.
+        // The legend and the rule answer different questions, so they are gated
+        // separately. The rule belongs to the change summary; the legend explains
+        // the strike-through and the wash IN THE TRANSCRIPT — and a record whose
+        // only change was recasing has neither, so "heard / inserted" was pointing
+        // at treatments that were not on screen.
         let notes = Array(diff.notes.prefix(3))
-        if notes.isEmpty {
-            legend = nil
-            rule = nil
-        } else {
-            legend = DictationRecordView.legendLabel(style: style)
-            rule = DashboardRule(color: style.hairline)
-        }
+        let hasMarkedRuns = diff.segments.contains { $0.kind != .unchanged }
+        rule = notes.isEmpty ? nil : DashboardRule(color: style.hairline)
+        legend = (notes.isEmpty || !hasMarkedRuns) ? nil
+            : DictationRecordView.legendLabel(style: style)
 
         super.init(frame: .zero)
 
