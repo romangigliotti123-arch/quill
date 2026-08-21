@@ -60,17 +60,23 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         ///
         ///     pass                        words   trigger   fixed    damaged
         ///     ──────────────────────────────────────────────────────────────
-        ///     closed list (default)          44       11%     3/6        0/6
+        ///     closed list                    44       11%     3/6        0/6
         ///     context, prompt v1           2281       31%     3/6        3/6
         ///     context, prompt v2           2281       31%    2/10       0/10
+        ///     context, v3 + endings        2281       18%    5/10       0/10
         ///
         /// v1 fixed as much as the closed list and rewrote half the correct
         /// sentences — "the flower shop on the corner" became "the flour shop".
-        /// v2 stopped the damage by moving the burden of proof, and became so
-        /// reluctant that it fixed one of the four cases the closed list cannot
-        /// reach at all. On this model, at this deadline, choosing from a short
-        /// list beats proposing freely. A larger model is the thing that would
-        /// change it, and gemma-4-31b is 1678ms at p50 against a 450ms budget.
+        /// v2 stopped the damage by moving the burden of proof and became so
+        /// reluctant it barely fired.
+        ///
+        /// v3 is the one that works, and two changes did it. Dropped endings were
+        /// added as a second verifiable repair — he speaks fast and the recogniser
+        /// loses them, "I move the whole front end" for "I moved" — and the
+        /// projection stopped refusing a whole answer because one word in it was
+        /// disallowed, keeping the repairs that check out and reverting the rest.
+        /// Fixes went 2/10 to 5/10 with damage still at zero, and it reaches words
+        /// the 44-item list cannot: coarse/course, sealing/ceiling, rode/rowed.
         public var contextRecovery: Bool
 
         public init(holdKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
@@ -78,7 +84,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                     inputDeviceUID: String? = nil,
                     liveText: Bool = true,
                     numberStyle: NumberStyle = .spellOutSmall,
-                    contextRecovery: Bool = false) {
+                    contextRecovery: Bool = true) {
             self.holdKeyCode = holdKeyCode
             self.toggleKeyCode = toggleKeyCode
             self.inputDeviceUID = inputDeviceUID

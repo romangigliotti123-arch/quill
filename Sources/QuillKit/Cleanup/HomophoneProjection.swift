@@ -73,7 +73,8 @@ public enum HomophoneProjection {
         _ raw: String,
         onto input: String,
         permitting mayReplace: (String, String) -> Bool = HomophonePairs.mayReplace,
-        maximumSubstitutions: Int = .max
+        maximumSubstitutions: Int = .max,
+        keepWhatIsAllowed: Bool = false
     ) -> String? {
         var out = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !out.isEmpty else { return nil }
@@ -104,7 +105,22 @@ public enum HomophoneProjection {
             let proposed = outTokens[index].word
             if HomophonePairs.normalise(original) == HomophonePairs.normalise(proposed) { continue }
             // Different word. It survives only if the caller's rule permits it.
-            guard mayReplace(original, proposed) else { return nil }
+            guard mayReplace(original, proposed) else {
+                // Refusing the whole answer over one bad word throws away the
+                // good ones with it. Measured on Roman's own dictation: the model
+                // returned "I moved the whole front end to type scripts" for
+                // "I move ... to type scoops" — the dropped ending repaired, which
+                // is exactly what he asked for, and "scoops" turned into
+                // "scripts", which is not. All-or-nothing lost both.
+                //
+                // Reverting just the disallowed word is not a weaker guarantee.
+                // Every surviving change is still individually verified, the word
+                // count still has to match exactly, so a rewritten sentence is
+                // still refused outright — only a same-shape answer with a mix of
+                // good and bad swaps gets taken apart like this.
+                guard keepWhatIsAllowed else { return nil }
+                continue
+            }
             inTokens[index].word = matchCase(of: original, applying: proposed)
             substitutions += 1
             // Refuse the whole answer rather than keeping the first N. A model

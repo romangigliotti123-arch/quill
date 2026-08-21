@@ -70,11 +70,13 @@ private func project(_ model: String, onto input: String) -> String? {
                     onto: "thick peppered flower fattened sauce") == nil)
 }
 
-@Test func refusesMoreThanOneChange() {
-    // Both swaps are genuine homophones, and it still refuses: a model changing
-    // two words has stopped correcting a mishearing and started editing.
-    #expect(ContextProjection.maximumSubstitutions == 1)
-    #expect(project("the flour and the dews", onto: "the flower and the dues") == nil)
+@Test func acceptsTwoRepairsInOneLongDictation() {
+    // The cap was one while homophones were the only permitted repair. Dropped
+    // endings changed that: he speaks fast, a 200-word dictation genuinely loses
+    // more than one, and refusing the whole answer over the second repair would
+    // throw away the first. See `atMostThreeWordsMayChange` for where it stops.
+    #expect(project("the flour and the dews", onto: "the flower and the dues")
+            == "the flour and the dews")
 }
 
 @Test func refusesAnExplanation() {
@@ -98,6 +100,61 @@ private func project(_ model: String, onto input: String) -> String? {
 @Test func refusesTheModelInventingAWordOutsideTheTable() {
     #expect(project("thick peppered flar fattened sauce",
                     onto: "thick peppered flower fattened sauce") == nil)
+}
+
+// MARK: - Dropped endings, which is how he actually loses words
+
+@Test func repairsAnEndingDroppedBySpeakingFast() {
+    // Verbatim from his own dictation, and the reason this category exists:
+    // he said "moved", the recogniser heard "move" because he was talking fast.
+    #expect(project("I moved the whole front end to type scoops last night",
+                    onto: "I move the whole front end to type scoops last night")
+            == "I moved the whole front end to type scoops last night")
+}
+
+@Test func keepsTheGoodRepairWhenTheModelAlsoTriesABadOne() {
+    // The measured failure of all-or-nothing. The model returned both "moved"
+    // (a real repair) and "scripts" for "scoops" (not a repair at all), and
+    // refusing the answer outright lost the first along with the second.
+    #expect(project("I moved the whole front end to type scripts last night",
+                    onto: "I move the whole front end to type scoops last night")
+            == "I moved the whole front end to type scoops last night")
+}
+
+@Test func endingRepairsAreOnlyEndings() {
+    #expect(ContextProjection.sameStem("move", "moved"))
+    #expect(ContextProjection.sameStem("site", "sites"))
+    #expect(ContextProjection.sameStem("carry", "carried"))
+    #expect(ContextProjection.sameStem("quick", "quickly"))
+    // A different word that happens to start the same way is not an ending.
+    #expect(!ContextProjection.sameStem("move", "movement"))
+    #expect(!ContextProjection.sameStem("book", "bookcase"))
+}
+
+@Test func shortFunctionWordsAreNeverTreatedAsStems() {
+    // The pairs that would quietly change his meaning, and are the most common
+    // words he says. All are prefixes of each other.
+    #expect(!ContextProjection.sameStem("the", "they"))
+    #expect(!ContextProjection.sameStem("a", "as"))
+    #expect(!ContextProjection.sameStem("is", "it"))
+    #expect(!ContextProjection.sameStem("he", "her"))
+    #expect(!ContextProjection.sameStem("i", "in"))
+    #expect(!ContextProjection.sameStem("on", "one"))
+}
+
+@Test func aRewrittenSentenceIsStillRefusedOutright() {
+    // Partial acceptance must not become a way in for a rewrite. The word count
+    // has to match exactly before any of it is considered, so the sentence the
+    // model actually produced on his bug report is still thrown away whole.
+    #expect(project("I've been experiencing bugs with the app",
+                    onto: "Here are the following bugs I've been experiencing") == nil)
+}
+
+@Test func atMostThreeWordsMayChange() {
+    #expect(ContextProjection.maximumSubstitutions == 3)
+    // Four permitted swaps is a model rewriting with a thesaurus of homophones.
+    #expect(project("the flour and the dews and the ceiling and the coarse",
+                    onto: "the flower and the dues and the sealing and the course") == nil)
 }
 
 // MARK: - The table itself
@@ -140,12 +197,22 @@ private func project(_ model: String, onto input: String) -> String? {
     #expect(!HomophonePairs.hasCandidate(in: "send the invoice tomorrow morning"))
 }
 
-@Test func theSettingDefaultsOffAndSurvivesAnOldFile() throws {
-    // Off because it was measured worse, not because it is unfinished. See the
-    // table in QuillSettings.Values.contextRecovery: the closed list fixes 3/6
-    // with 0 damage, this fixes 2/10.
-    #expect(QuillSettings.Values().contextRecovery == false)
+@Test func theSettingDefaultsOnAndSurvivesAnOldFile() throws {
+    // On because it was measured better: 5/10 fixed and 0 damaged against the
+    // closed list's 3/6, and it reaches words the list does not contain. See the
+    // table in QuillSettings.Values.contextRecovery.
+    #expect(QuillSettings.Values().contextRecovery == true)
     let json = #"{"holdKeyCode":61,"liveText":true}"#
     let back = try JSONDecoder().decode(QuillSettings.Values.self, from: Data(json.utf8))
-    #expect(back.contextRecovery == false)
+    #expect(back.contextRecovery == true)
+}
+
+@Test func aShortCommandNeverSpendsARequest() throws {
+    // "build" and "billed" are homophones, so the word gate fires on this — and
+    // six words that came out fine are not worth most of a second. The length
+    // floor is what stops the feature taxing every quick command he dictates.
+    #expect(!ContextProjection.hasCandidate(in: "push the build to Netlify tonight"))
+    #expect(!ContextProjection.hasCandidate(in: "push the build and tell the client it is done"))
+    #expect(ContextProjection.hasCandidate(
+        in: "okay so the sealing in the back room was cracked and stained and needs doing before Friday"))
 }

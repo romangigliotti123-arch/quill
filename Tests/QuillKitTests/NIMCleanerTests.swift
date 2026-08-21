@@ -335,8 +335,12 @@ private func cleaner(_ ai: FakeAI) -> NIMCleaner {
 // only ever change a listed word. The last of those is enforced by
 // HomophoneProjection and tested there; these are about the wiring.
 
+/// Pinned to the closed-list pass. These tests are about THAT pass — its gate,
+/// its prompt, its list — and the context pass is benched separately. Without
+/// pinning, whichever one happens to be the default silently takes over their
+/// assertions, which is how a test stops measuring what its name says.
 private func homophoneCleaner(_ ai: FakeAI) -> NIMCleaner {
-    NIMCleaner(client: ai, vocabulary: vocabulary, homophones: true)
+    NIMCleaner(client: ai, vocabulary: vocabulary, homophones: true, contextRecovery: false)
 }
 
 @Test func theHomophonePassCanBeSwitchedOff() async {

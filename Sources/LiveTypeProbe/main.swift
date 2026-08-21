@@ -184,6 +184,20 @@ if let i = args.firstIndex(of: "--alternatives"), i + 1 < args.count {
     }
     exit(0)
 }
+if let i = args.firstIndex(of: "--alwayson"), i + 1 < args.count {
+    let target = args[i + 1]
+    let cap = (i + 2 < args.count ? Int(args[i + 2]) : nil) ?? 40
+    let finished = DispatchSemaphore(value: 0)
+    Task { await AlwaysOnBench.run(path: target, limit: cap); finished.signal() }
+    while finished.wait(timeout: .now() + 0.01) == .timedOut {
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    exit(0)
+}
+if let i = args.firstIndex(of: "--gate"), i + 1 < args.count {
+    GateProbe.run(path: args[i + 1])
+    exit(0)
+}
 if args.contains("--demo") {
     FullPathDemo.run()
     exit(0)

@@ -260,7 +260,14 @@ struct NIMCleanerLiveTests {
 // Deliberately excludes anything FastCleaner.corrections already settles for
 // free — "principle developer", "no affect on", "loosing the", "stationary
 // shop". Benching the model on cases it never sees measures nothing.
-@Test func theHomophonePassOnTheRealModel() async throws {
+/// Both benches sit outside the live SUITE, so they carry their own guard — and
+/// `isConfigured` alone was not enough. A machine with a key that has set
+/// QUILL_SKIP_LIVE_TESTS still ran them, and a throttled or offline endpoint then
+/// reported "fixed 0/6" as a correctness failure rather than as a test that
+/// should never have run. `LiveTests.areEnabled` is the same condition the suite
+/// uses, and it is the honest one.
+@Test(.enabled(if: LiveTests.areEnabled, "no NVIDIA NIM key, or QUILL_SKIP_LIVE_TESTS is set"))
+func theHomophonePassOnTheRealModel() async throws {
     // contextRecovery off: this test measures the closed-list pass, and the
     // context pass is benched separately below. Without pinning it, whichever one
     // is currently the default would silently take over this test's numbers.
@@ -323,24 +330,36 @@ struct NIMCleanerLiveTests {
 /// cannot see it. That is the discipline `CleanupPrompt.swift` established and it
 /// is what caught the first version of this pass rewriting three correct
 /// sentences out of six.
-@Test func theContextPassOnTheRealModel() async throws {
+@Test(.enabled(if: LiveTests.areEnabled, "no NVIDIA NIM key, or QUILL_SKIP_LIVE_TESTS is set"))
+func theContextPassOnTheRealModel() async throws {
     let cleaner = NIMCleaner(vocabulary: Vocabulary.seed.contextualStrings,
                              homophones: true, contextRecovery: true)
     guard NIMClient().isConfigured else { return }
 
+    // Sentences of a realistic length, because the pass has a twelve-word floor —
+    // a six-word command is not worth most of a second and does not reach the
+    // model at all. His own dictations run to a median of eighteen words, so this
+    // is also closer to what it will actually see than the short fragments the
+    // closed-list bench uses.
     let corpus: [(String, String?)] = [
-        ("every time Cloudflare cashed something stale", "cached"),
-        ("the response is cashed for an hour", "cached"),
-        ("the dues were still on the grass", "dews"),
-        ("she is the principle architect", "principal"),
-        ("a discrete word with the client first", "discreet"),
-        ("the flower in the bread recipe", "flour"),
-        ("I cashed the cheque on Friday", nil),
-        ("the principle of least surprise", nil),
-        ("keep the modules discrete and separate", nil),
-        ("a compliment from a client is rare", nil),
-        ("the flower shop on the corner", nil),
-        ("the invoice is past due", nil),
+        ("okay so every time Cloudflare cashed something stale we had to clear it by hand again", "cached"),
+        ("the response is cashed for an hour which is why the second load feels instant", "cached"),
+        ("the dues were still on the grass when we walked out to the shed that morning", "dews"),
+        ("she is the principle architect on the job and she signed off the drawings already", "principal"),
+        ("I need to have a discrete word with the client first before anyone else hears about it", "discreet"),
+        ("you want about two cups of the flower in the bread recipe or it comes out heavy", "flour"),
+        ("the sealing was cracked and stained right through and it needs doing before Friday", "ceiling"),
+        ("the doctor put him on a coarse of antibiotics from the chemist for the whole week", "course"),
+        ("he rowed the horse along the ridge for an hour before the weather turned on him", "rode"),
+        ("she red the letter twice over before answering because she could not believe it", "read"),
+        ("I cashed the cheque on Friday afternoon and the money landed in the account overnight", nil),
+        ("the principle of least surprise is the one thing I keep coming back to in this design", nil),
+        ("keep the modules discrete and separate so that changing one never breaks another", nil),
+        ("a compliment from a client is rare enough that I write it down when it happens", nil),
+        ("the flower shop on the corner does the arrangements for most of the weddings around here", nil),
+        ("the invoice is past due and I still have not heard anything back from their office", nil),
+        ("the sealing of the envelope was neat enough that nobody noticed it had been opened", nil),
+        ("he rowed the boat across the lake in the dark without a torch or a life jacket", nil),
 
         // The half that matters for THIS pass. Not one of these pairs is on
         // HomophonePairs, so the closed-list pass cannot reach them at any

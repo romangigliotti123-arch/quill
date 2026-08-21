@@ -216,7 +216,75 @@ entries too. The six-token cap is the backstop for when that happens.
 
 533 tests pass.
 
-### 3. Context-aware word recovery — BUILT, MEASURED WORSE, SHIPPED OFF
+### 3b. What he actually asked for, after seeing the first attempt
+
+He restated the goal and it is bigger than homophones: "have some sort of model
+connected so that even if I murmur something or speak fast or say 'do this
+actually do this' it all gets picked up without me having to edit it after...
+accurate enough for me to just speak, trust what it said, and click send."
+
+**First finding: everything before this was measured on the wrong corpus.**
+LibriSpeech is clean, read-aloud, 19th-century prose. He dictates a median of 18
+words of fast, self-correcting speech. Profiling his 736 real dictations:
+self-correction cues in ~8%, filler in 7%, and the cleanup changed the text on
+21%. The acoustic path is already at its practical limit — `.fastResults` off and
+`DictationTranscriber` are both documented in `SpeechAnalyzerTranscriber` as
+measured and correctly rejected, and re-running them is a waste of an evening.
+
+**Second finding, and the one that mattered: the delete-only contract was the
+bottleneck, not the gate.** Running the cleanup prompt on his own dictations with
+the gate removed, 17 of 17 non-trivial answers were REFUSED by
+`CleanupProjection` and zero calls failed. Reading the refusals is what showed why:
+
+    said     "I move the whole front end to type scoops last night"
+    model    "I moved the whole front end to type scripts last night"
+
+"moved" is a real repair — he said it, and the recogniser dropped the ending
+because he was talking fast. "scripts" for "scoops" is not. Delete-only cannot
+tell them apart, so it refused both. On the next sentence the same model turned
+"Here are the following bugs I've been experiencing" into "I've been experiencing
+bugs with the app", which is exactly the damage the contract exists to stop.
+
+So the fix was not to loosen the contract but to make the permission *specific*.
+Three changes:
+
+1. **Dropped endings became a second verifiable repair.** `ContextProjection.
+   sameStem` allows a swap only when it is the same stem plus an ending English
+   actually uses, with a floor that keeps "the"/"they" and "is"/"it" out.
+2. **Partial acceptance.** The projection keeps the repairs that check out and
+   reverts the ones that do not, instead of discarding a good fix because the
+   model also tried a bad one. Not a weaker guarantee: every surviving change is
+   still individually verified and the word count must still match exactly, so a
+   rewritten sentence is still refused whole.
+3. **A twelve-word floor on the gate.** "Push the build to Netlify tonight" trips
+   the word gate (build/billed are homophones) and needs nothing. His errors
+   accumulate with length. 24% -> 18% of his real dictations.
+
+Measured on the half-correct corpus, lengthened to realistic sentences:
+
+| pass | words | trigger | fixed | damaged |
+|---|---|---|---|---|
+| closed list | 44 | 11% | 3/6 | 0/6 |
+| context v1 | 2281 | 31% | 3/6 | **3/6** |
+| context v2 | 2281 | 31% | 2/10 | 0/10 |
+| **context v3 + endings** | **2281** | **18%** | **5/10** | **0/10** |
+
+So it is now ON by default. It fixes more than the closed list, damages nothing,
+and reaches words the list does not contain — coarse/course, sealing/ceiling,
+rode/rowed.
+
+**Re-confirm those live numbers on a rested endpoint before trusting them.** This
+key 429s easily and a throttled run reports "fixed 0/6" on the closed-list pass
+too, which is the tell.
+
+**Fixed for real: the TestingMacros plugin drop (old issue #3).** SwiftPM
+intermittently omits `libTestingMacros` from `-load-resolved-plugin`. Naming it
+explicitly — `-Xswiftc -load-plugin-library -Xswiftc <path>` — fixes it every
+time, and `Scripts/test.sh` now does. Also both model benches sat outside the live
+SUITE and only checked for a key, so `QUILL_SKIP_LIVE_TESTS` did not skip them and
+an offline machine read as a correctness failure. Both now use the same guard.
+
+### 3. Context-aware word recovery — the first attempt, kept for the record
 
 His words: "if it can't really understand a word that I said, it should read the
 context of what I just said and figure out what word makes the most sense."

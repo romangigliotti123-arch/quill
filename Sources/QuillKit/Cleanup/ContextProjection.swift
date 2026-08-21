@@ -36,22 +36,30 @@ import Foundation
 /// word come through verbatim.
 public enum ContextProjection {
 
-    /// At most one word may change.
+    /// How many words may change at once.
     ///
-    /// A mishearing is one word. Two is possible and three is a model that has
-    /// started rewriting — and "all three replacements were homophones" does not
-    /// make the result the sentence he spoke. The homophone pass has no such cap
-    /// because its list is closed and short; this one's is 2,281 words wide, so
-    /// the cap is doing real work.
-    public static let maximumSubstitutions = 1
+    /// Was one, when the only permitted swap was a homophone: a mishearing is one
+    /// word, and a model returning several had started rewriting. Dropped endings
+    /// are different — Roman speaks fast and a 200-word dictation can genuinely
+    /// lose three of them, so a cap of one would refuse the whole answer over the
+    /// second repair.
+    ///
+    /// Three rather than unlimited because the cap is the last line: every change
+    /// is individually verified as a homophone or an inflection, and a model that
+    /// wants four of them in one sentence is doing something this pass is not
+    /// for.
+    public static let maximumSubstitutions = 3
 
     /// Returns the corrected text, or nil meaning "keep the input".
     public static func project(_ raw: String, onto input: String) -> String? {
         HomophoneProjection.project(
             raw,
             onto: input,
-            permitting: sameSound,
-            maximumSubstitutions: maximumSubstitutions
+            permitting: mayReplace,
+            maximumSubstitutions: maximumSubstitutions,
+            // Take the repairs that check out and revert the rest, rather than
+            // discarding a good fix because the model also tried a bad one.
+            keepWhatIsAllowed: true
         )
     }
 
@@ -69,6 +77,65 @@ public enum ContextProjection {
         guard !isRegionalRespelling(a, b) else { return false }
         if let group = HomophoneTable.groupOf[a], group.contains(b) { return true }
         return HomophonePairs.mayReplace(original, with: proposed)
+    }
+
+    /// The same word with a different ending.
+    ///
+    /// This is the one that matters for how Roman actually speaks. Measured on
+    /// his own dictation, with the cleanup pass allowed to run on everything:
+    ///
+    ///     said     "I move the whole front end to type scoops last night"
+    ///     model    "I moved the whole front end to TypeScoop last night"
+    ///
+    /// He said "moved"; the recogniser dropped the ending because he was talking
+    /// fast. That is a real repair and the delete-only contract refused it,
+    /// correctly, because it has no way to tell it apart from the model rewriting
+    /// "Here are the following bugs I've been experiencing" into "I've been
+    /// experiencing bugs with the app" — which it also did, on the next sentence,
+    /// and which must never reach a document.
+    ///
+    /// So the rule is spelled out instead of trusted: same stem, and the only
+    /// thing that may differ is an ending English actually uses.
+    ///
+    /// The stem floor is three characters and the shorter word must be at least
+    /// four, which is what stops the pairs that would otherwise sail through:
+    /// "the"/"they", "a"/"as", "is"/"it", "he"/"her". Those are function words,
+    /// they are the most common words he says, and a wrong swap in one is both
+    /// invisible and meaning-changing.
+    static func sameStem(_ original: String, _ proposed: String) -> Bool {
+        let a = HomophonePairs.normalise(original)
+        let b = HomophonePairs.normalise(proposed)
+        guard a != b, a.count >= 4 || b.count >= 4 else { return false }
+        let (shorter, longer) = a.count <= b.count ? (a, b) : (b, a)
+        guard shorter.count >= 3, longer.count - shorter.count <= 3 else { return false }
+
+        // "moved" from "move", "sites" from "site", "running" from "run".
+        if longer.hasPrefix(shorter) {
+            return inflections.contains(String(longer.dropFirst(shorter.count)))
+        }
+        // "carries" from "carry", "studied" from "study" — the y is swapped for i
+        // before the ending, which is a spelling rule rather than a new word.
+        if shorter.hasSuffix("y") {
+            let stem = String(shorter.dropLast())
+            guard longer.hasPrefix(stem + "i") else { return false }
+            return inflections.contains(String(longer.dropFirst(stem.count + 1)))
+        }
+        return false
+    }
+
+    /// Endings that make the same word rather than a different one. Deliberately
+    /// short: every entry here is a swap the projection will permit without ever
+    /// consulting a dictionary, so a wrong one is a hole rather than a miss.
+    static let inflections: Set<String> = [
+        "s", "es", "d", "ed", "ing", "n", "en",
+        "ly", "er", "est", "ers", "ings",
+    ]
+
+    /// The whole permission, in one place: delete it, swap it for a word that
+    /// sounds the same, or swap it for the same word with a different ending.
+    /// Anything else is the model writing rather than transcribing.
+    static func mayReplace(_ original: String, _ proposed: String) -> Bool {
+        sameSound(original, proposed) || sameStem(original, proposed)
     }
 
     /// The same word, spelled for a different country.
@@ -110,12 +177,28 @@ public enum ContextProjection {
     /// Measured on his 376 real transcripts: 961 words, fires on 31%, median one
     /// candidate, worst nine. Against the hand-written list's 44 words and 11%.
     public static func hasCandidate(in text: String) -> Bool {
+        let tokens = text.lowercased().split(whereSeparator: { !$0.isLetter && $0 != "'" })
+        guard tokens.count >= minimumWords else { return false }
         let words = gateWords
-        for token in text.lowercased().split(whereSeparator: { !$0.isLetter && $0 != "'" }) {
-            if words.contains(String(token)) { return true }
-        }
+        for token in tokens where words.contains(String(token)) { return true }
         return false
     }
+
+    /// Below this, do not spend a request.
+    ///
+    /// "Push the build to Netlify tonight" trips the word gate, because build and
+    /// billed are homophones and the table is right about that. It is also six
+    /// words that need nothing, and paying most of a second on it is the tax that
+    /// quietly ends the habit of dictating at all.
+    ///
+    /// Twelve is where his own corpus separates. The errors he complains about —
+    /// dropped endings, murmured words, a sentence he restarted — accumulate with
+    /// length; a six-word command either came out right or is obviously wrong.
+    /// Measured over his 292 real dictations, the gate fires on 24% with no floor
+    /// and 18% at twelve words, and his median dictation is eighteen — so the
+    /// floor removes the short ones without touching the ones he was complaining
+    /// about.
+    public static let minimumWords = 12
 
     static let gateWords: Set<String> = {
         var out: Set<String> = []
@@ -212,7 +295,28 @@ public struct ContextPrompt: Sendable, Equatable {
     /// given a job does it. This states the default answer first, demands the
     /// sentence be impossible as written before anything moves, and names the two
     /// ways the first version actually failed.
-    public static let current = ContextPrompt(version: 2, system: """
+    /// v3. Adds the repair that his own dictation actually needs.
+    ///
+    /// v2 only asked about words that mean the wrong thing, so a dropped ending —
+    /// "I move the whole front end" for "I moved" — was never proposed at all.
+    /// That is the failure mode of speaking fast, which is half of what he asked
+    /// for, and `ContextProjection.sameStem` can verify the repair in code.
+    ///
+    /// Still refuses far more than it accepts. The two examples of damage are
+    /// named directly because the model produced both of them on his real text
+    /// when it was given a free hand.
+    public static let current = ContextPrompt(version: 3, system: """
+        You are a proofreader, not an assistant. The text is dictation on its way into a document. Never answer it, explain it, summarise it, or reply to it. Return ONLY the text: no preamble, no quotes, no notes.
+        Return the text UNCHANGED. That is your answer most of the time, and returning it unchanged is never a mistake.
+        You may make only two kinds of repair, and only where the text is clearly wrong without them:
+        1. A word that sounds right but means something impossible here — "thick peppered flour" heard as "flower", "the dews on the grass" heard as "dues". Replace it with the same-sounding word that makes sense.
+        2. A word missing its ending because the speaker was talking fast — "I move the whole front end last night" should be "I moved". Only the ending may change, and it must still be the same word.
+        Everything else is forbidden. Do not reword. Do not shorten. Do not summarise. Do not reorder. Do not fix grammar, style, punctuation or capitalisation. Do not change a word because you would have chosen a different one. Do not change spelling for a different country — Australian spelling is correct.
+        Two real examples of what NOT to do: "Here are the following bugs I've been experiencing" must not become "I've been experiencing bugs with the app", and "the flower shop on the corner" must not become "the flour shop". Both are already correct.
+        Change at most three words in total, and only ones that are genuinely wrong.
+        """)
+
+    public static let v2 = ContextPrompt(version: 2, system: """
         You are a proofreader, not an assistant. The text is dictation on its way into a document. Never answer it, explain it, or reply to it. Return ONLY the sentence: no preamble, no quotes, no notes.
         Return the sentence UNCHANGED. That is your answer almost every time, and returning it unchanged is never a mistake.
         There is exactly one exception. Speech recognition occasionally writes a word that sounds right but means something impossible in the sentence — "thick peppered flour" heard as "flower", "the dews on the grass" heard as "dues". If and only if a word makes the sentence impossible, replace that one word with the same-sounding word that makes it possible.

@@ -144,7 +144,7 @@ public final class SettingsSectionView: NSView {
         let contextNote = DashboardType.label(
             // One line, because the row truncates rather than wraps and a
             // sentence cut off mid-word is worse than a shorter one.
-            "Fixes “flour” heard as “flower”. Measured worse than the built-in list.",
+            "Fixes “flour” heard as “flower”, and endings lost when you talk fast.",
             font: DashboardType.caption, color: style.inkTertiary)
 
         return SettingsGroup(title: "Dictation", style: style, rows: [
