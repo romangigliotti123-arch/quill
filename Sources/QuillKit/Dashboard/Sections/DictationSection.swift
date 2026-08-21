@@ -266,14 +266,38 @@ public final class DictationSectionView: NSView {
         rebuildDetail()
     }
 
-    private func rebuildDetail() {
-        detail?.removeFromSuperview()
+    private func rebuildDetail(animated: Bool = true) {
+        // Cross-fade rather than cut.
+        //
+        // This tore the old detail out and dropped the new one in with no
+        // animation at all, which is the "switching dictations" Roman named: the
+        // right-hand pane blinks and the eye has to re-find where it was. The
+        // outgoing view is kept alive just long enough to fade under the new one.
+        //
+        // Position is deliberately NOT animated. The two views occupy the same
+        // frame, so sliding one over the other would be motion for its own sake —
+        // and the HIG is blunt that a frequent interaction given too much movement
+        // reads as lag rather than as feedback.
+        let outgoing = detail ?? detailPlaceholder
         detail = nil
-        detailPlaceholder?.removeFromSuperview()
         detailPlaceholder = nil
 
+        func finish(_ incoming: NSView) {
+            guard animated, !DashboardMotion.isReduced, outgoing != nil else {
+                outgoing?.removeFromSuperview()
+                return
+            }
+            incoming.alphaValue = 0
+            DashboardMotion.spring(DashboardMotion.selectSpring) { _ in
+                incoming.animator().alphaValue = 1
+                outgoing?.animator().alphaValue = 0
+            } completion: {
+                outgoing?.removeFromSuperview()
+            }
+        }
+
         guard let selectedID, let record = records.first(where: { $0.id == selectedID }) else {
-            guard !records.isEmpty else { return }
+            guard !records.isEmpty else { outgoing?.removeFromSuperview(); return }
             let view = DictationMessageView(symbol: "doc.text",
                                             title: "Nothing selected",
                                             body: "Pick a dictation on the left to see what the recogniser heard against what Quill typed.",
@@ -281,11 +305,19 @@ public final class DictationSectionView: NSView {
                                             style: style, elevation: .raised)
             addSubview(view)
             detailPlaceholder = view
+            needsLayout = true
+            layoutSubtreeIfNeeded()
+            finish(view)
             return
         }
         let view = DictationDetailView(record: record, style: style)
         addSubview(view)
         detail = view
+        // Laid out before the fade starts, or the incoming view animates in at a
+        // zero frame and arrives by resizing.
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        finish(view)
     }
 
     // MARK: - Layout
@@ -543,10 +575,22 @@ final class DictationRowView: NSView {
         } else if hover.value > 0.001 {
             DashboardDraw.fill(bounds.insetBy(dx: 6, dy: 2), radius: DashboardRadius.row,
                                color: style.hover.faded(hover.value))
-        } else if showsSeparator {
-            style.hairline.setFill()
-            NSRect(x: DashboardSpace.md + 2, y: 0, width: bounds.width - (DashboardSpace.md + 2) * 2, height: 1).fill()
         }
+        // No separator between rows. Roman, pointing at a screenshot of exactly
+        // this: "the lines in between each dictation — I don't really like that
+        // either."
+        //
+        // He is right, and the reason is that they were doing a job nothing needed
+        // done. Each row is already two lines with its own internal hierarchy —
+        // a time, a sentence, a metadata line — and the vertical rhythm separates
+        // them perfectly well. A rule between every pair turns a list into a
+        // table, and a table is what you reach for when the rows are otherwise
+        // indistinguishable. These are not.
+        //
+        // `showsSeparator` is still computed and still passed in, because the
+        // date grouping uses it to know which row ENDS a day. Only the line is
+        // gone.
+        _ = showsSeparator
     }
 
     override func updateTrackingAreas() {

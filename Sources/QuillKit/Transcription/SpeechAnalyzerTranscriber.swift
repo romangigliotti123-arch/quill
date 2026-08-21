@@ -71,6 +71,13 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
     /// worse way to fail.
     public var shortUtteranceGrace: TimeInterval = 2.5
 
+    /// Same floor the coordinator uses to decide "that device sent no sound at
+    /// all". Duplicated as a nonisolated constant rather than reached for across
+    /// the actor boundary: this is read on the audio thread, and the coordinator's
+    /// copy is main-isolated. The two must agree, so they are asserted equal in
+    /// the tests rather than left to drift.
+    nonisolated static let silenceFloor: Float = 0.005
+
     public init(
         audio: AudioSource = AudioCapture(),
         locale: Locale = SpeechAssets.preferredLocale,
@@ -287,7 +294,12 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         // release-to-text stays in single-digit milliseconds. Only the case that
         // was previously returning silence waits, and it waits for the shortest
         // thing that rescues it rather than a flat delay applied to everyone.
-        if withLock({ session.settled.isEmpty && session.volatile.isEmpty }) {
+        // Only when there is something to wait FOR. Measured as the thing Roman
+        // actually complains about: tap the key, change your mind, and the HUD
+        // sits in front of you for 2.5s of grace plus the drain plus 1.6s of
+        // "Nothing was heard" — about four seconds of being in the way, for a
+        // gesture that carried no audio at all.
+        if withLock({ session.settled.isEmpty && session.volatile.isEmpty && session.heardAnything }) {
             let deadline = Date().addingTimeInterval(shortUtteranceGrace)
             while Date() < deadline {
                 // Abandon the grace the instant another dictation begins.
@@ -389,6 +401,11 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         /// Guarded by the transcriber's lock, not this object's.
         var settled = ""
         var volatile = ""
+        /// Whether the microphone ever delivered a buffer above the silence
+        /// floor. The short-utterance grace exists to give the recogniser enough
+        /// audio to commit to a short phrase; if no audio arrived at all, waiting
+        /// cannot rescue anything and the wait is pure delay in front of the user.
+        var heardAnything = false
         /// Host time this session opened. Audio that predates it belongs to the
         /// PREVIOUS dictation and must not be transcribed into this one — see
         /// the check in ingest().
@@ -611,7 +628,10 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
     }
 
     private func publish(level: Float) {
-        withLock { _level = level }
+        withLock {
+            _level = level
+            if level >= Self.silenceFloor { session?.heardAnything = true }
+        }
         onLevel?(level)
     }
 

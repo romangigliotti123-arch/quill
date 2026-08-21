@@ -78,7 +78,6 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         divider.wantsLayer = true
         divider.layer?.backgroundColor = style.hairlineStrong.cgColor
         addSubview(divider)
-        addSubview(statusPill)
         sidebar.delegate = self
         // No fade on the first paint: there is nothing to cross-fade from, and
         // starting at zero opacity is what made offscreen renders come out blank.
@@ -135,17 +134,25 @@ public final class DashboardRootView: NSView, SidebarDelegate {
             return
         }
 
-        let rise: CGFloat = 6
+        // A spring, not a cubic curve, and this is the case that shows why:
+        // click three sidebar rows quickly and a Bezier either snaps to each new
+        // target or restarts from zero, because a curve has no notion of the
+        // velocity it was already carrying. A spring redirects. Apple's guidance
+        // is that anything a person can interrupt should be one.
+        //
+        // The rise is smaller than it was. 6pt of travel under an 0.18s ease read
+        // as a slide; 4pt under a settling spring reads as the page arriving,
+        // which is the difference between noticing the animation and noticing the
+        // content.
+        let rise: CGFloat = 4
         view.setFrameOrigin(NSPoint(x: view.frame.origin.x, y: view.frame.origin.y - rise))
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        DashboardMotion.spring(DashboardMotion.viewSpring) { _ in
             view.animator().alphaValue = 1
             view.animator().setFrameOrigin(NSPoint(x: view.frame.origin.x,
                                                    y: view.frame.origin.y + rise))
             outgoing?.animator().alphaValue = 0
-        } completionHandler: {
+        } completion: {
             outgoing?.removeFromSuperview()
         }
 
@@ -183,7 +190,6 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         sidebarMaterial.restyle(fallback: newStyle.canvasBottom)
         panel.restyle(fallback: newStyle.canvasTop)
         divider.layer?.backgroundColor = newStyle.hairlineStrong.cgColor
-        statusPill.style = newStyle
         // Not animated. A theme change is not a navigation, and cross-fading here
         // leaves two section views parented for 0.18s — which the offscreen
         // renderer captures, because it renders light and dark from the same root
@@ -206,10 +212,11 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         divider.frame = NSRect(x: DashboardMetrics.sidebarWidth - 1, y: 0, width: 1, height: bounds.height)
         sectionView?.frame = DashboardMetrics.sectionFrame(in: panel.bounds)
 
-        let size = statusPill.fittingSize
-        statusPill.frame = NSRect(x: bounds.width - 16 - size.width,
-                                  y: ((DashboardMetrics.titlebarHeight - size.height) / 2).rounded(),
-                                  width: size.width, height: size.height)
+        // The status pill used to live here. Removed: it said "Ready" at all
+        // times except during a dictation, when the overlay is already saying so
+        // an inch from the cursor, and repeated a shortcut the user is holding
+        // down at the moment they can read it. A permanent label for a transient
+        // state is chrome, not information.
     }
 
     /// Nothing to draw any more, and the omission is the point.

@@ -31,6 +31,84 @@ public enum DashboardMotion {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
+    // MARK: - Springs
+
+    /// A spring described the way Apple describes one: how long it takes, and how
+    /// much it overshoots.
+    ///
+    /// From WWDC23 "Animate with springs" and the HIG's Motion page. The whole
+    /// argument for springs over Bezier curves here is interruption: a cubic
+    /// curve started from rest and cannot be redirected, so clicking a second row
+    /// while the first is still animating either snaps or restarts. A spring
+    /// carries its current velocity into the new target, which is why every
+    /// system control that a person can touch uses one.
+    ///
+    /// Bounce, per Apple's own table:
+    ///   0     smooth, no overshoot — the recommended default and what this app uses
+    ///   0.15  slightly brisk with a longer tail
+    ///   0.30  visibly playful, for gesture ends
+    ///   >0.4  avoid, reads as exaggerated
+    ///
+    /// Quill is an instrument you dictate into at speed. It gets 0.
+    public struct Spring {
+        public let duration: TimeInterval
+        public let bounce: Double
+
+        public init(duration: TimeInterval, bounce: Double = 0) {
+            self.duration = duration
+            self.bounce = bounce
+        }
+
+        /// SwiftUI's own mapping, so these numbers mean the same thing here as in
+        /// a `.spring(duration:bounce:)` anywhere else: damping ratio is
+        /// 1 - bounce, stiffness is (2π/duration)² and damping is 4π·ratio/duration
+        /// for unit mass.
+        public var animation: CASpringAnimation {
+            let ratio = max(0.1, 1 - bounce)
+            let a = CASpringAnimation(keyPath: nil)
+            a.mass = 1
+            a.stiffness = pow(2 * .pi / duration, 2)
+            a.damping = 4 * .pi * ratio / duration
+            a.duration = a.settlingDuration
+            return a
+        }
+    }
+
+    /// Hover, and anything else the pointer does constantly.
+    ///
+    /// The HIG is explicit that frequent interactions should not be given much
+    /// motion — the movement stops reading as feedback and starts reading as lag.
+    /// Under 200ms is the band for a light in-page change.
+    public static let hoverSpring = Spring(duration: 0.16)
+    /// Selecting a row, a tab, a section — something the user aimed at and can
+    /// aim at again before it finishes.
+    public static let selectSpring = Spring(duration: 0.32)
+    /// A whole view arriving. Slower, because there is more to read.
+    public static let viewSpring = Spring(duration: 0.42)
+
+    /// Runs a block with a spring, honouring reduced motion.
+    public static func spring(_ spring: Spring,
+                              _ body: @escaping (NSAnimationContext) -> Void,
+                              completion: (() -> Void)? = nil) {
+        guard !isReduced else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                context.allowsImplicitAnimation = true
+                body(context)
+            } completionHandler: { completion?() }
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            let s = spring.animation
+            context.duration = s.settlingDuration
+            context.timingFunction = nil
+            context.allowsImplicitAnimation = true
+            body(context)
+        } completionHandler: {
+            completion?()
+        }
+    }
+
     public static func run(_ duration: TimeInterval,
                            timing: CAMediaTimingFunction? = nil,
                            _ body: @escaping (NSAnimationContext) -> Void,

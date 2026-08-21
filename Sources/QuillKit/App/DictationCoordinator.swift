@@ -18,6 +18,18 @@ public final class DictationCoordinator {
     private let cleaner: TranscriptCleaning
     /// Loudest input level seen during the current dictation.
     private var peakLevel: Float = 0
+    /// Whether ANY level arrived, as distinct from levels that were all silent.
+    ///
+    /// The difference decides whether a quick tap is binned. A peak of zero can
+    /// mean the microphone heard nothing — bin it — or that no buffer ever
+    /// reached us, which is a different failure and one the user needs told
+    /// about. It also stops the guard firing in tests, where the transcriber is a
+    /// double that produces text without ever publishing a level: without this
+    /// the whole coordinator suite came back with every dictation silently
+    /// discarded, which is the guard working exactly as written and exactly
+    /// wrongly.
+    private var sawLevels = false
+    var sawLevelsForTesting: Bool { sawLevels }
     private let history: HistoryStore
     private let snippets: SnippetStore
     private let settings: QuillSettings
@@ -114,6 +126,7 @@ public final class DictationCoordinator {
                     // The loudest thing the microphone heard. Kept so that an
                     // empty transcript can tell the user which of the two very
                     // different things went wrong.
+                    self.sawLevels = true
                     self.peakLevel = max(self.peakLevel, level)
                     // The moment speech actually starts, as distinct from the
                     // moment the microphone opened. Uses the same floor that
@@ -131,6 +144,41 @@ public final class DictationCoordinator {
         }
     }
 
+    /// How long the key can be down and still count as a tap rather than an
+    /// utterance.
+    ///
+    /// 400ms. His shortest real dictation is "On my way." at 855ms, and the
+    /// shortest thing anyone can say and mean is a good deal longer than a key
+    /// bounce. Set well under the former so nothing he actually said is thrown
+    /// away, and well over the latter so a change of mind is caught.
+    nonisolated static let tapDuration: TimeInterval = 0.4
+
+    /// Whether this gesture was over before it began.
+    private var heldBriefly: Bool {
+        guard let down = timeline.hotkeyDown, let up = timeline.hotkeyUp else { return false }
+        return up.timeIntervalSince(down) < Self.tapDuration
+    }
+
+    /// The whole decision, as a function of three numbers.
+    ///
+    /// Pulled out of `endDictation` so it can be tested without a clock. The
+    /// integration version of this test passed alone and failed in the suite,
+    /// because the press and the release are wall-clock timestamps and the gap
+    /// between them grows when the machine is busy — the same wall-clock
+    /// dependence already documented for one other test here. A flaky test is
+    /// worse than no test; a pure one asks the same question and always gets the
+    /// same answer.
+    ///
+    /// - Parameters:
+    ///   - heldFor: seconds between key down and key up.
+    ///   - sawLevels: whether ANY audio level arrived. A peak of zero with no
+    ///     levels means the microphone never delivered a buffer, which is a
+    ///     different failure and must still be reported.
+    ///   - peak: the loudest level heard.
+    nonisolated static func isChangeOfMind(heldFor: TimeInterval, sawLevels: Bool, peak: Float) -> Bool {
+        sawLevels && peak < silenceFloor && heldFor < tapDuration
+    }
+
     /// Below this the input is not quiet, it is not connected to anything.
     ///
     /// Ordinary room tone on the built-in microphone sits around 0.01–0.03 even
@@ -138,7 +186,7 @@ public final class DictationCoordinator {
     /// returns exact zeros. The floor is set under the quietest real room and
     /// well above digital silence, so the specific message only appears when the
     /// device genuinely delivered nothing.
-    static let silenceFloor: Float = 0.005
+    nonisolated static let silenceFloor: Float = 0.005
 
     @discardableResult
     public func start() -> Bool { hotkey.start() }
@@ -171,6 +219,7 @@ public final class DictationCoordinator {
         // Per dictation, not per launch: last time's loud sentence must not vouch
         // for this time's dead microphone.
         peakLevel = 0
+        sawLevels = false
 
         Task { [transcriber] in
             await transcriber.prepare()
@@ -221,6 +270,35 @@ public final class DictationCoordinator {
         // latency they sit through.
         timeline.hotkeyUp = Date()
         let session = sessionID
+
+        // A tap, not a dictation.
+        //
+        // Roman: "when I hold the right option key and then just sort of press it
+        // and change my mind, the transcribing thing sits there for a couple
+        // seconds and it's kind of annoying."
+        //
+        // He is right and it was worse than he thought: the key came up, the
+        // recogniser had nothing, so stop() waited out its 2.5s short-utterance
+        // grace, then the drain, then the empty-transcript path put "Nothing was
+        // heard" on screen for another 1.6s. Four seconds of HUD for a gesture
+        // that carried no sound.
+        //
+        // Both halves of the test matter. Short alone would bin a fast "Yes." —
+        // measured at 855ms in his own corpus. Silent alone would show the error
+        // for a long hold at a dead microphone, which is exactly when he needs to
+        // be told. Only short AND silent is a change of mind, and the right answer
+        // to a change of mind is to leave no trace.
+        let held = timeline.hotkeyDown.map { timeline.hotkeyUp?.timeIntervalSince($0) ?? 0 } ?? 0
+        if Self.isChangeOfMind(heldFor: held, sawLevels: sawLevels, peak: peakLevel) {
+            isSpeculating = false
+            sessionID += 1
+            if isLive { liveTyper.retract() }
+            isLive = false
+            overlay.hide()
+            Task { [transcriber] in await transcriber.cancel() }
+            return
+        }
+
         overlay.show(.transcribing)
 
         Task { [transcriber, cleaner, inserter, overlay, history, snippets, cleanupDeadline] in
