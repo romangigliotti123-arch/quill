@@ -175,6 +175,10 @@ func heartbeat() {
 // MARK: - Run
 
 let args = CommandLine.arguments
+if args.contains("--demo") {
+    FullPathDemo.run()
+    exit(0)
+}
 if args.contains("--bench") {
     CleanerBench.run()
     exit(0)

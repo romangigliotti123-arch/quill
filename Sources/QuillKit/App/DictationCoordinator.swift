@@ -346,7 +346,8 @@ public final class DictationCoordinator {
             // going. A shell command does not want the full stop the cleanup just
             // added, and deleting it by hand every time is the kind of small tax
             // that quietly ends the habit of dictating at all.
-            final = AppContextFormatter.apply(final, context: self.capturedContext)
+            final = AppContextFormatter.apply(final, context: self.capturedContext,
+                                              numbers: self.settings.numberStyle)
 
             // Two ways in, and the difference is whether the text is already
             // there. Live typing has been writing this sentence since the first
@@ -559,8 +560,12 @@ extension DictationCoordinator: TranscriberDelegate {
         // Formatted for the destination here too, not only at the end. The live
         // stream and the final text have to agree, or the last edit becomes a
         // visible flicker as a capital letter or a full stop is taken back.
+        // Same formatting as the closing edit, number style included: the live
+        // stream and the final text have to agree, or the last edit becomes a
+        // visible flicker as "four" is taken back and retyped.
         liveTyper.update(to: AppContextFormatter.apply(cleaner.cleanFast(transcript.text),
-                                                       context: capturedContext))
+                                                       context: capturedContext,
+                                                       numbers: settings.numberStyle))
     }
 
     public func transcriber(didFail error: Error) {

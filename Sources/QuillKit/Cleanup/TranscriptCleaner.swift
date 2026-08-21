@@ -229,6 +229,14 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         text = Self.stripStandaloneDisfluencies(from: text)
         text = Self.collapseWhitespace(in: text)
         text = Self.tightenPunctuationSpacing(in: text)
+        // After the spacing rules, so a domain the recogniser dotted correctly has
+        // survived them; before the sentence casing, which knows to leave an
+        // address lowercase.
+        //
+        // The number style is deliberately NOT here. It is a presentation choice
+        // and the destination gets a vote, so it lives in AppContextFormatter
+        // alongside the other two — a terminal keeps its digits.
+        text = Self.formatSpokenEmails(in: text)
         text = Self.capitaliseSentences(in: text)
         return text
     }
@@ -236,6 +244,403 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
     /// No model here. Callers race this against the real one.
     public func cleanThorough(_ raw: String, deadline: Duration) async -> String? {
         cleanFast(raw)
+    }
+
+    // MARK: - Spoken email addresses
+
+    /// Turns an address he said out loud into an address.
+    ///
+    ///     send it to roman gigliotti 123 at gmail dot com
+    ///     -> send it to romangigliotti123@gmail.com
+    ///
+    /// The real failure, from his history on 20 Aug: "send it to the Gmail Grace
+    /// Kingston 20 at gmail.com" reached the document as prose, with the domain
+    /// broken into "gmail. Com" on top. The broken domain is fixed elsewhere;
+    /// this is the rest of it.
+    ///
+    /// **It anchors on the domain, never on the word "at".** That is the whole
+    /// safety argument. "Meet me at the shop at four" has no domain and is never
+    /// even considered. Only once a domain is found does it look left for a local
+    /// part, and it refuses outright when the word in front of "at" is one that
+    /// ordinary English puts there — "I'll look at netlify.com later" must not
+    /// become "I'll look@netlify.com later".
+    ///
+    /// Deleting or gluing words the user actually said is the failure mode this
+    /// whole file is scarred by (see VocabularyCorrector's notes on "Roman design
+    /// cost"), so every rule here is a refusal rather than a guess.
+    static func formatSpokenEmails(in text: String) -> String {
+        var tokens = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        guard tokens.count >= 3 else { return text }
+
+        var i = 0
+        while i < tokens.count {
+            guard Self.bareWord(tokens[i]).lowercased() == "at",
+                  // An address the recogniser already assembled is finished.
+                  !tokens[i].contains("@"),
+                  let domain = Self.readDomain(tokens, from: i + 1)
+            else { i += 1; continue }
+
+            guard let local = Self.readLocalPart(tokens, endingBefore: i) else {
+                i += 1
+                continue
+            }
+
+            // Whatever punctuation closed the last domain token closes the address.
+            let trailing = Self.trailingPunctuation(tokens[domain.lastIndex])
+            tokens.replaceSubrange(local.firstIndex ... domain.lastIndex,
+                                   with: ["\(local.text)@\(domain.text)\(trailing)"])
+            i = local.firstIndex + 1
+        }
+        return tokens.joined(separator: " ")
+    }
+
+    /// A domain starting at `start`, either already dotted ("gmail.com") or spoken
+    /// ("gmail dot com", "kass barbers dot com dot au"). Nil when there is none,
+    /// which is the answer for almost every "at" in ordinary speech.
+    private static func readDomain(_ tokens: [String], from start: Int)
+    -> (text: String, lastIndex: Int)? {
+        guard start < tokens.count else { return nil }
+
+        // Already dotted. Requires a real-looking suffix so that "node.js" and
+        // "1.4" cannot pass as somewhere to send mail.
+        let first = bareWord(tokens[start])
+        if first.contains("."), isDottedDomain(first) {
+            return (first.lowercased(), start)
+        }
+
+        // Spoken. Words up to the first "dot" are one label glued together — the
+        // recogniser splits "kassbarbers" into "kass barbers" as readily as it
+        // splits a name.
+        var label = ""
+        var index = start
+        while index < tokens.count, bareWord(tokens[index]).lowercased() != "dot" {
+            let word = bareWord(tokens[index])
+            guard isNameLike(word), label.count < 40 else { return nil }
+            label += word
+            index += 1
+            // A label that runs on with no "dot" behind it is a sentence.
+            if index - start > 3 { return nil }
+        }
+        guard !label.isEmpty, index < tokens.count else { return nil }
+
+        var parts = [label]
+        var last = index
+        while index < tokens.count, bareWord(tokens[index]).lowercased() == "dot" {
+            guard index + 1 < tokens.count else { return nil }
+            let next = bareWord(tokens[index + 1])
+            guard isTopLevelDomain(next) else { return nil }
+            parts.append(next)
+            last = index + 1
+            index += 2
+        }
+        guard parts.count >= 2 else { return nil }
+        return (parts.joined(separator: ".").lowercased(), last)
+    }
+
+    /// The address's local part, read backwards from the token before "at".
+    ///
+    /// Bounded at six tokens, but the bound is a safety net rather than the rule
+    /// — the stop words are what actually decide. "send it to the Gmail Grace
+    /// Kingston 20 at gmail.com" stops at "Gmail", because there the provider's
+    /// name describes the service rather than forming part of the address.
+    ///
+    /// Six because spelling an address out digit by digit is a real thing people
+    /// do — "roman gigliotti one two three" is five tokens before the digits are
+    /// even folded — and because the bound is the backstop, not the rule. What
+    /// actually decides is the stop-word list, which was checked by replaying
+    /// every transcript on this machine and fixed where it was wrong.
+    private static func readLocalPart(_ tokens: [String], endingBefore at: Int)
+    -> (text: String, firstIndex: Int)? {
+        var collected: [String] = []
+        var index = at - 1
+        var firstIndex = at
+
+        while index >= 0, collected.count < 6 {
+            let raw = tokens[index]
+            // A full stop, question mark or exclamation ends the sentence and so
+            // ends any address inside it. A comma is only a spoken pause.
+            if raw.hasSuffix(".") || raw.hasSuffix("?") || raw.hasSuffix("!") { break }
+            let word = bareWord(raw)
+            if word.isEmpty { break }
+            if localPartStopWords.contains(word.lowercased()) { break }
+            guard isNameLike(word) || word.lowercased() == "dot" else { break }
+            collected.append(word)
+            firstIndex = index
+            index -= 1
+        }
+
+        guard !collected.isEmpty else { return nil }
+
+        var out = ""
+        for word in collected.reversed() {
+            if word.lowercased() == "dot" {
+                // A leading or doubled dot is not something anyone said.
+                guard !out.isEmpty, !out.hasSuffix(".") else { return nil }
+                out += "."
+            } else {
+                out += spokenDigits[word.lowercased()] ?? word.lowercased()
+            }
+        }
+        guard out.count >= 2, !out.hasSuffix("."), out.contains(where: { $0.isLetter || $0.isNumber })
+        else { return nil }
+        return (out, firstIndex)
+    }
+
+    /// Words that end a local part when read backwards.
+    ///
+    /// Two kinds, and both are needed. The verbs and prepositions are what stop
+    /// "I'll look at netlify.com" becoming an address — English puts them in front
+    /// of "at" constantly and an address never does. The provider names are what
+    /// stop his own sentence, "send it to the Gmail Grace Kingston 20 at
+    /// gmail.com", from swallowing the word Gmail into the name.
+    static let localPartStopWords: Set<String> = [
+        // Determiners, pronouns and prepositions. "at" is in here because a
+        // sentence can hold two of them — "email me at roman dot gigliotti at
+        // outlook dot com" — and without it the first one is read as a name.
+        "the", "a", "an", "to", "my", "your", "his", "her", "their", "our", "its",
+        "this", "that", "these", "those", "it", "them", "us", "me", "him",
+        "and", "or", "but", "of", "in", "on", "for", "with", "from", "by", "at",
+        // The verbs that introduce a recipient. These are the ones that sit
+        // directly in front of a name, so without them "invoice noah at
+        // kassbarbers.com.au" addresses mail to invoicenoah.
+        "send", "sent", "sends", "sending", "invoice", "invoiced", "forward",
+        "forwarded", "cc", "bcc", "contact", "reach", "ping", "message", "messaged",
+        "write", "wrote", "text", "texted", "call", "called", "add", "invite",
+        "invited", "notify", "notified", "tell", "told", "ask", "asked", "give",
+        // Talking ABOUT an address rather than giving one. Found by replaying his
+        // own history: "for example, if I say Roman Gigliotti, 123, at gmail.com"
+        // came out as "if isayromangigliotti123@gmail.com" — the verb and the
+        // pronoun glued onto the front of the name.
+        "i", "we", "you", "he", "she", "they", "who",
+        "say", "says", "said", "saying", "mention", "mentions", "mentioned",
+        "spell", "spells", "spelled", "spelt", "type", "typed", "hear", "heard",
+        "put", "puts", "read", "reads", "example", "like",
+        // Verbs English puts in front of "at". Without these the step reads the
+        // verb as a name and glues it to the domain.
+        "look", "looks", "looked", "looking", "meet", "meets", "met", "meeting",
+        "stay", "stayed", "staying", "arrive", "arrived", "arriving",
+        "work", "works", "worked", "working", "live", "lives", "lived", "living",
+        "sit", "sits", "sat", "stand", "stood", "stop", "stopped", "wait", "waited",
+        "start", "started", "point", "pointed", "glance", "glanced", "stare", "stared",
+        "laugh", "laughed", "shout", "shouted", "aim", "aimed", "host", "hosted",
+        "hosts", "hosting", "is", "was", "are", "were", "be", "been", "am",
+        "available", "here", "there", "home", "back", "again", "now", "later",
+        // The service, not the address.
+        "email", "e-mail", "mail", "gmail", "googlemail", "outlook", "hotmail",
+        "yahoo", "icloud", "proton", "protonmail", "inbox", "address",
+    ]
+
+    /// Number words that mean a digit when they sit inside an address. "roman
+    /// gigliotti one two three" is a person spelling out their own email.
+    static let spokenDigits: [String: String] = [
+        "zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+        "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    ]
+
+    /// Letters, digits, and nothing else. Deliberately excludes anything already
+    /// carrying punctuation, because that is a sentence doing something else.
+    private static func isNameLike(_ word: String) -> Bool {
+        !word.isEmpty && word.allSatisfy { $0.isLetter || $0.isNumber }
+    }
+
+    /// A suffix that could be a real top-level domain: two to six letters. Rules
+    /// out "dot 4" and "dot something-with-punctuation".
+    private static func isTopLevelDomain(_ word: String) -> Bool {
+        (2...6).contains(word.count) && word.allSatisfy { $0.isLetter }
+    }
+
+    /// "gmail.com" and "kassbarbers.com.au" yes; "node.js" and "1.4" no.
+    ///
+    /// The ".js" exclusion is why this is a list rather than a shape test: three.js
+    /// and node.js are exactly the shape of a domain, they are named in his
+    /// dictation constantly, and nobody sends mail to them.
+    private static func isDottedDomain(_ word: String) -> Bool {
+        let labels = word.lowercased().split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2 else { return false }
+        guard labels.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" } })
+        else { return false }
+        // Every label but the last must contain a letter, so "1.4" is not a domain.
+        guard labels.dropLast().allSatisfy({ $0.contains(where: \.isLetter) }) else { return false }
+        guard let tld = labels.last.map(String.init), isTopLevelDomain(tld) else { return false }
+        return !nonMailSuffixes.contains(tld)
+    }
+
+    /// Dotted names that are not places you can send mail.
+    static let nonMailSuffixes: Set<String> = ["js", "ts", "py", "rb", "sh", "md", "json", "swift"]
+
+    private static func bareWord(_ token: String) -> String {
+        token.trimmingCharacters(in: CharacterSet(charactersIn: ",.;:!?\"'()[]“”‘’"))
+    }
+
+    private static func trailingPunctuation(_ token: String) -> String {
+        var out = ""
+        for character in token.reversed() {
+            guard ",.;:!?\"')]".contains(character) else { break }
+            out.insert(character, at: out.startIndex)
+        }
+        return out
+    }
+
+    // MARK: - How numbers are written down
+
+    /// Applies the chosen number style, and refuses on everything structural.
+    ///
+    /// The recogniser is already good at this — "I'm 15 years old" and "6th of
+    /// April, 1830" come back as digits, "one of you" and "the two parties" as
+    /// words — so the job here is a light rule on top, not an override.
+    ///
+    /// The refusals are the substance. Checked against his own corpus, where
+    /// "On 6 April 1830, the church was organised" would otherwise have shipped as
+    /// "On six April 1830", and where 20 of 299 recorded transcripts contain a
+    /// bare small digit at all. A number touching a month, a colon, a dollar sign,
+    /// a decimal point, an "@" or a hyphen is part of something, and the something
+    /// is never prose.
+    static func applyNumberStyle(to text: String, style: QuillSettings.Values.NumberStyle) -> String {
+        guard style != .asHeard else { return text }
+
+        let tokens = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        var out = tokens
+
+        for i in tokens.indices {
+            let token = tokens[i]
+            guard !isStructural(token) else { continue }
+            // The style guards belong to the writing convention, so they apply to
+            // the mode that IS the writing convention. "Always words" is the blunt
+            // mode by definition — someone who picks it has asked for every number
+            // spelled out and should get it.
+            if style == .spellOutSmall {
+                let before = i > 0 ? bareWord(tokens[i - 1]).lowercased() : ""
+                let after = i + 1 < tokens.count ? bareWord(tokens[i + 1]).lowercased() : ""
+                guard !numberKeepsItsDigits(before: before, after: after) else { continue }
+            }
+
+            let word = bareWord(token)
+
+            switch style {
+            case .asHeard:
+                continue
+            case .spellOutSmall:
+                // One to nine only. Ten and up read better as digits, which is
+                // also what he already gets.
+                guard let value = Int(word), (1...9).contains(value) else { continue }
+                out[i] = replacingWord(token, with: englishNumber(value))
+            case .alwaysWords:
+                guard let value = Int(word), (0...9999).contains(value) else { continue }
+                out[i] = replacingWord(token, with: englishNumber(value))
+            case .alwaysDigits:
+                guard let value = numberFromWords(word) else { continue }
+                out[i] = replacingWord(token, with: String(value))
+            }
+        }
+
+        var joined = out.joined(separator: " ")
+        if style == .alwaysDigits { joined = collapseSpokenTens(in: joined) }
+        return joined
+    }
+
+    /// Anything carrying structure — an address, a version, a time, money, a URL,
+    /// an identifier. Never prose, so never restyled, in any mode.
+    private static func isStructural(_ token: String) -> Bool {
+        token.contains("@") || token.contains("/") || token.contains(":")
+            || token.contains("$") || token.contains("%") || token.contains("_")
+            // A hyphen between digits is a phone number or a range, not two words.
+            || (token.contains("-") && token.contains(where: \.isNumber))
+            // A dot with a digit on either side is a decimal or a version.
+            || hasInternalDot(token)
+    }
+
+    private static func hasInternalDot(_ token: String) -> Bool {
+        let chars = Array(token)
+        for (i, c) in chars.enumerated() where c == "." {
+            let previous = i > 0 ? chars[i - 1] : " "
+            let next = i + 1 < chars.count ? chars[i + 1] : " "
+            if previous.isNumber || next.isNumber { return true }
+            if previous.isLetter && next.isLetter { return true }
+        }
+        return false
+    }
+
+    /// Whether the words either side say "this number is a date, an age, or a
+    /// numbered thing" — all of which keep their digits whatever the mode.
+    private static func numberKeepsItsDigits(before: String, after: String) -> Bool {
+        if monthNames.contains(before) || monthNames.contains(after) { return true }
+        if ageWords.contains(after) || before == "aged" { return true }
+        if numberedReferenceWords.contains(before) { return true }
+        return false
+    }
+
+    static let monthNames: Set<String> = [
+        "january", "february", "march", "april", "may", "june", "july",
+        "august", "september", "october", "november", "december",
+        "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+    ]
+
+    /// "5 years old" is an age and stays a numeral; "5 minutes" is a count and
+    /// does not.
+    static let ageWords: Set<String> = ["years", "year", "yo", "y/o"]
+
+    /// A numbered reference is a label, not a quantity. "See chapter 3", not
+    /// "see chapter three".
+    static let numberedReferenceWords: Set<String> = [
+        "chapter", "version", "page", "step", "part", "figure", "table", "number",
+        "no", "item", "level", "round", "phase", "question", "task", "line", "row",
+        "column", "section", "room", "unit", "model", "size", "grade", "track",
+        "episode", "season", "volume", "issue", "week", "day", "apartment", "suite",
+        "build", "rev", "revision", "port", "channel", "tier",
+    ]
+
+    /// Replaces the word inside a token, keeping whatever punctuation was attached.
+    private static func replacingWord(_ token: String, with replacement: String) -> String {
+        let word = bareWord(token)
+        guard let range = token.range(of: word) else { return replacement }
+        return token.replacingCharacters(in: range, with: replacement)
+    }
+
+    /// Spelled English for 0…9999. Beyond that a number is a year or an amount and
+    /// spelling it out helps nobody, so `applyNumberStyle` does not ask.
+    static func englishNumber(_ value: Int) -> String {
+        let ones = ["zero", "one", "two", "three", "four", "five", "six", "seven",
+                    "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+                    "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+        let tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
+                    "eighty", "ninety"]
+        if value < 20 { return ones[value] }
+        if value < 100 {
+            let unit = value % 10
+            return unit == 0 ? tens[value / 10] : "\(tens[value / 10])-\(ones[unit])"
+        }
+        if value < 1000 {
+            let rest = value % 100
+            let head = "\(ones[value / 100]) hundred"
+            return rest == 0 ? head : "\(head) and \(englishNumber(rest))"
+        }
+        let rest = value % 1000
+        let head = "\(englishNumber(value / 1000)) thousand"
+        return rest == 0 ? head : "\(head) \(englishNumber(rest))"
+    }
+
+    /// The single words that mean a number, for the always-digits direction.
+    static func numberFromWords(_ word: String) -> Int? {
+        let table: [String: Int] = [
+            "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+            "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+            "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+            "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+            "seventy": 70, "eighty": 80, "ninety": 90,
+        ]
+        return table[word.lowercased()]
+    }
+
+    /// "20 5 people" back into "25 people", after always-digits turned each word of
+    /// "twenty five" into its own numeral. Only joins a round ten to a single unit,
+    /// which is the only pair that is one spoken number rather than two.
+    private static func collapseSpokenTens(in text: String) -> String {
+        text.replacingOccurrences(
+            of: "\\b([2-9])0 ([1-9])\\b",
+            with: "$1$2",
+            options: .regularExpression
+        )
     }
 
     // MARK: - Steps, each independently testable
@@ -355,7 +760,12 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         var capitaliseNext = true
         for i in chars.indices {
             let c = chars[i]
-            if capitaliseNext, c.isLetter {
+            if capitaliseNext, c.isLetter, startsAnEmailAddress(chars, at: i) {
+                // "roman@gmail.com is the address" must not open with a capital R.
+                // An address is case-insensitive but it is written lowercase, and
+                // a capitalised one reads as a mistake because it is one.
+                capitaliseNext = false
+            } else if capitaliseNext, c.isLetter {
                 chars[i] = Character(c.uppercased())
                 capitaliseNext = false
             } else if capitaliseNext, c.isNumber {
@@ -377,5 +787,15 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
             }
         }
         return String(chars)
+    }
+
+    /// Whether the word beginning at `i` is an email address.
+    private static func startsAnEmailAddress(_ chars: [Character], at i: Int) -> Bool {
+        var j = i
+        while j < chars.count, !chars[j].isWhitespace {
+            if chars[j] == "@" { return true }
+            j += 1
+        }
+        return false
     }
 }

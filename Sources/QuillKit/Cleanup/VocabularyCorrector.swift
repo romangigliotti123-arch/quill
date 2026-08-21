@@ -103,6 +103,11 @@ public struct VocabularyCorrector: Sendable {
                       !Self.isBoundaryWord(window.last?.word) || span == 1
                 else { continue }
                 let candidate = window.map(\.word).joined(separator: " ")
+                // An email address is not a misheard name. Its local part is
+                // whatever the person chose to call themselves, and fuzzy-matching
+                // it against the Dictionary would rewrite someone's address —
+                // which looks correct and silently mails the wrong person.
+                guard !candidate.contains("@") else { continue }
                 let key = MatchMemo.Key(candidate: candidate, spanCount: span,
                                         phoneticAllowed: allowsPhoneticMatch(window))
                 let resolved: String?

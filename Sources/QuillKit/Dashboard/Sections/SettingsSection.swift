@@ -121,11 +121,41 @@ public final class SettingsSectionView: NSView {
         let live = DashboardSwitch(isOn: settings.liveText, style: style)
         live.onToggle = { [weak self] on in self?.settings.setLiveText(on) }
 
+        let numbers = DashboardMenuButton(title: settings.numberStyle.label, style: style) {
+            [weak self] in
+            guard let self else { return [] }
+            let chosen = self.settings.numberStyle
+            return QuillSettings.Values.NumberStyle.allCases.map { style in
+                .init(title: style.label, isSelected: style == chosen) { [weak self] in
+                    self?.settings.setNumberStyle(style)
+                    self?.refreshNumberStyle()
+                }
+            }
+        }
+        numberPicker = numbers
+
+        let numbersNote = DashboardType.label(settings.numberStyle.detail,
+                                              font: DashboardType.caption,
+                                              color: style.inkTertiary)
+        numberNote = numbersNote
+
         return SettingsGroup(title: "Dictation", style: style, rows: [
             .init(label: "Hold to talk", detail: nil, control: hold),
             .init(label: "Push to talk", detail: note, control: push),
             .init(label: "Show text as you speak", detail: nil, control: live),
+            .init(label: "Numbers", detail: numbersNote, control: numbers),
         ])
+    }
+
+    private var numberPicker: DashboardMenuButton?
+    private var numberNote: NSTextField?
+
+    /// The example under the picker has to follow the choice, or the row says one
+    /// thing and does another.
+    private func refreshNumberStyle() {
+        numberPicker?.title = settings.numberStyle.label
+        numberNote?.stringValue = settings.numberStyle.detail
+        relayout()
     }
 
     private func inputGroup() -> SettingsGroup {

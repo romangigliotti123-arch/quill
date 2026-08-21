@@ -107,6 +107,21 @@ public enum AppContext: String, Sendable, CaseIterable {
         }
     }
 
+    /// Whether a spoken number should be restyled for this destination.
+    ///
+    /// Only prose. "Spell out small numbers" is a writing convention, and a shell
+    /// command, a search box and a source file are not writing — `git log -3`
+    /// becoming `git log -three` is not a style preference, it is a broken
+    /// command. Code is excluded for the same reason even though it is treated as
+    /// prose everywhere else: the cost of being wrong here is a value that no
+    /// longer parses, and nobody rereads dictated code closely enough to catch it.
+    public var stylesNumbers: Bool {
+        switch self {
+        case .terminal, .query, .code: return false
+        case .prose: return true
+        }
+    }
+
     public var title: String {
         switch self {
         case .terminal: return "Terminal"
@@ -136,8 +151,20 @@ public enum AppContext: String, Sendable, CaseIterable {
 /// is leave text exactly as the cleanup produced it.
 public enum AppContextFormatter {
 
-    public static func apply(_ text: String, context: AppContext) -> String {
+    /// - Parameter numbers: how a spoken number should be written down. Applied
+    ///   here rather than in `cleanFast` because it is a presentation choice, not
+    ///   a repair — and because the destination gets a vote. A shell command with
+    ///   a "3" in it must keep the 3; only prose wants "three".
+    ///
+    ///   Defaults to `.asHeard` so that every caller which has no opinion, and
+    ///   every test which is not about numbers, sees exactly what it saw before.
+    public static func apply(_ text: String,
+                             context: AppContext,
+                             numbers: QuillSettings.Values.NumberStyle = .asHeard) -> String {
         var out = text
+        if context.stylesNumbers {
+            out = FastCleaner.applyNumberStyle(to: out, style: numbers)
+        }
         if !context.keepsTrailingFullStop {
             // Only a full stop, and only one, and only at the very end. A question
             // mark is information — "did the build pass?" means something a full

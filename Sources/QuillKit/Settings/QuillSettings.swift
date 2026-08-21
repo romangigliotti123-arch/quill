@@ -49,15 +49,19 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         /// Type the words into the focused app as they are recognised, instead of
         /// pasting the finished sentence on key release.
         public var liveText: Bool
+        /// How a spoken number is written down. See `NumberStyle`.
+        public var numberStyle: NumberStyle
 
         public init(holdKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
                     toggleKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
                     inputDeviceUID: String? = nil,
-                    liveText: Bool = true) {
+                    liveText: Bool = true,
+                    numberStyle: NumberStyle = .spellOutSmall) {
             self.holdKeyCode = holdKeyCode
             self.toggleKeyCode = toggleKeyCode
             self.inputDeviceUID = inputDeviceUID
             self.liveText = liveText
+            self.numberStyle = numberStyle
         }
 
         public init(from decoder: Decoder) throws {
@@ -67,7 +71,51 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
             toggleKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .toggleKeyCode) ?? fallback.toggleKeyCode
             inputDeviceUID = try c.decodeIfPresent(String.self, forKey: .inputDeviceUID)
             liveText = try c.decodeIfPresent(Bool.self, forKey: .liveText) ?? fallback.liveText
+            // Every settings file written before this key existed decodes to the
+            // default, which is the behaviour those files already had plus the
+            // ordinary writing rule. An unknown value from a newer build does the
+            // same rather than throwing the whole file away.
+            numberStyle = (try? c.decodeIfPresent(NumberStyle.self, forKey: .numberStyle))
+                .flatMap { $0 } ?? fallback.numberStyle
         }
+
+    /// How a spoken number reaches the page.
+    ///
+    /// The recogniser already decides, and mostly decides well: "I'm 15 years
+    /// old" and "6th of April, 1830" come back as digits, "one of you" and "the
+    /// two parties" as words. So the default is not an override — it is the
+    /// ordinary writing rule applied on top, and the wholesale modes are there
+    /// for the jobs that want them.
+    public enum NumberStyle: String, Codable, Sendable, CaseIterable {
+        /// Whatever the recogniser wrote. No rule applied.
+        case asHeard
+        /// One to nine as words, ten and above as digits. Dates, versions, times,
+        /// money, ages, numbered references and addresses keep their digits.
+        case spellOutSmall
+        /// Every counted number as a numeral.
+        case alwaysDigits
+        /// Every counted number spelled out. Structural numbers are still exempt,
+        /// or a version string becomes a sentence.
+        case alwaysWords
+
+        public var label: String {
+            switch self {
+            case .asHeard: return "Leave as heard"
+            case .spellOutSmall: return "Spell out small numbers"
+            case .alwaysDigits: return "Always digits"
+            case .alwaysWords: return "Always words"
+            }
+        }
+
+        public var detail: String {
+            switch self {
+            case .asHeard: return "Whatever the recogniser wrote"
+            case .spellOutSmall: return "“four men”, but “15 years old”"
+            case .alwaysDigits: return "“4 men”, “25 people”"
+            case .alwaysWords: return "“four men”, “fifteen years old”"
+            }
+        }
+    }
     }
 
     private let url: URL
@@ -91,6 +139,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public var toggle: HotkeyBinding { HotkeyBinding(keyCode: withLock { values.toggleKeyCode }) }
     public var inputDeviceUID: String? { withLock { values.inputDeviceUID } }
     public var liveText: Bool { withLock { values.liveText } }
+    public var numberStyle: Values.NumberStyle { withLock { values.numberStyle } }
 
     /// True when one key does both jobs, which is the default and means push-to-talk
     /// is reached by double-tapping rather than by a key of its own.
@@ -129,6 +178,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public func setToggle(_ binding: HotkeyBinding) { update { $0.toggleKeyCode = binding.keyCode } }
     public func setInputDeviceUID(_ uid: String?) { update { $0.inputDeviceUID = uid } }
     public func setLiveText(_ on: Bool) { update { $0.liveText = on } }
+    public func setNumberStyle(_ style: Values.NumberStyle) { update { $0.numberStyle = style } }
 
     // MARK: - Disk
 

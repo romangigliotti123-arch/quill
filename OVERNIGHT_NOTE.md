@@ -166,9 +166,68 @@ or holding volatile text back from the screen, which changes what live typing
 feels like. Neither should be guessed at — measure whether Roman can still see it
 first.
 
-### The rest
+### 2. Spoken email addresses, and a setting for numbers — DONE
 
-He has more. Ask for the next one.
+Not a bug, a request. Three parts; the first two are built, the third is
+deliberately not.
+
+**Emails.** His real failure, from history on 20 Aug: "send it to the Gmail Grace
+Kingston 20 at gmail.com" arrived as prose with the domain broken into
+"gmail. Com" on top. The broken domain was already fixed by the node.js work on
+21 Aug. `FastCleaner.formatSpokenEmails` does the rest.
+
+It **anchors on the domain, never on the word "at"**, which is the whole safety
+argument — "meet me at the shop at four" has no domain and is never considered.
+Only once a domain is found does it read left for a local part, and it refuses
+when the word in front of "at" is one English puts there. Handles both spoken
+("gmail dot com", "kass barbers dot com dot au" — the recogniser splits domain
+labels exactly as it splits names) and already-dotted forms, folds spoken digits,
+and lowercases.
+
+**Numbers.** `QuillSettings.Values.NumberStyle`, defaulting to `spellOutSmall`
+(one to nine as words, ten and up as digits) — his pick, after being shown that a
+blunt toggle would turn "one of you" into "1 of you" and 1830 into a sentence.
+Picker is in Settings > Dictation, with a live example under it.
+
+It lives in `AppContextFormatter`, **not** in `cleanFast`, and that placement is
+load-bearing twice over. It is presentation rather than repair, so the eval rig
+and the model tests do not start measuring a preference; and the destination gets
+a vote, so a terminal, a search field and a code editor all keep their digits —
+`git log -3` becoming `git log -three` is a broken command, not a style.
+
+**What the corpus caught that no unit test would have.** Replaying all 376
+transcripts on this machine — the rig's 299 plus 77 of his own — through the old
+build and the new one turned up exactly two changes. One was the Grace Kingston
+address, correct. The other was a genuine bug:
+
+    said:  "...for example, if I say Roman Gigliotti, 123, at gmail.com..."
+    got:   "...if isayromangigliotti123@gmail.com..."
+
+The verb and the pronoun glued onto the front of the name, because "say" and "I"
+were not stop words. Both are now, along with the other speech verbs, and that
+sentence is pinned as a test. After the fix: two changes across 376, both right,
+no false fires anywhere else. `LiveTypeProbe --replay` is how to re-run it and
+`--demo` shows the whole path end to end.
+
+The stop-word list is the honest weak point. It is explicit and it will need a
+word added the first time one is missed — which is exactly how
+`VocabularyCorrector.boundaryWords` and the compound-name anchors got their
+entries too. The six-token cap is the backstop for when that happens.
+
+533 tests pass.
+
+### 3. Context-aware word recovery — NOT STARTED, needs its own design
+
+His third ask: when the recogniser produces a word that makes no sense, read the
+surrounding sentence and work out what he actually said. This is the
+model-backed pass that `ACCURACY_ANALYSIS.md` already scoped, and it was split
+out on purpose rather than bolted on. The two traps are recorded there and in
+`CleanupPrompt.swift`: do not loosen the cleanup contract (there is a bench where
+that was tried and lost), and the model pass does not currently run on ordinary
+dictation at all, so it needs its own trigger and has to pay for its own latency
+— measured from Melbourne, 250ms catches 11% of calls, 350ms catches 78%.
+
+Brainstorm it properly before writing anything.
 
 ## Next — everything else
 
