@@ -104,3 +104,25 @@ private func clean(_ s: String) -> String { FastCleaner.applyCorrections(to: s) 
     #expect(clean(sentence) == sentence)
     #expect(clean("that is not a fly it is a wasp") == "that is not a fly it is a wasp")
 }
+
+// Real dictation, 21 Aug 2026. The recogniser wrote "node.js" correctly and the
+// cleanup pulled it apart: "the node. Js version bump". The punctuation rule
+// that turns "word.Next" into "word. Next" was treating a file extension as a
+// sentence break, and sentence casing then capitalised the fragment.
+@Test func doesNotSplitADottedName() {
+    let cleaner = FastCleaner()
+    #expect(cleaner.cleanFast("the node.js version bump went through")
+            == "The node.js version bump went through")
+    #expect(cleaner.cleanFast("a three.js scene loads fine")
+            == "A Three.js scene loads fine")
+    #expect(cleaner.cleanFast("it is live on roman-design-co.web.app now")
+            == "It is live on roman-design-co.web.app now")
+}
+
+@Test func stillSeparatesARealSentenceBreak() {
+    let cleaner = FastCleaner()
+    #expect(cleaner.cleanFast("I fixed the build.Just the one test failed")
+            == "I fixed the build. Just the one test failed")
+    #expect(cleaner.cleanFast("that is done.It works now")
+            == "That is done. It works now")
+}

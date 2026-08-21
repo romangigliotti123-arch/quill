@@ -146,7 +146,22 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         // `offline` is the deterministic answer and may be nil when there was
         // nothing to resolve; the text to correct is then the tidied input.
         let base = offline ?? tidy
-        let needsHomophones = !needsSelfCorrection && homophones && HomophonePairs.hasCandidate(in: base)
+        // A long dictation almost always contains a stumble, and a stumble sets
+        // needsSelfCorrection — so "one or the other" quietly meant homophones
+        // never ran on his longest dictations. Measured on a real one: a phone
+        // call in the tail contained "mum told me mum told me", the repetition
+        // gate fired, and "cashing" stayed wrong all the way into the document.
+        //
+        // But the offline resolver handles repetitions deterministically, for
+        // free, before any of this. When it has already changed the text the
+        // retraction is dealt with and the model pass is only a refinement — so
+        // the request is better spent on the homophone, which nothing else can
+        // reach. The original premise, that a sentence needing a retraction is
+        // never also one where flour and flower are in play, was simply wrong.
+        let offlineHandledIt = offline != nil && offline != tidy
+        let needsHomophones = homophones
+            && (!needsSelfCorrection || offlineHandledIt)
+            && HomophonePairs.hasCandidate(in: base)
         guard needsSelfCorrection || needsHomophones else { return offline }
         guard client.isConfigured, client.isReadyToTry else { return offline }
 

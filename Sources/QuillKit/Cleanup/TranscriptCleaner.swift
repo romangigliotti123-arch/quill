@@ -317,8 +317,20 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         var out = text.replacingOccurrences(
             of: "\\s+([,.;:!?])", with: "$1", options: .regularExpression
         )
+        // "word.Next" -> "word. Next", but not "node.js" -> "node. js".
+        //
+        // The recogniser writes node.js, three.js and roman-design-co.web.app
+        // correctly, and this rule was pulling them apart — after which sentence
+        // casing capitalised the fragment, so a correct "node.js" reached the
+        // document as "node. Js". Seen on a real dictation, 21 Aug.
+        //
+        // The test is the shape around the dot rather than a list of known
+        // suffixes: a LOWERCASE letter directly after it. A dotted name is
+        // lowercase on both sides; a sentence break is followed by a capital,
+        // because the recogniser capitalises the sentences it emits. A suffix
+        // list was tried first and immediately missed "web.app".
         out = out.replacingOccurrences(
-            of: "([.!?])([A-Za-z])", with: "$1 $2", options: .regularExpression
+            of: "([.!?])([A-Z])", with: "$1 $2", options: .regularExpression
         )
         return out
     }
@@ -353,7 +365,15 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
                 let previous = i > 0 ? chars[i - 1] : " "
                 let next = i + 1 < chars.count ? chars[i + 1] : " "
                 let isDecimalPoint = c == "." && previous.isNumber && next.isNumber
-                if !isDecimalPoint { capitaliseNext = true }
+                // A dot inside a name is not a sentence break either. Same bug
+                // as the decimal, found the same way: "the node.js version bump"
+                // reached the document as "the node.Js version bump", because
+                // the dot armed a capital and the next letter took it. The test
+                // is the shape around the dot — letter, dot, lowercase letter,
+                // with no space — which is what node.js, three.js and web.app
+                // look like and what the end of a sentence never does.
+                let isInsideAName = c == "." && previous.isLetter && next.isLowercase
+                if !isDecimalPoint, !isInsideAName { capitaliseNext = true }
             }
         }
         return String(chars)
