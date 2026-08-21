@@ -516,6 +516,21 @@ public final class DashboardWindowController: NSWindowController, NSWindowDelega
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak window] in
             workspace.removeObserver(observer)
             guard let window, !cancelled.value, !window.isKeyWindow else { return }
+            // Ask the system as well as the notification.
+            //
+            // The observer above cancels the retry when another app activates,
+            // and it loses a race: didActivateApplicationNotification is
+            // delivered asynchronously, so a click landing inside this 50ms
+            // window can be in flight while the retry fires. Quill then hauls
+            // itself back in front of whatever was just chosen — which is exactly
+            // "I open the app, click the terminal, and it stays on top", and
+            // exactly the failure the observer was added to prevent.
+            //
+            // frontmostApplication is the system's answer at the moment it is
+            // asked rather than a message that may still be on its way, so the
+            // two together cannot both be wrong.
+            let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            guard front == nil || front == me else { return }
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
         }

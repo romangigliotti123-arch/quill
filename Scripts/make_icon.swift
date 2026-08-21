@@ -71,57 +71,72 @@ func render(size: CGFloat) -> NSBitmapImageRep {
     //
     // So: a wider nib, a slit that scales with the shape instead of with the
     // canvas, and the vent dropped entirely below the size where it can be seen.
+
+    // A waveform, which is what Apple actually draws for a voice app.
+    //
+    // Voice Memos is a waveform. Dictation is a waveform. The nib was the better
+    // pun — the app is called Quill — but Roman's brief was "something Apple
+    // would design for this sort of app", and Apple would not draw a pen for a
+    // thing you talk to.
+    //
+    // Seven bars, symmetric about the centre, tallest in the middle. Odd count on
+    // purpose: an even one has no centre bar and the mark reads as two groups
+    // rather than one shape. The heights are a shallow curve rather than random —
+    // random bars look like a level meter caught mid-frame, and an icon is not a
+    // frame of anything, it is a symbol of the whole.
+    //
+    // Bars, gaps and caps are all proportional to the tile, so the mark is the
+    // same shape at 16pt as at 1024. That is the property the nib never had.
     let w = tile.width, h = tile.height, ox = tile.minX, oy = tile.minY
-    func p(_ fx: CGFloat, _ fy: CGFloat) -> NSPoint { NSPoint(x: ox + w * fx, y: oy + h * fy) }
 
-    // A nib is not a leaf, and the difference is asymmetry.
+    // Fewer bars where seven cannot be drawn.
     //
-    // The previous silhouette was pointed at BOTH ends and widest in the middle,
-    // which is the shape of a leaf — and read as one at every size. A real nib
-    // has a broad shoulder where it meets the barrel and tapers to a single point
-    // at the writing end. Getting that one relationship right does more for
-    // recognition than any amount of detail inside it.
-    //
-    // It is also much bigger than it was. The glyph filled about 55% of the tile,
-    // which is why 16pt came out as a smudge; Apple's marks sit closer to 70% and
-    // that headroom is most of what makes them survive the Finder list.
-    let nib = NSBezierPath()
-    let tip = p(0.5, 0.10)          // the writing point
-    let shoulder = p(0.5, 0.92)     // the broad end
-    nib.move(to: tip)
-    // Right side: out to the widest point just above centre, then in to the
-    // shoulder. Control points chosen so the widest part sits at ~0.62, which is
-    // where a nib actually swells.
-    nib.curve(to: shoulder,
-              controlPoint1: p(0.30, 0.30), controlPoint2: p(0.14, 0.78))
-    nib.curve(to: tip,
-              controlPoint1: p(0.86, 0.78), controlPoint2: p(0.70, 0.30))
-    NSColor.white.setFill()
-    nib.fill()
-
-    // The slit runs from the tip toward the vent, as it does on a real nib —
-    // it is what stops the shape reading as a solid petal. Proportional to the
-    // nib's width with a one-pixel floor, so it never disappears and never
-    // becomes a gash.
-    //
-    // Below 48pt it is not drawn at all. A slit two pixels wide does not read as
-    // a slit, it reads as the shape having gone slightly grey in the middle —
-    // which is worse than a clean silhouette. Same rule as the vent below: detail
-    // appears only at the sizes that can resolve it, and every size below that
-    // gets the boldest honest version of the mark.
-    if size >= 48 {
-        tileColour.setFill()
-        let slitWidth = max(w * 0.045, 1)
-        NSBezierPath(rect: NSRect(x: ox + w * 0.5 - slitWidth / 2, y: oy + h * 0.16,
-                                  width: slitWidth, height: h * 0.44)).fill()
+    // At 16pt a seven-bar mark gives each bar about one pixel with a sub-pixel
+    // gap, and the whole thing greys into a blob — measured by rendering it, not
+    // guessed. Dropping to three keeps the bars thick enough to stay separate,
+    // and three bars rising to a centre still reads as a waveform. This is the
+    // same rule the slit and vent followed: the mark simplifies as it shrinks
+    // rather than dissolving.
+    let heights: [CGFloat]
+    switch size {
+    case ..<24:  heights = [0.44, 0.94, 0.44]
+    case ..<48:  heights = [0.30, 0.66, 0.94, 0.66, 0.30]
+    default:     heights = [0.26, 0.46, 0.74, 0.94, 0.74, 0.46, 0.26]
     }
+    let bars = CGFloat(heights.count)
+    // The mark spans 62% of the tile. Wider reads as a chart; narrower and the
+    // bars crowd into a blob at small sizes.
+    // Narrower when there are fewer bars, so three do not sprawl across the tile.
+    let span = w * (heights.count >= 7 ? 0.62 : heights.count == 5 ? 0.58 : 0.56)
+    let pitch = span / bars              // one bar plus one gap
+    let barWidth = max(pitch * 0.50, 1)  // half, so bar and gap read equally
+    let capRadius = barWidth / 2         // fully rounded caps, as SF Symbols do
+    let midY = oy + h * 0.5
+    let startX = ox + (w - span) / 2 + (pitch - barWidth) / 2
 
-    // The vent only exists where it can be resolved. Below ~128pt it is fewer
-    // than four pixels across and contributes nothing but a smudge.
-    if size >= 128 {
-        let vent = w * 0.11
-        NSBezierPath(ovalIn: NSRect(x: ox + w * 0.5 - vent / 2, y: oy + h * 0.555,
-                                    width: vent, height: vent)).fill()
+    NSColor.white.setFill()
+    for (index, factor) in heights.enumerated() {
+        // A bar shorter than it is wide cannot be drawn with round caps without
+        // becoming a circle, so the shortest is floored at its own width.
+        let barHeight = max(h * 0.5 * factor, barWidth)
+        var rect = NSRect(x: startX + CGFloat(index) * pitch,
+                          y: midY - barHeight / 2,
+                          width: barWidth, height: barHeight)
+        // Snapped to whole pixels below 64.
+        //
+        // This is what actually made the small sizes grey, rather than the number
+        // of bars: a bar landing on a fractional x with a fractional width is
+        // antialiased across two columns, so at 16pt every bar became two half-lit
+        // pixels and the mark dissolved. Rounding puts each bar on a pixel and
+        // gives it a hard edge, which is the whole difference between a legible
+        // 16pt icon and a smudge.
+        if size < 64 {
+            rect = NSRect(x: rect.minX.rounded(), y: rect.minY.rounded(),
+                          width: max(rect.width.rounded(), 1),
+                          height: max(rect.height.rounded(), 1))
+        }
+        let r = min(capRadius, rect.width / 2)
+        NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r).fill()
     }
 
     NSGraphicsContext.restoreGraphicsState()

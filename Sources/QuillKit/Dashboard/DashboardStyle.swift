@@ -934,33 +934,39 @@ public final class DashboardMark: NSView {
         style.fill.setFill()
         DashboardDraw.path(rect, rect.width * 0.2237).fill()
 
-        // The same nib as Scripts/make_icon.swift, and it has to STAY the same —
-        // the icon in the Dock and the mark in the sidebar are one identity, and
-        // the two drifting apart is the exact failure this comment exists to
-        // prevent. Both were leaf-shaped until now: symmetric, pointed at each
-        // end, widest in the middle. A nib has a broad shoulder and one point.
+        // The same waveform as Scripts/make_icon.swift, and it has to STAY the
+        // same — the Dock icon and the in-app mark are one identity, and the two
+        // drifting apart is the exact failure this comment exists to prevent.
+        //
+        // A waveform rather than a nib because that is what Apple draws for a
+        // voice app: Voice Memos is a waveform, Dictation is a waveform. The nib
+        // was the better pun on the app's name and the wrong answer to "something
+        // Apple would design for this sort of app".
         let w = rect.width, h = rect.height
-        func p(_ fx: CGFloat, _ fy: CGFloat) -> NSPoint { NSPoint(x: w * fx, y: h * fy) }
 
-        let nib = NSBezierPath()
-        let tip = p(0.5, 0.10), shoulder = p(0.5, 0.92)
-        nib.move(to: tip)
-        nib.curve(to: shoulder, controlPoint1: p(0.30, 0.30), controlPoint2: p(0.14, 0.78))
-        nib.curve(to: tip, controlPoint1: p(0.86, 0.78), controlPoint2: p(0.70, 0.30))
+        // The mark is drawn around 24pt, squarely in the band where seven bars
+        // cannot resolve, so it gets five — by the same rule the icon uses.
+        let heights: [CGFloat] = w < 24 ? [0.44, 0.94, 0.44]
+                               : w < 48 ? [0.30, 0.66, 0.94, 0.66, 0.30]
+                               : [0.26, 0.46, 0.74, 0.94, 0.74, 0.46, 0.26]
+        let span = w * (heights.count >= 7 ? 0.62 : heights.count == 5 ? 0.58 : 0.56)
+        let pitch = span / CGFloat(heights.count)
+        let barWidth = max(pitch * 0.50, 1)
+        let midY = h * 0.5
+        let startX = (w - span) / 2 + (pitch - barWidth) / 2
+
         style.onFill.setFill()
-        nib.fill()
-
-        // The sidebar mark is drawn around 24pt, so it sits in the band where the
-        // icon shows its slit but not its vent — a 2.6pt hole is a smudge. Same
-        // rule, same reason: detail only where it resolves.
-        style.fill.setFill()
-        let slitWidth = max(w * 0.045, 1)
-        NSBezierPath(rect: NSRect(x: w * 0.5 - slitWidth / 2, y: h * 0.16,
-                                  width: slitWidth, height: h * 0.44)).fill()
-        if w >= 40 {
-            let vent = w * 0.11
-            NSBezierPath(ovalIn: NSRect(x: w * 0.5 - vent / 2, y: h * 0.555,
-                                        width: vent, height: vent)).fill()
+        for (index, factor) in heights.enumerated() {
+            let barHeight = max(h * 0.5 * factor, barWidth)
+            // Snapped to whole points. A fractional bar antialiases across two
+            // columns and the mark greys out — the same thing that made the 16pt
+            // icon a smudge until it was rendered and looked at.
+            let barRect = NSRect(x: (startX + CGFloat(index) * pitch).rounded(),
+                                 y: (midY - barHeight / 2).rounded(),
+                                 width: max(barWidth.rounded(), 1),
+                                 height: max(barHeight.rounded(), 1))
+            let r = min(barWidth / 2, barRect.width / 2)
+            NSBezierPath(roundedRect: barRect, xRadius: r, yRadius: r).fill()
         }
     }
 }
