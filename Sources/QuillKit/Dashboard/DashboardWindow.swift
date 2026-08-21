@@ -23,7 +23,12 @@ public final class DashboardRootView: NSView, SidebarDelegate {
     public weak var provider: DashboardSectionProvider?
 
     public let sidebar: SidebarView
-    private let panel: DashboardCardView
+    /// The translucent plate the sidebar sits on. Behind-window blending, so it
+    /// picks up the desktop rather than a colour we invented.
+    private let sidebarMaterial: DashboardMaterialView
+    /// The content area. Within-window blending: it should read as part of the
+    /// window, not as another hole through it.
+    private let panel: DashboardMaterialView
     private let statusPill: DashboardStatusPill
     private var sectionView: NSView?
 
@@ -35,17 +40,23 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         self.style = style
         self.provider = provider
         sidebar = SidebarView(style: style, selection: selection)
-        panel = DashboardCardView(style: style, elevation: .panel, radius: DashboardRadius.panel)
+        sidebarMaterial = DashboardMaterialView(material: .sidebar,
+                                                blending: .behindWindow,
+                                                fallback: style.canvasBottom)
+        panel = DashboardMaterialView(material: .contentBackground,
+                                      blending: .withinWindow,
+                                      fallback: style.panel)
         statusPill = DashboardStatusPill(style: style)
         super.init(frame: NSRect(origin: .zero, size: DashboardMetrics.windowSize))
         // Clip the section to the panel's corners so a scrolling list stops at
         // the curve instead of squaring it off. Verified to survive
         // `CALayer.render(in:)` — `masksToBounds` does, an explicit `layer.mask`
         // does not, which is why sections must never reach for the latter.
-        panel.wantsLayer = true
-        panel.layer?.cornerRadius = DashboardRadius.panel
-        panel.layer?.cornerCurve = .continuous
-        panel.layer?.masksToBounds = true
+        // Only the two corners away from the sidebar. The content area meets the
+        // sidebar square, the way a split view does, and rounds where the window
+        // itself rounds — rounding all four is what made it a floating card.
+        panel.round(corners: [.layerMinXMinYCorner, .layerMinXMaxYCorner], radius: 0)
+        addSubview(sidebarMaterial)
         addSubview(sidebar)
         addSubview(panel)
         addSubview(statusPill)
@@ -150,37 +161,50 @@ public final class DashboardRootView: NSView, SidebarDelegate {
     public func apply(_ newStyle: DashboardStyle) {
         style = newStyle
         sidebar.style = newStyle
-        panel.style = newStyle
+        sidebarMaterial.restyle(fallback: newStyle.canvasBottom)
+        panel.restyle(fallback: newStyle.panel)
         statusPill.style = newStyle
-        showSection(sidebar.selection)
-        // Shows through during a live resize, when AppKit fills the newly
-        // exposed area before the view has drawn into it.
-        window?.backgroundColor = newStyle.canvasBottom
+        // Not animated. A theme change is not a navigation, and cross-fading here
+        // leaves two section views parented for 0.18s — which the offscreen
+        // renderer captures, because it renders light and dark from the same root
+        // by applying a style between shots. It was invisible while both copies
+        // sat at the same frame and appeared the moment they did not.
+        showSection(sidebar.selection, animated: false)
+        // Stays clear through a theme change. The materials carry the surface
+        // now, and giving the window a colour again would put an opaque sheet in
+        // front of the blending.
+        window?.backgroundColor = .clear
         needsDisplay = true
     }
 
     public override func layout() {
         super.layout()
-        sidebar.frame = NSRect(x: 0, y: 0, width: DashboardMetrics.sidebarWidth, height: bounds.height)
+        sidebarMaterial.frame = NSRect(x: 0, y: 0,
+                                       width: DashboardMetrics.sidebarWidth, height: bounds.height)
+        sidebar.frame = sidebarMaterial.frame
         panel.frame = DashboardMetrics.panelFrame(in: bounds.size)
-        sectionView?.frame = panel.bounds
+        sectionView?.frame = DashboardMetrics.sectionFrame(in: panel.bounds)
 
         let size = statusPill.fittingSize
-        statusPill.frame = NSRect(x: bounds.width - DashboardMetrics.panelGap - 6 - size.width,
+        statusPill.frame = NSRect(x: bounds.width - 16 - size.width,
                                   y: ((DashboardMetrics.titlebarHeight - size.height) / 2).rounded(),
                                   width: size.width, height: size.height)
     }
 
+    /// Nothing to draw any more, and the omission is the point.
+    ///
+    /// This used to paint a canvas gradient and then cast a drop shadow under a
+    /// floating content panel. Both are how a web page fakes depth. A Mac window
+    /// gets its depth from the window itself and from one material sitting
+    /// against another, and drawing a gradient here would sit *in front of* the
+    /// behind-window blending and cancel the translucency it exists for.
+    ///
+    /// The one line kept is the divider. A sidebar and a content area that meet
+    /// with no seam read as one flat surface at most desktop backgrounds, and
+    /// AppKit's own split views draw exactly this hairline.
     public override func draw(_ dirtyRect: NSRect) {
-        DashboardDraw.gradient(bounds, radius: 0,
-                               top: style.canvasTop, bottom: style.canvasBottom, flipped: true)
-        // The panel's own shadow has to be cast from underneath it — a view
-        // cannot draw outside its bounds, so the drop shadow lives here.
-        let frame = DashboardMetrics.panelFrame(in: bounds.size)
-        DashboardDraw.shadowed(style.shadowPanel, flipped: true) {
-            style.panel.setFill()
-            DashboardDraw.path(frame, DashboardRadius.panel).fill()
-        }
+        style.hairline.setFill()
+        NSRect(x: DashboardMetrics.sidebarWidth - 1, y: 0, width: 1, height: bounds.height).fill()
     }
 }
 
@@ -373,7 +397,11 @@ public final class DashboardWindowController: NSWindowController, NSWindowDelega
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.minSize = DashboardMetrics.minWindowSize
-        window.backgroundColor = style.canvasBottom
+        // Clear and non-opaque, or behind-window blending has nothing to blend
+        // with: AppKit composites the window background OVER the material and the
+        // sidebar comes out a flat colour that merely looks like vibrancy.
+        window.backgroundColor = .clear
+        window.isOpaque = false
         window.isReleasedWhenClosed = false
         // Tabs bring a system tab bar, which is exactly the default chrome this
         // window is drawn from scratch to avoid.

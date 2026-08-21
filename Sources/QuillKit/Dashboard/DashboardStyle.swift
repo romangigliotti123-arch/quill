@@ -55,8 +55,11 @@ public enum DashboardMetrics {
     public static let sidebarWidth: CGFloat = 234
     /// The strip the traffic lights live in. The content panel starts below it.
     public static let titlebarHeight: CGFloat = 52
-    /// Gap between the floating panel and the window's right/bottom edge.
-    public static let panelGap: CGFloat = 10
+    /// Was the gap around a floating content panel. Zero now: a Mac window puts
+    /// content edge to edge against the window frame and lets the split between
+    /// sidebar and content do the separating. The constant stays because the
+    /// panel frame is computed from it and a lot of sections measure against it.
+    public static let panelGap: CGFloat = 0
 
     public static let sidebarInset: CGFloat = 12
     public static let navRowHeight: CGFloat = 36
@@ -65,11 +68,27 @@ public enum DashboardMetrics {
     public static let contentPaddingX: CGFloat = 46
     public static let contentPaddingY: CGFloat = 40
 
+    /// The content area: everything right of the sidebar, below the titlebar,
+    /// out to the window's edges. The titlebar is transparent and full-size, so
+    /// the sidebar material runs up behind the traffic lights the way it does in
+    /// Mail and Notes.
     public static func panelFrame(in size: NSSize) -> NSRect {
-        NSRect(x: sidebarWidth,
-               y: titlebarHeight,
+        NSRect(x: sidebarWidth, y: 0,
                width: size.width - sidebarWidth - panelGap,
-               height: size.height - titlebarHeight - panelGap)
+               height: size.height - panelGap)
+    }
+
+    /// Where a section's own content starts inside that area.
+    ///
+    /// The material runs the full height of the window and the CONTENT is inset
+    /// below the titlebar, rather than the material starting below it. Starting
+    /// the material at the titlebar left a bare strip across the top of the
+    /// window — the window is non-opaque now, so "nothing drawn" is a hole rather
+    /// than a background. Every Mac app with a full-size content view does it
+    /// this way, which is why their toolbars appear to float over the content.
+    public static func sectionFrame(in panel: NSRect) -> NSRect {
+        NSRect(x: 0, y: titlebarHeight,
+               width: panel.width, height: panel.height - titlebarHeight)
     }
 }
 
