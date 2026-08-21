@@ -216,7 +216,86 @@ entries too. The six-token cap is the backstop for when that happens.
 
 533 tests pass.
 
-### 3. Context-aware word recovery — NOT STARTED, needs its own design
+### 3. Context-aware word recovery — BUILT, MEASURED WORSE, SHIPPED OFF
+
+His words: "if it can't really understand a word that I said, it should read the
+context of what I just said and figure out what word makes the most sense."
+
+**Four ways of bounding the general version were measured. All four failed.**
+Writing them down because each one looks obviously correct until you measure it,
+and the next person will think of them in the same order.
+
+1. **Ask the recogniser what it was unsure about.** `SpeechTranscriber.Result`
+   carries `alternatives` and Quill never requested them. Turn on
+   `.alternativeTranscriptions` and they arrive populated — and they are
+   *punctuation* variants. `" peppered flour"` against `" peppered, flour"`,
+   every span, every clip. There is no lexical n-best to lean on.
+   (`LiveTypeProbe --alternatives <wav>` reproduces it.)
+2. **"The replacement must sound similar,"** using Quill's `phoneticKey`. 85% of
+   English words have a neighbour under it and "flour" has 1140, including
+   "baffle". That key folds b/p/v/f and c/k/g/q/j together on purpose — it is for
+   matching mis-split proper nouns against a 142-term dictionary — and it bounds
+   nothing here.
+3. **Offer the model every true homophone in the sentence,** generated from
+   CMUdict. Fires on 98% of his 376 real transcripts, median ten decisions each.
+   Ten decisions per sentence is ten chances to damage a word he meant.
+4. **Filter that list to ordinary words.** Still 81%, and dominated by pairs like
+   the/thee, but/butt, would/wood — all risk, no upside, because he does not say
+   "thee". Filtering to pairs where *both* members appear in his corpus leaves
+   five, which is the hand-written list again.
+
+**What was built instead: propose-then-verify.** Invert the shape. The model
+reads the sentence and proposes a fix freely; `ContextProjection` refuses the
+proposal unless the replacement is a true homophone of the word that was heard,
+checked against `HomophoneTable` — 1,073 sets and 2,281 words generated from
+CMUdict by `rig/tools/make_homophone_table.py`, surnames excluded. The model is
+free, the acceptance is not, and the blast radius is "words that sound the same"
+by construction. At most one word may change.
+
+**And it is measurably worse than the closed list it was meant to replace:**
+
+| pass | words | trigger | fixed | damaged |
+|---|---|---|---|---|
+| closed list (`HomophonePairs`) | 44 | 11% | 3/6 | 0/6 |
+| context, prompt v1 | 2281 | 31% | 3/6 | **3/6** |
+| context, prompt v2 | 2281 | 31% | 2/10 | 0/10 |
+
+v1 matched the closed list and rewrote half the correct sentences — "the flower
+shop on the corner" became "the flour shop", "the principle of least surprise"
+became "principal", and "cheque" was Americanised. v2 moved the burden of proof
+(return it unchanged unless the sentence is impossible as written) and a
+code-level refusal handles regional spellings, because no amount of context makes
+Australian spelling wrong. That took damage to zero and hits down with it: it
+fixed one of the four cases the closed list cannot reach at all.
+
+So it ships **off**, with the numbers in `QuillSettings.Values.contextRecovery`
+and a switch in Settings. Choosing from a short list beats proposing freely on an
+8B model at a 450ms deadline. The lever that would change it is a larger model,
+and `gemma-4-31b` is 1678ms at p50 — see `AIConfig`.
+
+**Do not tune the prompt against that 12-sentence bench.** Two versions already
+moved along the same trade curve, and a third that scores better on twelve
+sentences has probably learned the twelve sentences.
+
+### Two things this turned up that are not about homophones
+
+**The live benches rate-limit.** Six suite runs in an hour and the closed-list
+pass fell from 3/6 to 1/6 with a 27-second call — the shape of throttling, not of
+a regression. `fixed >= 3` in `theHomophonePassOnTheRealModel` is also right at
+the edge of what the model does reliably; a clean cold run scored 2/6 with the
+homophone path byte-identical to before. Left pinned rather than loosened,
+because loosening someone's measured bar to go green is how a bar stops meaning
+anything. Re-run it on an idle endpoint before believing a failure.
+
+**Issue #3 in the old list, better characterised but still not solved.**
+`libTestingMacros.dylib` gets dropped from `-load-resolved-plugin` and the whole
+suite fails to compile. New this round: it is not only `--filter` builds, it hits
+full runs too, and rerunning does NOT reliably clear it — one sequence failed
+four times running. A fresh `QUILL_SCRATCH` path helped twice out of three, so it
+is a better bet than rerunning in place, but it is not a fix and must not be
+written up as one. Still unexplained.
+
+### The original note's item 3 — the model-backed homophone half
 
 His third ask: when the recogniser produces a word that makes no sense, read the
 surrounding sentence and work out what he actually said. This is the

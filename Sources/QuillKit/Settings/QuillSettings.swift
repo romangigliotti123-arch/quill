@@ -51,17 +51,40 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         public var liveText: Bool
         /// How a spoken number is written down. See `NumberStyle`.
         public var numberStyle: NumberStyle
+        /// Let the model read the sentence, propose a fix of its own, and have
+        /// `ContextProjection` refuse anything that is not a same-sounding swap.
+        ///
+        /// **Off by default, and the reason is measured rather than cautious.**
+        /// Benched against the real endpoint on a corpus that is deliberately
+        /// half already-correct:
+        ///
+        ///     pass                        words   trigger   fixed    damaged
+        ///     ──────────────────────────────────────────────────────────────
+        ///     closed list (default)          44       11%     3/6        0/6
+        ///     context, prompt v1           2281       31%     3/6        3/6
+        ///     context, prompt v2           2281       31%    2/10       0/10
+        ///
+        /// v1 fixed as much as the closed list and rewrote half the correct
+        /// sentences — "the flower shop on the corner" became "the flour shop".
+        /// v2 stopped the damage by moving the burden of proof, and became so
+        /// reluctant that it fixed one of the four cases the closed list cannot
+        /// reach at all. On this model, at this deadline, choosing from a short
+        /// list beats proposing freely. A larger model is the thing that would
+        /// change it, and gemma-4-31b is 1678ms at p50 against a 450ms budget.
+        public var contextRecovery: Bool
 
         public init(holdKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
                     toggleKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
                     inputDeviceUID: String? = nil,
                     liveText: Bool = true,
-                    numberStyle: NumberStyle = .spellOutSmall) {
+                    numberStyle: NumberStyle = .spellOutSmall,
+                    contextRecovery: Bool = false) {
             self.holdKeyCode = holdKeyCode
             self.toggleKeyCode = toggleKeyCode
             self.inputDeviceUID = inputDeviceUID
             self.liveText = liveText
             self.numberStyle = numberStyle
+            self.contextRecovery = contextRecovery
         }
 
         public init(from decoder: Decoder) throws {
@@ -77,6 +100,8 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
             // same rather than throwing the whole file away.
             numberStyle = (try? c.decodeIfPresent(NumberStyle.self, forKey: .numberStyle))
                 .flatMap { $0 } ?? fallback.numberStyle
+            contextRecovery = try c.decodeIfPresent(Bool.self, forKey: .contextRecovery)
+                ?? fallback.contextRecovery
         }
 
     /// How a spoken number reaches the page.
@@ -140,6 +165,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public var inputDeviceUID: String? { withLock { values.inputDeviceUID } }
     public var liveText: Bool { withLock { values.liveText } }
     public var numberStyle: Values.NumberStyle { withLock { values.numberStyle } }
+    public var contextRecovery: Bool { withLock { values.contextRecovery } }
 
     /// True when one key does both jobs, which is the default and means push-to-talk
     /// is reached by double-tapping rather than by a key of its own.
@@ -179,6 +205,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public func setInputDeviceUID(_ uid: String?) { update { $0.inputDeviceUID = uid } }
     public func setLiveText(_ on: Bool) { update { $0.liveText = on } }
     public func setNumberStyle(_ style: Values.NumberStyle) { update { $0.numberStyle = style } }
+    public func setContextRecovery(_ on: Bool) { update { $0.contextRecovery = on } }
 
     // MARK: - Disk
 

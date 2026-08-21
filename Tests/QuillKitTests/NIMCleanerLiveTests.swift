@@ -261,7 +261,11 @@ struct NIMCleanerLiveTests {
 // free — "principle developer", "no affect on", "loosing the", "stationary
 // shop". Benching the model on cases it never sees measures nothing.
 @Test func theHomophonePassOnTheRealModel() async throws {
-    let cleaner = NIMCleaner(vocabulary: Vocabulary.seed.contextualStrings, homophones: true)
+    // contextRecovery off: this test measures the closed-list pass, and the
+    // context pass is benched separately below. Without pinning it, whichever one
+    // is currently the default would silently take over this test's numbers.
+    let cleaner = NIMCleaner(vocabulary: Vocabulary.seed.contextualStrings,
+                             homophones: true, contextRecovery: false)
     guard NIMClient().isConfigured else { return }
 
     // (sentence, the word that must come out) — nil means "must not change".
@@ -310,4 +314,72 @@ struct NIMCleanerLiveTests {
     // the latency.
     #expect(broke == 0, "rewrote \(broke) sentences that were already correct")
     #expect(fixed >= 3, "fixed \(fixed)/6, was 3/6 when this was written")
+}
+
+/// The context pass on the same corpus, so the two are comparable.
+///
+/// Same twelve sentences, half of them deliberately already correct, because the
+/// number that decides this is the damage column and a hit-rate-only corpus
+/// cannot see it. That is the discipline `CleanupPrompt.swift` established and it
+/// is what caught the first version of this pass rewriting three correct
+/// sentences out of six.
+@Test func theContextPassOnTheRealModel() async throws {
+    let cleaner = NIMCleaner(vocabulary: Vocabulary.seed.contextualStrings,
+                             homophones: true, contextRecovery: true)
+    guard NIMClient().isConfigured else { return }
+
+    let corpus: [(String, String?)] = [
+        ("every time Cloudflare cashed something stale", "cached"),
+        ("the response is cashed for an hour", "cached"),
+        ("the dues were still on the grass", "dews"),
+        ("she is the principle architect", "principal"),
+        ("a discrete word with the client first", "discreet"),
+        ("the flower in the bread recipe", "flour"),
+        ("I cashed the cheque on Friday", nil),
+        ("the principle of least surprise", nil),
+        ("keep the modules discrete and separate", nil),
+        ("a compliment from a client is rare", nil),
+        ("the flower shop on the corner", nil),
+        ("the invoice is past due", nil),
+
+        // The half that matters for THIS pass. Not one of these pairs is on
+        // HomophonePairs, so the closed-list pass cannot reach them at any
+        // prompt or any model — it would never even be offered the choice. This
+        // is what the generated table is for, and if it fixes none of them the
+        // table is not earning its 13 KB.
+        ("the sealing was cracked and stained", "ceiling"),
+        ("a coarse of antibiotics from the chemist", "course"),
+        ("he rowed the horse along the ridge", "rode"),
+        ("she red the letter twice before answering", "read"),
+        // And the other half, again: already right, must survive.
+        ("the sealing of the envelope was neat", nil),
+        ("a coarse woollen blanket", nil),
+        ("he rowed the boat across the lake", nil),
+        ("the ceiling fan needs cleaning", nil),
+    ]
+
+    var fixed = 0, broke = 0, missed = 0
+    var wanted = 0, correct = 0
+    for (sentence, expected) in corpus {
+        let baseline = cleaner.cleanFast(sentence)
+        let out = await cleaner.cleanThorough(sentence, deadline: .milliseconds(2500)) ?? baseline
+        if let expected {
+            wanted += 1
+            if out.lowercased().contains(expected) { fixed += 1 }
+            else { missed += 1; print("[context] MISS  \(sentence) -> \(out)") }
+        } else {
+            correct += 1
+            if out.lowercased() == baseline.lowercased() { /* untouched, good */ }
+            else { broke += 1; print("[context] BROKE \(baseline) -> \(out)") }
+        }
+    }
+    print("[context] fixed \(fixed)/\(wanted), missed \(missed), damaged \(broke)/\(correct)")
+
+    // The damage bound is the one that has to hold. Prompt v1 scored 3/6 fixed
+    // and 3/6 damaged — it read "change at most one word" as "change one word" —
+    // and v2 moves the burden of proof: return it unchanged unless the sentence
+    // is impossible as written. The regional-spelling refusal in
+    // `ContextProjection` handles the cheque/check case in code, because no
+    // amount of context makes Australian spelling the wrong answer.
+    #expect(broke == 0, "rewrote \(broke) sentences that were already correct")
 }

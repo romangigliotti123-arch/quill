@@ -64,6 +64,8 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
     private let safetyMargin: Duration
     private let minimumBudget: Duration
     private let homophones: Bool
+    /// Propose-then-verify instead of choose-from-a-list. See ContextProjection.
+    private let contextRecovery: Bool
 
     /// - Parameters:
     ///   - safetyMargin: taken off the caller's deadline before the request is
@@ -99,7 +101,8 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         vocabulary: [String] = Vocabulary.load().contextualStrings,
         safetyMargin: Duration = .milliseconds(30),
         minimumBudget: Duration = .milliseconds(120),
-        homophones: Bool = ProcessInfo.processInfo.environment["QUILL_HOMOPHONES"] != "0"
+        homophones: Bool = ProcessInfo.processInfo.environment["QUILL_HOMOPHONES"] != "0",
+        contextRecovery: Bool = QuillSettings.shared.contextRecovery
     ) {
         self.client = client
         self.fast = fast
@@ -108,6 +111,7 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         self.safetyMargin = safetyMargin
         self.minimumBudget = minimumBudget
         self.homophones = homophones
+        self.contextRecovery = contextRecovery
     }
 
     public func cleanFast(_ raw: String) -> String { fast.cleanFast(raw) }
@@ -124,6 +128,26 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
                 )
             }
             return HomophoneProjection.project(completion, onto: text)
+        } catch {
+            return nil
+        }
+    }
+
+    /// The context pass: the model reads the sentence and proposes a fix of its
+    /// own, and `ContextProjection` refuses anything that is not a same-sounding
+    /// word swapped for the one that was heard.
+    ///
+    /// Same request budget as the pass it replaces, and the same gate decides
+    /// whether to spend it — so this costs nothing extra on the 89% of his
+    /// dictations that contain no confusable word at all.
+    private func recoverFromContext(in text: String, budget: Duration) async -> String? {
+        do {
+            let completion = try await Self.withDeadline(budget) {
+                try await client.complete(
+                    system: ContextPrompt.current.system, user: text, model: nil, deadline: budget
+                )
+            }
+            return ContextProjection.project(completion, onto: text)
         } catch {
             return nil
         }
@@ -159,9 +183,17 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         // reach. The original premise, that a sentence needing a retraction is
         // never also one where flour and flower are in play, was simply wrong.
         let offlineHandledIt = offline != nil && offline != tidy
+        // Each pass gets the gate that matches its reach. The closed-list pass
+        // can only fix a word on its 44-word list, so asking about anything else
+        // is a request spent on a question it cannot answer. The context pass
+        // verifies against 2,281 words, and gating it on the small list would
+        // mean shipping a table it almost never gets to use.
+        let hasCandidate = contextRecovery
+            ? ContextProjection.hasCandidate(in: base)
+            : HomophonePairs.hasCandidate(in: base)
         let needsHomophones = homophones
             && (!needsSelfCorrection || offlineHandledIt)
-            && HomophonePairs.hasCandidate(in: base)
+            && hasCandidate
         guard needsSelfCorrection || needsHomophones else { return offline }
         guard client.isConfigured, client.isReadyToTry else { return offline }
 
@@ -173,6 +205,15 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         // needs a retraction resolved is not also the sentence where flour and
         // flower are in play, and if it ever is, the retraction matters more.
         if needsHomophones {
+            // Two shapes of the same request, and only one is sent. The context
+            // pass lets the model propose freely and refuses anything that is not
+            // a same-sounding swap; the older pass hands it a closed list to
+            // choose from. The first covers 2,281 words against 44 and is the
+            // default; the second stays reachable because its list carries pairs
+            // CMUdict does not know this recogniser confuses.
+            if contextRecovery {
+                return await recoverFromContext(in: base, budget: budget) ?? offline
+            }
             return await correctHomophones(in: base, budget: budget) ?? offline
         }
 

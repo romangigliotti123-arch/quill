@@ -59,7 +59,22 @@ public enum HomophoneProjection {
     ///
     /// Never throws and never reports an error: the caller already holds a good
     /// answer, and this is only ever allowed to improve it.
-    public static func project(_ raw: String, onto input: String) -> String? {
+    /// - Parameters:
+    ///   - permitting: whether a given substitution is allowed. The default is
+    ///     the hand-written pair list, which is what the offer-a-choice pass
+    ///     uses. `ContextProjection` passes the generated pronunciation table
+    ///     instead, because there the model proposes freely and this is the only
+    ///     thing standing between a proposal and the user's document.
+    ///   - maximumSubstitutions: how many words may change at once. One is the
+    ///     honest answer for a mishearing; a model returning five swaps has
+    ///     started rewriting, and the fact that all five happen to be homophones
+    ///     does not make that the user's sentence any more.
+    public static func project(
+        _ raw: String,
+        onto input: String,
+        permitting mayReplace: (String, String) -> Bool = HomophonePairs.mayReplace,
+        maximumSubstitutions: Int = .max
+    ) -> String? {
         var out = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !out.isEmpty else { return nil }
 
@@ -88,10 +103,14 @@ public enum HomophoneProjection {
             let original = inTokens[index].word
             let proposed = outTokens[index].word
             if HomophonePairs.normalise(original) == HomophonePairs.normalise(proposed) { continue }
-            // Different word. It survives only if the pair list permits it.
-            guard HomophonePairs.mayReplace(original, with: proposed) else { return nil }
+            // Different word. It survives only if the caller's rule permits it.
+            guard mayReplace(original, proposed) else { return nil }
             inTokens[index].word = matchCase(of: original, applying: proposed)
             substitutions += 1
+            // Refuse the whole answer rather than keeping the first N. A model
+            // that changed too much was not doing this job, and taking half of
+            // its output would be keeping the half we happened to look at first.
+            guard substitutions <= maximumSubstitutions else { return nil }
         }
 
         // Nothing changed: say so, rather than handing back an identical string

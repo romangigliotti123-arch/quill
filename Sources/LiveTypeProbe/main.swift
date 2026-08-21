@@ -175,6 +175,15 @@ func heartbeat() {
 // MARK: - Run
 
 let args = CommandLine.arguments
+if let i = args.firstIndex(of: "--alternatives"), i + 1 < args.count {
+    let target = URL(fileURLWithPath: args[i + 1])
+    let finished = DispatchSemaphore(value: 0)
+    Task { await AlternativesProbe.run(url: target); finished.signal() }
+    while finished.wait(timeout: .now() + 0.01) == .timedOut {
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    exit(0)
+}
 if args.contains("--demo") {
     FullPathDemo.run()
     exit(0)
