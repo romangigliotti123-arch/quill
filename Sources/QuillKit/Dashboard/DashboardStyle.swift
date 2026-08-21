@@ -66,7 +66,10 @@ public enum DashboardMetrics {
     public static let navRowGap: CGFloat = 4
 
     public static let contentPaddingX: CGFloat = 46
-    public static let contentPaddingY: CGFloat = 40
+    /// More room above the title than below it. An editorial page opens with air
+    /// and then gets on with it; padding the top and the bottom equally is what
+    /// makes a screen look like a form.
+    public static let contentPaddingY: CGFloat = 34
 
     /// The content area: everything right of the sidebar, below the titlebar,
     /// out to the window's edges. The titlebar is transparent and full-size, so
@@ -104,7 +107,19 @@ public enum DashboardType {
     // System Settings sets a page title at 15-17pt — and reserve size for data,
     // not for headings. Everything below is a step on one 4pt-ish rhythm, and
     // there is exactly one monospaced face, used only where digits must align.
-    public static var display: NSFont { .systemFont(ofSize: 20, weight: .semibold) }
+    /// Section titles. 28, not 20.
+    ///
+    /// The note below is right that a big title over empty space is a landing
+    /// page wearing a window frame, and that is why this was cut to 20 once. But
+    /// Roman's reference is Music and Podcasts, not System Settings, and those
+    /// set their headings around here. The difference between Music and a landing
+    /// page is not the size of the title, it is what is underneath it: Music
+    /// spends the space on a heading and then puts DENSE content directly below,
+    /// where a landing page follows a big title with more air. So the title grows
+    /// and the content stays as tight as it was.
+    public static var display: NSFont { .systemFont(ofSize: 28, weight: .bold) }
+    /// A heading inside a page, one step under `display`.
+    public static var section: NSFont { .systemFont(ofSize: 17, weight: .semibold) }
     public static var title: NSFont { .systemFont(ofSize: 15, weight: .semibold) }
     public static var headline: NSFont { .systemFont(ofSize: 13, weight: .semibold) }
     public static var body: NSFont { .systemFont(ofSize: 13, weight: .regular) }
@@ -318,8 +333,12 @@ public struct DashboardStyle {
 
         // Transparent: the material behind is the panel now.
         panel: .clear,
-        card: w(0, 0.035),
-        cardAlt: w(0, 0.018),
+        // Barely there. In Music a list is not a card sitting on a page — it is
+        // the page, ruled by hairlines. Cards were what made every screen read as
+        // a dashboard, so the container recedes almost to nothing and the
+        // separators do the work of grouping.
+        card: w(0, 0.020),
+        cardAlt: .clear,
         raised: w(1, 0.75),
         raisedTop: .clear,
 
@@ -364,8 +383,8 @@ public struct DashboardStyle {
         windowEdge: w(1, 0.10),
 
         panel: .clear,
-        card: w(1, 0.055),
-        cardAlt: w(1, 0.028),
+        card: w(1, 0.030),
+        cardAlt: .clear,
         raised: w(1, 0.11),
         raisedTop: .clear,
 
