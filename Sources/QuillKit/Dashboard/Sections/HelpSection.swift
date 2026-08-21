@@ -20,7 +20,7 @@ public final class HelpSectionView: NSView {
 
     private let scroll = NSScrollView()
     private let content = HelpFlippedView()
-    private let header = NSView()
+    private var header: DashboardSectionHeader!
     private var summary: NSTextField?
     private var groups: [NSView] = []
 
@@ -58,16 +58,8 @@ public final class HelpSectionView: NSView {
         scroll.documentView = content
         addSubview(scroll)
 
-        let title = DashboardType.label("Help", font: DashboardType.display, color: style.ink)
-        title.translatesAutoresizingMaskIntoConstraints = false
-        header.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(title)
+        header = DashboardSectionHeader(title: "Help", style: style)
         content.addSubview(header)
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-            title.topAnchor.constraint(equalTo: header.topAnchor),
-            title.bottomAnchor.constraint(equalTo: header.bottomAnchor),
-        ])
 
         rebuildGroups()
     }
@@ -110,8 +102,13 @@ public final class HelpSectionView: NSView {
             // because "Secure Input is on" without "quit the terminal that turned
             // it on" is a diagnosis with no treatment.
             let text = [check.detail, check.remedy].compactMap { $0 }.joined(separator: " ")
+            // Uncapped. A line cap here is a truncation waiting for a narrower
+            // column, and this is the screen whose entire job is telling you what
+            // to do about a failure — "remove Quill from the" is not advice. The
+            // group measures its rows, so letting them wrap costs nothing but
+            // height, and height is what this page has spare.
             let detail = DashboardType.label(text, font: DashboardType.caption,
-                                             color: style.inkTertiary, lines: 2)
+                                             color: style.inkTertiary, lines: 0)
             return .init(label: check.title, detail: detail, control: control)
         })
         content.addSubview(statusGroup)
@@ -137,17 +134,17 @@ public final class HelpSectionView: NSView {
             .init(label: "The key does nothing, and there is no error",
                   detail: DashboardType.label(
                     "Almost always Secure Input, or Accessibility granted to an older build. The grant is tied to the code signature, so a rebuild leaves a dead entry behind — remove Quill from the list and add it again.",
-                    font: DashboardType.caption, color: style.inkTertiary, lines: 3),
+                    font: DashboardType.caption, color: style.inkTertiary, lines: 0),
                   control: NSView()),
             .init(label: "Text lands in the wrong app",
                   detail: DashboardType.label(
                     "Quill types into whatever had focus when the key went down. If focus moves mid-sentence it stops rather than typing the rest somewhere else.",
-                    font: DashboardType.caption, color: style.inkTertiary, lines: 2),
+                    font: DashboardType.caption, color: style.inkTertiary, lines: 0),
                   control: NSView()),
             .init(label: "It heard the room instead of your headset",
                   detail: DashboardType.label(
                     "Settings ▸ Input picks the microphone. A device that has been unplugged falls back to the system default, and the transcript records which one was actually used.",
-                    font: DashboardType.caption, color: style.inkTertiary, lines: 3),
+                    font: DashboardType.caption, color: style.inkTertiary, lines: 0),
                   control: NSView()),
         ]
         let known = SettingsGroup(title: "When something is wrong", style: style, rows: knownRows)
@@ -179,21 +176,30 @@ public final class HelpSectionView: NSView {
         super.layout()
         scroll.frame = bounds
         let x = DashboardMetrics.contentPaddingX
-        let column = min(max(0, bounds.width - x * 2), 620)
+        let width = max(0, bounds.width - x * 2)
 
-        header.frame = NSRect(x: x, y: DashboardMetrics.contentPaddingY, width: column, height: 26)
-        var y = header.frame.maxY + DashboardSpace.sm
+        header.frame = NSRect(x: x, y: DashboardMetrics.contentPaddingY,
+                              width: width, height: header.height)
+        var top = DashboardMetrics.contentPaddingY + header.height + DashboardSpace.xs
         if let summary {
-            let height = DashboardType.size(summary, width: column).height
-            summary.frame = NSRect(x: x, y: y, width: column, height: height)
-            y += height + DashboardSpace.lg
+            let height = DashboardType.size(summary, width: width).height
+            summary.frame = NSRect(x: x, y: top, width: width, height: height)
+            top += height + DashboardSpace.lg
+        } else {
+            top += DashboardSpace.lg - DashboardSpace.xs
         }
-        for group in groups {
-            guard let group = group as? SettingsGroup else { continue }
-            let height = group.fittedHeight(width: column)
-            group.frame = NSRect(x: x, y: y, width: column, height: height)
-            y += height + DashboardSpace.lg
+
+        // Same two-column packing as Settings, for the same reason: a 620pt
+        // column of health checks pinned left leaves most of a 1350pt window
+        // empty, and these two screens have to look like each other.
+        let blocks = groups.compactMap { $0 as? SettingsGroup }
+        let (places, used) = DashboardColumns.pack(blocks.map { group in
+            { group.fittedHeight(width: $0) }
+        }, width: width, originX: x, originY: top)
+        for (group, place) in zip(blocks, places) {
+            group.frame = NSRect(x: place.x, y: place.y, width: place.width, height: place.height)
         }
+        let y = top + used
         content.frame = NSRect(x: 0, y: 0, width: bounds.width,
                                height: max(bounds.height, y + DashboardSpace.md))
     }

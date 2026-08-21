@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import QuillKit
@@ -116,6 +117,12 @@ private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         screen = String(screen.dropLast(times))
         actions.append("backspace(\(times))")
+        return true
+    }
+
+    @discardableResult func chord(key: CGKeyCode, flags: CGEventFlags) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        actions.append("chord(\(key))")
         return true
     }
 }

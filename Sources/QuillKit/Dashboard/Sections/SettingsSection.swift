@@ -22,7 +22,7 @@ public final class SettingsSectionView: NSView {
     /// list short.
     private let scroll = NSScrollView()
     private let content = SettingsFlippedView()
-    private let header = NSView()
+    private var header: DashboardSectionHeader!
     private var groups: [SettingsGroup] = []
     private var holdRecorder: KeyRecorderControl?
     private var pushRecorder: KeyRecorderControl?
@@ -57,16 +57,11 @@ public final class SettingsSectionView: NSView {
         scroll.documentView = content
         addSubview(scroll)
 
-        let title = DashboardType.label("Settings", font: DashboardType.display, color: style.ink)
-        title.translatesAutoresizingMaskIntoConstraints = false
-        header.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(title)
+        // The shared header, like every other section. This built its own out of
+        // a bare NSView and a constrained label, which is how the title ended up
+        // in a different place here than on the screen next to it.
+        header = DashboardSectionHeader(title: "Settings", style: style)
         content.addSubview(header)
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-            title.topAnchor.constraint(equalTo: header.topAnchor),
-            title.bottomAnchor.constraint(equalTo: header.bottomAnchor),
-        ])
 
         groups = [dictationGroup(), inputGroup(), permissionsGroup(), dataGroup()]
         groups.forEach(content.addSubview)
@@ -115,7 +110,8 @@ public final class SettingsSectionView: NSView {
         }
         pushRecorder = push
 
-        let note = DashboardType.label("", font: DashboardType.caption, color: style.inkTertiary)
+        let note = DashboardType.label("", font: DashboardType.caption, color: style.inkTertiary,
+                                       lines: 2, lineHeight: 16)
         pushNote = note
 
         let live = DashboardSwitch(isOn: settings.liveText, style: style)
@@ -136,16 +132,20 @@ public final class SettingsSectionView: NSView {
 
         let numbersNote = DashboardType.label(settings.numberStyle.detail,
                                               font: DashboardType.caption,
-                                              color: style.inkTertiary)
+                                              color: style.inkTertiary, lines: 2, lineHeight: 16)
         numberNote = numbersNote
 
         let context = DashboardSwitch(isOn: settings.contextRecovery, style: style)
         context.onToggle = { [weak self] on in self?.settings.setContextRecovery(on) }
+        // Two lines. The comment that used to sit here said one, "because the row
+        // truncates rather than wraps" — but `SettingsGroup` measures its detail
+        // with `DashboardType.size(detail, width:)` and lays it out at that height,
+        // so it has wrapped for some time. The single-line cap only started
+        // costing anything when the column narrowed to make room for a second one,
+        // and this sentence lost its last three words to an ellipsis.
         let contextNote = DashboardType.label(
-            // One line, because the row truncates rather than wraps and a
-            // sentence cut off mid-word is worse than a shorter one.
             "Fixes “flour” heard as “flower”, and endings lost when you talk fast.",
-            font: DashboardType.caption, color: style.inkTertiary)
+            font: DashboardType.caption, color: style.inkTertiary, lines: 2, lineHeight: 16)
 
         return SettingsGroup(title: "Dictation", style: style, rows: [
             .init(label: "Hold to talk", detail: nil, control: hold),
@@ -269,9 +269,18 @@ public final class SettingsSectionView: NSView {
         } else {
             text = "Tap once to start, once to stop."
         }
+        // Rebuilt rather than recoloured, so it keeps the paragraph style that
+        // lets it wrap. Assigning a plain attributed string here would silently
+        // drop the two-line allowance the label was created with.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = 16
+        paragraph.maximumLineHeight = 16
+        paragraph.lineBreakMode = .byWordWrapping
         pushNote.attributedStringValue = NSAttributedString(
             string: text,
-            attributes: [.font: DashboardType.caption, .foregroundColor: style.inkTertiary])
+            attributes: [.font: DashboardType.caption,
+                         .foregroundColor: style.inkTertiary,
+                         .paragraphStyle: paragraph])
         holdRecorder?.setBinding(settings.hold)
         pushRecorder?.setBinding(settings.toggle)
         relayout()
@@ -294,19 +303,22 @@ public final class SettingsSectionView: NSView {
         // The scroller is an overlay, so it costs no width — but leave the same
         // gutter on the right anyway, or a group's trailing edge sits under it.
         let width = max(0, bounds.width - x * 2)
-        // Settings rows read badly at full width: the label and its control end
-        // up a hand's width apart. System Settings caps its column too.
-        let column = min(width, 620)
 
         header.frame = NSRect(x: x, y: DashboardMetrics.contentPaddingY,
-                              width: column, height: 26)
+                              width: width, height: header.height)
 
-        var y = header.frame.maxY + DashboardSpace.lg
-        for group in groups {
-            let height = group.fittedHeight(width: column)
-            group.frame = NSRect(x: x, y: y, width: column, height: height)
-            y += height + DashboardSpace.lg
+        // Two columns when there is room for two readable ones. The row measure
+        // stays capped — a label and its control a hand's width apart is genuinely
+        // worse to read — and the page gets a second column instead of four
+        // hundred and fifty points of empty window.
+        let top = DashboardSectionHeader.contentTop(for: header)
+        let (places, used) = DashboardColumns.pack(groups.map { group in
+            { group.fittedHeight(width: $0) }
+        }, width: width, originX: x, originY: top)
+        for (group, place) in zip(groups, places) {
+            group.frame = NSRect(x: place.x, y: place.y, width: place.width, height: place.height)
         }
+        let y = top + used
 
         // The document is as tall as its contents or the viewport, whichever is
         // more — shorter than the viewport and the whole thing sticks to the

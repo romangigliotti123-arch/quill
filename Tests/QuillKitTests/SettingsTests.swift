@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import QuillKit
@@ -148,6 +149,7 @@ private func temporarySettingsURL() -> URL {
 final class SilentKeystrokes: KeystrokeEmitting {
     func type(_ text: String) -> Bool { true }
     func backspace(times: Int) -> Bool { true }
+    func chord(key: CGKeyCode, flags: CGEventFlags) -> Bool { true }
 }
 
 /// Settings isolated to this test, with live text off so the assertions below

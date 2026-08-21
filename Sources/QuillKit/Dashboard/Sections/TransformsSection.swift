@@ -22,10 +22,9 @@ public final class TransformsSectionView: NSView {
 
     private let scroll = NSScrollView()
     private let listDocument = TransformsFlippedView()
-    private let header = NSView()
-    private let listWell: DashboardCardView
-    private let detail: DashboardCardView
-    private var detailBody: NSView?
+    private var header: DashboardSectionHeader!
+    private let listRule: DashboardRule
+    private var hero: TransformDetailView?
     private var rows: [TransformRowView] = []
 
     public override var isFlipped: Bool { true }
@@ -39,8 +38,7 @@ public final class TransformsSectionView: NSView {
         self.store = store
         self.transforms = store.ordered
         self.selected = transforms.first
-        listWell = DashboardCardView(style: style, elevation: .sunken, radius: DashboardRadius.card)
-        detail = DashboardCardView(style: style, elevation: .sunken, radius: DashboardRadius.card)
+        listRule = DashboardRule(color: style.hairline)
         super.init(frame: .zero)
         wantsLayer = true
         build()
@@ -52,29 +50,19 @@ public final class TransformsSectionView: NSView {
     // MARK: - Build
 
     private func build() {
-        let title = DashboardType.label("Transforms", font: DashboardType.display, color: style.ink)
-        title.translatesAutoresizingMaskIntoConstraints = false
-        header.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(title)
-        addSubview(header)
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-            title.topAnchor.constraint(equalTo: header.topAnchor),
-            title.bottomAnchor.constraint(equalTo: header.bottomAnchor),
-        ])
-
         // How many of them survive with no network. The one number on this screen
         // worth putting in the header, because it is the claim Flow cannot make.
+        //
+        // It used to be constrained to the title's trailing edge and its baseline,
+        // which put it halfway across the window on a line of its own, aligned to
+        // nothing — the shared header carries it as a meta line now, in the same
+        // place every other section puts one.
         let offlineCount = transforms.filter(\.worksOffline).count
-        let counter = DashboardType.label(
-            "\(transforms.count) transforms · \(offlineCount) work offline",
-            font: DashboardType.caption, color: style.inkTertiary)
-        counter.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(counter)
-        NSLayoutConstraint.activate([
-            counter.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: DashboardSpace.sm),
-            counter.lastBaselineAnchor.constraint(equalTo: title.lastBaselineAnchor),
-        ])
+        header = DashboardSectionHeader(
+            title: "Transforms",
+            meta: "\(transforms.count) transforms  \u{00B7}  \(offlineCount) work offline",
+            style: style)
+        addSubview(header)
 
         scroll.drawsBackground = false
         scroll.backgroundColor = .clear
@@ -86,9 +74,8 @@ public final class TransformsSectionView: NSView {
         scroll.contentView.drawsBackground = false
         scroll.documentView = listDocument
 
-        addSubview(listWell)
-        listWell.addSubview(scroll)
-        addSubview(detail)
+        addSubview(listRule)
+        addSubview(scroll)
 
         rebuildList()
         rebuildDetail()
@@ -121,20 +108,31 @@ public final class TransformsSectionView: NSView {
         needsLayout = true
     }
 
+    /// Cross-fade the open transform, the same way Dictation swaps its record.
     private func rebuildDetail() {
-        detailBody?.removeFromSuperview()
+        let outgoing = hero
+        hero = nil
         guard let transform = selected else {
-            let empty = DashboardType.label("Nothing selected", font: DashboardType.callout,
-                                            color: style.inkTertiary, alignment: .center)
-            detail.addSubview(empty)
-            detailBody = empty
+            outgoing?.removeFromSuperview()
             needsLayout = true
             return
         }
         let body = TransformDetailView(transform: transform, style: style)
-        detail.addSubview(body)
-        detailBody = body
+        addSubview(body)
+        hero = body
         needsLayout = true
+        layoutSubtreeIfNeeded()
+        guard !DashboardMotion.isReduced, outgoing != nil else {
+            outgoing?.removeFromSuperview()
+            return
+        }
+        body.alphaValue = 0
+        DashboardMotion.spring(DashboardMotion.selectSpring) { _ in
+            body.animator().alphaValue = 1
+            outgoing?.animator().alphaValue = 0
+        } completion: {
+            outgoing?.removeFromSuperview()
+        }
     }
 
     // MARK: - Layout
@@ -146,31 +144,36 @@ public final class TransformsSectionView: NSView {
         let width = bounds.width - padX * 2
         guard width > 0 else { return }
 
-        // Height from the type, not a constant. A 26pt box around a 28pt face
-        // crops the leading and lifts the title above every other section's.
-        let headerHeight = ceil(DashboardType.display.ascender - DashboardType.display.descender)
-        header.frame = NSRect(x: padX, y: padY, width: width, height: headerHeight)
-        let top = padY + headerHeight + DashboardSpace.lg
-        let bottom = bounds.height - padY
-        let height = max(120, bottom - top)
+        header.frame = NSRect(x: padX, y: padY, width: width, height: header.height)
+        var y = DashboardSectionHeader.contentTop(for: header)
 
-        // The list keeps a workable width and the detail takes the rest, with a
-        // floor under the list so a narrow window truncates names rather than
-        // reducing the column to a strip of initials.
-        let listWidth = max(240, min(340, (width - DashboardSpace.md) * 0.36))
-        listWell.frame = NSRect(x: padX, y: top, width: listWidth, height: height)
-        scroll.frame = listWell.bounds
-        detail.frame = NSRect(x: padX + listWidth + DashboardSpace.md, y: top,
-                              width: width - listWidth - DashboardSpace.md, height: height)
-        detailBody?.frame = detail.bounds
-
-        var y: CGFloat = 0
-        for row in rows {
-            let h = row.preferredHeight(width: listWidth)
-            row.frame = NSRect(x: 0, y: y, width: listWidth, height: h)
-            y += h
+        // The same shape as Dictation, and for the same reason. This was a 340pt
+        // list beside a half-window card: eight rows in a well tall enough for
+        // eighteen, next to a card holding four short paragraphs in seven hundred
+        // points of height. Both halves were mostly empty at once.
+        //
+        // A transform list has one axis, so it is a column: the open transform is
+        // a hero sized to what is in it, and the list underneath takes whatever
+        // height is left and can never leave a hole.
+        if let hero {
+            let height = hero.fittingHeight(width: width)
+            hero.frame = NSRect(x: padX, y: y, width: width, height: height)
+            y += height + DashboardSpace.xl
         }
-        listDocument.frame = NSRect(x: 0, y: 0, width: listWidth, height: max(y, listWell.bounds.height))
+
+        listRule.frame = NSRect(x: padX, y: y, width: width, height: 1)
+        y += 1
+
+        let listHeight = max(0, bounds.height - y - padY)
+        scroll.frame = NSRect(x: padX, y: y, width: width, height: listHeight)
+
+        var rowY: CGFloat = 0
+        for row in rows {
+            let h = row.preferredHeight(width: width)
+            row.frame = NSRect(x: 0, y: rowY, width: width, height: h)
+            rowY += h
+        }
+        listDocument.frame = NSRect(x: 0, y: 0, width: width, height: rowY + DashboardSpace.md)
     }
 }
 
@@ -199,7 +202,15 @@ final class TransformRowView: NSView {
             hover.animate(to: isHovered ? 1 : 0)
         }
     }
+    private var isPressed = false {
+        didSet {
+            guard isPressed != oldValue else { return }
+            press.animate(to: isPressed ? 1 : 0,
+                          duration: isPressed ? DashboardMotion.press : DashboardMotion.quick)
+        }
+    }
     private lazy var hover = DashboardTween(view: self)
+    private lazy var press = DashboardTween(view: self)
 
     override var isFlipped: Bool { true }
 
@@ -265,18 +276,33 @@ final class TransformRowView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        // The same treatment a dictation row gets, and that is the point: two
+        // full-width lists in one app drew their selection two different ways.
+        //
+        // This used `raisedSurface`, which strokes a hairline around the fill —
+        // and `style.raised` in light mode is 75% white on a white page, so the
+        // fill vanished and only the stroke survived. The selected row read as an
+        // outlined BOX rather than a highlighted row, in light mode only.
+        let body = bounds.insetBy(dx: 0, dy: 1)
         if isSelected {
-            let pill = NSRect(x: 6, y: 3, width: bounds.width - 12, height: bounds.height - 6)
-            DashboardDraw.raisedSurface(pill, radius: DashboardRadius.row,
-                                        fillColor: style.raised, topColor: style.raisedTop,
-                                        style: style, shadow: style.shadowRaised, flipped: true)
+            DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.raised)
+            NSGraphicsContext.saveGraphicsState()
+            DashboardDraw.path(body, DashboardRadius.row).addClip()
+            style.accent.setFill()
+            NSRect(x: body.minX, y: body.minY, width: 2.5, height: body.height).fill()
+            NSGraphicsContext.restoreGraphicsState()
         } else if hover.value > 0.001 {
-            DashboardDraw.fill(NSRect(x: 6, y: 3, width: bounds.width - 12, height: bounds.height - 6),
-                               radius: DashboardRadius.row, color: style.hover.faded(hover.value))
+            DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.hover.faded(hover.value))
         }
-        guard !isSelected, showsSeparator, hover.value < 1 else { return }
-        style.hairline.faded(1 - hover.value).setFill()
-        NSRect(x: 14, y: bounds.height - 1, width: bounds.width - 28, height: 1).fill()
+        if press.value > 0.001 {
+            DashboardDraw.fill(body, radius: DashboardRadius.row,
+                               color: NSColor(white: style.isDark ? 1 : 0, alpha: 0.07 * press.value))
+        }
+        // No separator between rows. Roman asked for that twice about the
+        // dictation list, and the argument is the same here: each row is two
+        // lines with its own hierarchy, so the vertical rhythm already separates
+        // them and a rule between every pair turns a list into a table.
+        _ = showsSeparator
     }
 
     override func updateTrackingAreas() {
@@ -293,9 +319,14 @@ final class TransformRowView: NSView {
     }
     override func mouseExited(with event: NSEvent) {
         isHovered = false
+        isPressed = false
         NSCursor.arrow.set()
     }
+    override func mouseDown(with event: NSEvent) {
+        isPressed = !toggle.frame.contains(convert(event.locationInWindow, from: nil))
+    }
     override func mouseUp(with event: NSEvent) {
+        isPressed = false
         let point = convert(event.locationInWindow, from: nil)
         // The switch is a control inside a row that is itself a control. Let it
         // have its own clicks, or turning a transform off also selects it.
@@ -333,66 +364,93 @@ final class TransformDetailView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func build() {
-        let title = DashboardType.label(transform.name, font: DashboardType.title, color: style.ink)
-        add(title)
+        add(DashboardType.label(transform.name, font: DashboardType.title, color: style.ink))
 
-        if transform.isBuiltIn {
-            add(DashboardType.label("Built in", font: DashboardType.caption, color: style.inkTertiary))
-        }
-
-        heading("What it does")
-        add(DashboardType.label(transform.instruction, font: DashboardType.callout,
-                                color: style.inkSecondary, lines: 6))
+        // The first sentence of the instruction, not the whole thing.
+        //
+        // `instruction` is the system prompt handed to the model — an order,
+        // written for a model, several sentences long: "Rewrite the text as a
+        // bullet list. One point per line, each line starting with '- '. Keep
+        // every fact and every name; do not add, merge or invent points. No
+        // heading, no preamble." The first sentence is the description; the rest
+        // is prompt engineering on a screen a person reads to decide whether to
+        // use a feature.
+        add(DashboardType.label(TransformDetailView.firstSentence(of: transform.instruction),
+                                font: DashboardType.body, color: style.inkSecondary, lines: 2,
+                                lineHeight: 20))
 
         heading("How to run it")
-        if let hotkey = transform.hotkey {
-            add(DashboardType.label("Press \(hotkey.displayName).", font: DashboardType.callout,
-                                    color: style.inkSecondary))
-        }
+        var invocations: [String] = []
+        if let hotkey = transform.hotkey { invocations.append("Press \(hotkey.displayName)") }
         if transform.triggers.isEmpty {
-            add(DashboardType.label("No spoken trigger.", font: DashboardType.callout,
-                                    color: style.inkTertiary))
+            invocations.append("no spoken trigger yet")
         } else {
             // Every phrase, not a sample. These are matched exactly — that is what
             // makes them safe to say mid-sentence — so a user who only sees three
-            // of seven will believe the other four do not work.
-            let list = transform.triggers.map { "“\($0)”" }.joined(separator: "\n")
-            add(DashboardType.label(list, font: DashboardType.callout,
-                                    color: style.inkSecondary, lines: transform.triggers.count))
+            // of seven will believe the other four do not work. Wrapped as one
+            // paragraph rather than stacked one per line: seven lines of quoted
+            // fragments is a column of noise, and the same seven read fine as a
+            // sentence.
+            invocations.append(transform.triggers.map { "\u{201C}\($0)\u{201D}" }
+                                .joined(separator: "   \u{00B7}   "))
         }
+        add(DashboardType.label(invocations.joined(separator: "   \u{00B7}   "),
+                                font: DashboardType.callout, color: style.inkSecondary,
+                                lines: 3, lineHeight: 19))
 
         heading("With no network")
         if transform.worksOffline {
-            let recipe = transform.offline.title
             let limit = transform.offline.limitation
             add(DashboardType.label(
-                limit == nil ? "\(recipe). No approximation — this is the whole job."
-                             : "\(recipe) — \(limit!). Less than the full transform, and Quill says so when it runs.",
-                font: DashboardType.callout, color: style.inkSecondary, lines: 3))
+                limit == nil ? "\(transform.offline.title). No approximation — this is the whole job."
+                             : "\(transform.offline.title) — \(limit!). Quill says so when it runs.",
+                font: DashboardType.callout, color: style.inkSecondary, lines: 3, lineHeight: 19))
         } else {
             // Named plainly. A transform that silently does nothing offline is
             // worse than one that refuses, and this is the screen where the user
             // finds out which they have.
             add(DashboardType.label(
                 "This one refuses. There is no honest deterministic version of it, so offline it says so rather than returning something close.",
-                font: DashboardType.callout, color: style.inkTertiary, lines: 3))
+                font: DashboardType.callout, color: style.inkTertiary, lines: 3, lineHeight: 19))
         }
 
-        heading("Guards")
-        let guards = [
-            "Reads \(transform.target.title.lowercased()).",
-            transform.preservesVocabulary
-                ? "Every word from your dictionary must survive, checked afterwards rather than asked for in the prompt."
-                : "Vocabulary is not enforced for this one.",
-            "Refused if the result is under \(Int(transform.bounds.minRatio * 100))% or over \(Int(transform.bounds.maxRatio * 100))% of the original length.",
-        ]
-        add(DashboardType.label(guards.joined(separator: "\n"), font: DashboardType.callout,
-                                color: style.inkSecondary, lines: 5))
+        // The "Guards" section is gone, and this is the cut Roman asked for by
+        // name: *"I don't really want any unneeded little bits of information or
+        // little bits of text. Only the things that the average user is actually
+        // going to use."*
+        //
+        // It printed three lines of engineering: that the dictionary is checked
+        // after the round trip rather than asked for in the prompt, and that a
+        // result is refused under 60% or over 160% of the original length. Those
+        // are real and they still run — they are just implementation, and nobody
+        // reading "what does Shorter do" has a decision to make about a ratio.
+        //
+        // What survives is the one line that changes what the user does: which
+        // text the transform will act on.
+        let usage = transform.useCount > 0
+            ? "Reads \(transform.target.title.lowercased())  \u{00B7}  used \(transform.useCount) time\(transform.useCount == 1 ? "" : "s")"
+            : "Reads \(transform.target.title.lowercased())"
+        add(DashboardType.label(usage, font: DashboardType.caption, color: style.inkQuaternary))
+    }
 
-        if transform.useCount > 0 {
-            add(DashboardType.label("Used \(transform.useCount) time\(transform.useCount == 1 ? "" : "s")",
-                                    font: DashboardType.caption, color: style.inkQuaternary))
+    /// Up to the first full stop, keeping the stop. Falls back to the whole
+    /// string when there is no sentence break to find.
+    static func firstSentence(of text: String) -> String {
+        guard let stop = text.firstIndex(of: ".") else { return text }
+        return String(text[...stop])
+    }
+
+    /// The height this transform wants, so the page can size the hero to it
+    /// rather than stretching it to fill a half-window card.
+    func fittingHeight(width: CGFloat) -> CGFloat {
+        let pad = DashboardSpace.lg
+        let inner = max(40, width - pad * 2)
+        var height = pad
+        for (index, block) in blocks.enumerated() {
+            if block.isHeading, index > 0 { height += DashboardSpace.md }
+            height += DashboardType.size(block.view, width: inner).height + DashboardSpace.xs
         }
+        return ceil(height + pad - DashboardSpace.xs)
     }
 
     private func heading(_ text: String) {
@@ -419,5 +477,13 @@ final class TransformDetailView: NSView {
             block.view.frame = NSRect(x: pad, y: y, width: width, height: height)
             y += height + DashboardSpace.xs
         }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // A tint of the page rather than a slab on it, the same as the Dictation
+        // record. This used to be a subview of a `DashboardCardView`, which drew
+        // the surface for it; standing on the page it has to draw its own.
+        DashboardDraw.fill(bounds, radius: DashboardRadius.card, color: style.card)
+        DashboardDraw.stroke(bounds, radius: DashboardRadius.card, color: style.hairline)
     }
 }

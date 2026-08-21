@@ -8,6 +8,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Held for the app's lifetime: the window is closed, not destroyed, so
     /// reopening it keeps the selected section and the frame the user left it at.
     private var dashboard: DashboardWindowController?
+    /// Also held for the app's lifetime: it owns a global mouse monitor and a
+    /// workspace observer, and letting it go would silently stop ⌥⌫ noticing
+    /// that the caret has moved.
+    private var undo: InsertionUndo?
 
     public override init() { super.init() }
 
@@ -31,8 +35,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // One store, shared: the event tap decides whether to swallow ⌥⌫ from it,
+        // and the coordinator is what fills it in. Two instances would mean a
+        // chord that swallows against a record nobody wrote.
+        let undo = InsertionUndo()
+        undo.beginWatching()
+        self.undo = undo
+
         let coordinator = DictationCoordinator(
-            hotkey: EventTapHotkeyEngine(),
+            hotkey: EventTapHotkeyEngine(undo: undo),
             transcriber: SpeechAnalyzerTranscriber(),
             inserter: TextInserter(),
             overlay: overlay,
@@ -41,7 +52,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // self-correction. With no key and no network it degrades to the
             // deterministic repair, so this needs no setting behind it — there is
             // no configuration in which it is worse.
-            cleaner: NIMCleaner()
+            cleaner: NIMCleaner(),
+            undo: undo
         )
         self.coordinator = coordinator
         coordinator.start()

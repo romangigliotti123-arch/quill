@@ -24,7 +24,7 @@ public final class DictionarySectionView: NSView {
     private let style: DashboardStyle
     private let entries: [DictionaryEntry]
 
-    private let eyebrow: NSTextField
+    private var header: DashboardSectionHeader!
     private let heading: NSTextField
     private let blurb: NSTextField
     private let addButton: DashboardButton
@@ -70,9 +70,7 @@ public final class DictionarySectionView: NSView {
         }
         self.entries = sorted
 
-        eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
-                                      color: style.inkTertiary)
-        heading = DashboardType.label("Dictionary", font: DashboardType.display, color: style.ink)
+        heading = DashboardType.label("", font: DashboardType.display, color: style.ink)
         blurb = DashboardType.label(
             "",
             font: DashboardType.body, color: style.inkSecondary, lines: 2, lineHeight: 20)
@@ -87,11 +85,12 @@ public final class DictionarySectionView: NSView {
 
         super.init(frame: .zero)
 
-        addSubview(eyebrow)
+        header = DashboardSectionHeader(title: "Dictionary",
+                                        trailing: [importButton, addButton],
+                                        style: style)
+        addSubview(header)
         addSubview(heading)
         addSubview(blurb)
-        addSubview(importButton)
-        addSubview(addButton)
         if isSample {
             let chip = DashboardChip(text: "Sample data", tone: .outline, style: style)
             addSubview(chip)
@@ -213,24 +212,13 @@ public final class DictionarySectionView: NSView {
         let padY = DashboardMetrics.contentPaddingY
         let width = bounds.width - padX * 2
 
-        var y = padY
-        eyebrow.frame = .zero
-
-        let headingSize = heading.fittingSize
-        heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 260), height: headingSize.height)
-        y += headingSize.height + 8
-
-        let blurbWidth = min(width - 300, 660)
-        let blurbHeight = blurb.stringValue.isEmpty ? 0 : DashboardType.size(blurb, width: blurbWidth).height
-        blurb.frame = NSRect(x: padX, y: y, width: blurbWidth, height: blurbHeight)
-        y += blurbHeight
-
-        let addWidth = addButton.intrinsicWidth
-        addButton.frame = NSRect(x: bounds.width - padX - addWidth,
-                                 y: padY, width: addWidth, height: 36)
-        let importWidth = importButton.intrinsicWidth
-        importButton.frame = NSRect(x: addButton.frame.minX - 10 - importWidth,
-                                    y: addButton.frame.minY, width: importWidth, height: 36)
+        // The header places the title and both buttons. This screen used to do it
+        // itself — an empty eyebrow, an empty blurb, and two buttons pinned to padY
+        // at a hardcoded 36 points — which is four separate opinions about where a
+        // heading goes, in one of the two screens that sets the bar for the rest.
+        header.frame = NSRect(x: padX, y: padY, width: width, height: header.height)
+        heading.frame = .zero
+        blurb.frame = .zero
         if let sampleChip {
             let size = sampleChip.fittingSize
             sampleChip.frame = NSRect(x: importButton.frame.minX - 10 - size.width,
@@ -238,7 +226,7 @@ public final class DictionarySectionView: NSView {
                                       width: size.width, height: size.height)
         }
 
-        y += DashboardSpace.lg + DashboardSpace.xxs
+        var y = DashboardSectionHeader.contentTop(for: header) - DashboardSpace.xxs
 
         if let composer {
             let height = composer.height(forWidth: width)
@@ -298,34 +286,43 @@ final class DictionaryListView: NSView {
 
     var onSelect: ((DictionaryEntry) -> Void)?
 
-    private let entries: [DictionaryEntry]
+    /// Everything, unfiltered. `entries` is what the list is currently showing.
+    private let allEntries: [DictionaryEntry]
+    private var entries: [DictionaryEntry]
     private let style: DashboardStyle
     private let maxRepairs: Int
 
+    /// Which of the three filter segments is live, and whether the footer's
+    /// "review unused" is on top of it. Both used to be drawn and neither could
+    /// be operated.
+    private enum Filter: Int { case all, manual, learned }
+    private var filter: Filter = .all
+    private var unusedOnly = false
+    private var sortByName = false
+
     private let segmented: DictionarySegmented
-    private let sortLabel: NSTextField
-    private let sortIcon: DashboardIconView
+    private let sortControl: DictionarySortControl
+    private let footButton: DictionaryFootButton
     private let headTerm: NSTextField
     private let headHeard: NSTextField
     private let headCount: NSTextField
     private let headRule: DashboardRule
     private let footRule: DashboardRule
     private let footLabel: NSTextField
-    private let footAction: NSTextField
     private var rows: [DictionaryTermRow] = []
     private var selected: Int = 0
 
     override var isFlipped: Bool { true }
 
     init(entries: [DictionaryEntry], style: DashboardStyle) {
+        self.allEntries = entries
         self.entries = entries
         self.style = style
         maxRepairs = max(1, entries.map(\.repairs).max() ?? 1)
 
         segmented = DictionarySegmented(titles: ["All", "Added by you", "Learned"], selected: 0, style: style)
-        sortLabel = DashboardType.label("Most repaired", font: DashboardType.caption, color: style.inkTertiary)
-        sortIcon = DashboardIconView(image: DashboardIcon.image("chevron.up.chevron.down", pointSize: 9,
-                                                                weight: .semibold, color: style.inkQuaternary))
+        sortControl = DictionarySortControl(style: style)
+        footButton = DictionaryFootButton(style: style)
         headTerm = DashboardType.label("Term", font: DashboardType.micro, color: style.inkQuaternary)
         headHeard = DashboardType.label("Heard instead", font: DashboardType.micro, color: style.inkQuaternary)
         headCount = DashboardType.label("Repairs", font: DashboardType.micro, color: style.inkQuaternary,
@@ -336,11 +333,6 @@ final class DictionaryListView: NSView {
         // The terms that have never fired sort to the bottom, which means they
         // are the rows nobody scrolls to. Naming them in the footer is what
         // turns "sorted by repairs" from a convenience into an audit.
-        let unused = entries.filter { !$0.hasFired }.count
-        footAction = DashboardType.label(unused > 0 ? "Review \(unused) unused ›" : "Show all",
-                                         font: DashboardType.caption, color: style.inkSecondary,
-                                         alignment: .right)
-
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = DashboardRadius.card
@@ -348,32 +340,90 @@ final class DictionaryListView: NSView {
         layer?.masksToBounds = true
 
         addSubview(segmented)
-        addSubview(sortLabel)
-        addSubview(sortIcon)
+        addSubview(sortControl)
         addSubview(headTerm)
         addSubview(headHeard)
         addSubview(headCount)
         addSubview(headRule)
 
+        addSubview(footRule)
+        addSubview(footLabel)
+        addSubview(footButton)
+        buildRows()
+
+        segmented.onChange = { [weak self] index in
+            guard let self, let next = Filter(rawValue: index) else { return }
+            self.filter = next
+            self.unusedOnly = false
+            self.applyFilter()
+        }
+        sortControl.onClick = { [weak self] in
+            guard let self else { return }
+            self.sortByName.toggle()
+            self.sortControl.setTitle(self.sortByName ? "A \u{2013} Z" : "Most repaired", style: self.style)
+            self.applyFilter()
+        }
+        footButton.onClick = { [weak self] in
+            guard let self else { return }
+            self.unusedOnly.toggle()
+            self.applyFilter()
+        }
+    }
+
+    /// The one place rows come from. Filtering used to be impossible because the
+    /// rows were built once, in `init`, from a list that could never change.
+    private func buildRows() {
+        rows.forEach { $0.removeFromSuperview() }
+        rows = []
         for (index, entry) in entries.enumerated() {
             let row = DictionaryTermRow(entry: entry, maxRepairs: maxRepairs, style: style)
-            row.isSelected = index == 0
+            row.isSelected = index == selected
             row.onClick = { [weak self] in self?.select(index) }
             addSubview(row)
             rows.append(row)
         }
-
-        addSubview(footRule)
-        addSubview(footLabel)
-        addSubview(footAction)
+        footButton.setTitle(unusedOnly ? "Show all" : unusedTitle, style: style)
+        footButton.isHidden = !unusedOnly && unusedCount == 0
     }
+
+    private var unusedCount: Int { allEntries.filter { !$0.hasFired }.count }
+    private var unusedTitle: String { "Review \(unusedCount) unused \u{203A}" }
+
+    private func applyFilter() {
+        var next = allEntries.filter { entry in
+            switch filter {
+            case .all: return true
+            case .manual: return entry.origin == .manual
+            case .learned: return entry.origin == .auto
+            }
+        }
+        if unusedOnly { next = next.filter { !$0.hasFired } }
+        next.sort {
+            sortByName
+                ? $0.term.lowercased() < $1.term.lowercased()
+                : ($0.repairs == $1.repairs ? $0.term.lowercased() < $1.term.lowercased() : $0.repairs > $1.repairs)
+        }
+        entries = next
+        selected = 0
+        buildRows()
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        // The inspector follows the list. A filter that leaves the right-hand
+        // card showing a term the list no longer contains is worse than no
+        // filter at all.
+        if let first = entries.first { onSelect?(first) }
+    }
+
+    /// How many rows survived the current filter. Pinned by a test, because
+    /// "the buttons do something" is exactly the claim that went unchecked.
+    var visibleEntryCount: Int { entries.count }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     private func select(_ index: Int) {
-        guard index != selected, rows.indices.contains(index) else { return }
-        rows[selected].isSelected = false
+        guard index != selected, rows.indices.contains(index), entries.indices.contains(index) else { return }
+        if rows.indices.contains(selected) { rows[selected].isSelected = false }
         selected = index
         rows[index].isSelected = true
         needsLayout = true
@@ -387,18 +437,14 @@ final class DictionaryListView: NSView {
 
         // Filter strip.
         segmented.frame = NSRect(x: inset, y: 15, width: segmented.intrinsicWidth, height: 26)
-        let sortSize = sortLabel.fittingSize
         // The sort control is secondary; the filter tabs are how you navigate. When
         // there is not room for both, the sort goes rather than printing through
         // "Learned".
-        let sortNeeds = sortSize.width + 12 + 5
-        let sortFits = inset + segmented.intrinsicWidth + 16 + sortNeeds <= bounds.width - inset
-        sortIcon.isHidden = !sortFits
-        sortLabel.isHidden = !sortFits
-        sortIcon.frame = NSRect(x: bounds.width - inset - 12, y: 22, width: 12, height: 12)
-        sortLabel.frame = NSRect(x: sortIcon.frame.minX - 5 - sortSize.width,
-                                 y: (28 - sortSize.height / 2).rounded(),
-                                 width: sortSize.width, height: sortSize.height)
+        let sortWidth = sortControl.intrinsicWidth
+        let sortFits = inset + segmented.intrinsicWidth + 16 + sortWidth <= bounds.width - inset
+        sortControl.isHidden = !sortFits
+        sortControl.frame = NSRect(x: bounds.width - inset - sortWidth, y: 15,
+                                   width: sortWidth, height: 26)
 
         // Column headings.
         let headY: CGFloat = 51
@@ -436,17 +482,18 @@ final class DictionaryListView: NSView {
         footRule.frame = NSRect(x: inset, y: footTop, width: bounds.width - inset * 2, height: 1)
         let shown = min(visible, rows.count)
         footLabel.attributedStringValue = NSAttributedString(
-            string: "Showing \(shown) of \(rows.count) · sorted by repairs",
+            string: "Showing \(shown) of \(rows.count) · sorted by \(sortByName ? "name" : "repairs")",
             attributes: [.font: DashboardType.caption, .foregroundColor: style.inkTertiary])
         let footSize = footLabel.fittingSize
-        let actionSize = footAction.fittingSize
+        let actionSize = footButton.isHidden ? .zero : NSSize(width: footButton.intrinsicWidth, height: 24)
         // "Review 6 unused" is a control and keeps its width; the count beside it
         // is prose and gives way. They used to overlap and both became unreadable.
         let roomForCount = max(0, bounds.width - inset * 2 - actionSize.width - 16)
         footLabel.frame = NSRect(x: inset, y: (footTop + (footerHeight - footSize.height) / 2 + 0.5).rounded(),
                                  width: min(footSize.width, roomForCount), height: footSize.height)
-        footAction.frame = NSRect(x: bounds.width - inset - actionSize.width,
-                                  y: footLabel.frame.minY, width: actionSize.width, height: actionSize.height)
+        footButton.frame = NSRect(x: bounds.width - inset - actionSize.width,
+                                  y: (footTop + (footerHeight - actionSize.height) / 2).rounded(),
+                                  width: actionSize.width, height: actionSize.height)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -634,18 +681,40 @@ final class DictionaryTermRow: NSView {
 /// Three-way filter. Hairline capsule, raised pill on the selected segment —
 /// `NSSegmentedControl` brings the system tint and a bezel that belongs to a
 /// different app.
+///
+/// It is also, now, a control. Roman: *"when you click All, Added by you or
+/// Learned, none of those buttons actually work, or even just hovering over
+/// them, nothing happens."* He was exactly right — this view had no tracking
+/// area, no `mouseDown`, and no callback. It was a picture of a segmented
+/// control, drawn well enough that the only way to find out was to click it.
+///
+/// A control that cannot be operated is worse than no control: it costs the user
+/// a click and then makes them wonder what else on the screen is decoration.
 final class DictionarySegmented: NSView {
+
+    var onChange: ((Int) -> Void)?
 
     private let style: DashboardStyle
     private var labels: [NSTextField] = []
+    private var titles: [String] = []
     private var selected: Int
     private var widths: [CGFloat] = []
+    private var hovered: Int?
+    private var pressed: Int?
+
+    /// The pill travels between segments rather than appearing on the new one.
+    /// Same argument as the sidebar's: selection that can only blink on and off
+    /// reads as a redraw, and selection that moves reads as a control.
+    private lazy var slide = DashboardTween(view: self)
+    private var pillFrom: NSRect = .zero
+    private var pillTo: NSRect = .zero
 
     override var isFlipped: Bool { true }
 
     init(titles: [String], selected: Int, style: DashboardStyle) {
         self.style = style
         self.selected = selected
+        self.titles = titles
         super.init(frame: .zero)
         for (index, title) in titles.enumerated() {
             let field = DashboardType.label(title, font: DashboardType.caption,
@@ -655,6 +724,7 @@ final class DictionarySegmented: NSView {
             labels.append(field)
             widths.append(ceil(field.fittingSize.width) + 24)
         }
+        slide.set(1)
     }
 
     @available(*, unavailable)
@@ -662,9 +732,31 @@ final class DictionarySegmented: NSView {
 
     var intrinsicWidth: CGFloat { widths.reduce(6) { $0 + $1 } }
 
-    private func segment(_ index: Int) -> NSRect {
+    var selectedIndex: Int { selected }
+
+    func select(_ index: Int, notify: Bool = true) {
+        guard index != selected, labels.indices.contains(index) else { return }
+        pillFrom = pillRect(selected)
+        selected = index
+        pillTo = pillRect(index)
+        for (i, field) in labels.enumerated() {
+            DashboardType.recolor(field, i == index ? style.ink : style.inkTertiary)
+        }
+        slide.set(0)
+        slide.animate(to: 1, duration: DashboardMotion.standard)
+        needsDisplay = true
+        if notify { onChange?(index) }
+    }
+
+    private func pillRect(_ index: Int) -> NSRect {
         let x = widths.prefix(index).reduce(3) { $0 + $1 }
-        return NSRect(x: x, y: 3, width: widths[index], height: bounds.height - 6)
+        return NSRect(x: x, y: 3, width: widths[index], height: max(0, bounds.height - 6))
+    }
+
+    private func segment(_ index: Int) -> NSRect { pillRect(index) }
+
+    private func index(at point: NSPoint) -> Int? {
+        labels.indices.first { segment($0).insetBy(dx: 0, dy: -3).contains(point) }
     }
 
     override func layout() {
@@ -675,14 +767,69 @@ final class DictionarySegmented: NSView {
             field.frame = NSRect(x: rect.minX, y: (rect.midY - size.height / 2).rounded(),
                                  width: rect.width, height: size.height)
         }
+        // Bounds-dependent, so they cannot be cached from before the first layout.
+        if pillTo == .zero { pillTo = pillRect(selected) }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .mouseMoved,
+                                                 .activeInActiveApp, .inVisibleRect],
+                                       owner: self))
+    }
+
+    private func update(hover point: NSPoint?) {
+        let next = point.flatMap(index(at:))
+        guard next != hovered else { return }
+        hovered = next
+        needsDisplay = true
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.pointingHand.set()
+        update(hover: convert(event.locationInWindow, from: nil))
+    }
+    override func mouseMoved(with event: NSEvent) {
+        update(hover: convert(event.locationInWindow, from: nil))
+    }
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.arrow.set()
+        update(hover: nil)
+        pressed = nil
+    }
+    override func mouseDown(with event: NSEvent) {
+        pressed = index(at: convert(event.locationInWindow, from: nil))
+        needsDisplay = true
+    }
+    override func mouseUp(with event: NSEvent) {
+        let hit = index(at: convert(event.locationInWindow, from: nil))
+        pressed = nil
+        needsDisplay = true
+        if let hit, hit == index(at: convert(event.locationInWindow, from: nil)) { select(hit) }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         DashboardDraw.fill(bounds, radius: DashboardRadius.row, color: style.isDark ? style.cardAlt : style.card)
         DashboardDraw.stroke(bounds, radius: DashboardRadius.row, color: style.hairline)
-        DashboardDraw.raisedSurface(segment(selected), radius: DashboardRadius.chip,
+
+        // An unselected segment lights under the pointer. This is the whole cue
+        // that the strip is clickable at all, and it was the missing half of the
+        // bug: with no hover, a control that does nothing and a control that is
+        // merely slow look identical.
+        if let hovered, hovered != selected {
+            DashboardDraw.fill(segment(hovered).insetBy(dx: 1, dy: 0), radius: DashboardRadius.chip,
+                               color: style.hover.faded(pressed == hovered ? 1 : 0.7))
+        }
+        let pill = pillFrom == .zero ? pillTo : pillFrom.lerp(to: pillTo, slide.value)
+        DashboardDraw.raisedSurface(pill, radius: DashboardRadius.chip,
                                     fillColor: style.raised, topColor: style.raisedTop,
                                     style: style, shadow: style.shadowContact, flipped: true)
+        if pressed == selected {
+            DashboardDraw.fill(pill, radius: DashboardRadius.chip,
+                               color: NSColor(white: style.isDark ? 1 : 0, alpha: 0.07))
+        }
     }
 }
 
@@ -1127,5 +1274,119 @@ final class DictionaryHighlightText: NSView {
             }
         }
         manager.drawGlyphs(forGlyphRange: manager.glyphRange(for: container), at: .zero)
+    }
+}
+
+// MARK: - Small text controls
+
+/// A quiet, drawn text control: a label, an optional trailing glyph, a hover
+/// wash and a press scrim. `DashboardButton` pads for a pill it does not want
+/// here, and an `NSTextField` cannot be clicked at all — which is what "Most
+/// repaired" and "Review 6 unused ›" were before this: two pieces of text
+/// styled as affordances, wired to nothing.
+class DictionaryTextControl: NSView {
+
+    var onClick: (() -> Void)?
+
+    fileprivate var label: NSTextField
+    fileprivate let glyph: DashboardIconView?
+    fileprivate var style: DashboardStyle
+
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hover.animate(to: isHovered ? 1 : 0)
+        }
+    }
+    private var isPressed = false {
+        didSet {
+            guard isPressed != oldValue else { return }
+            press.animate(to: isPressed ? 1 : 0,
+                          duration: isPressed ? DashboardMotion.press : DashboardMotion.quick)
+        }
+    }
+    private lazy var hover = DashboardTween(view: self)
+    private lazy var press = DashboardTween(view: self)
+
+    override var isFlipped: Bool { true }
+
+    init(title: String, symbol: String?, style: DashboardStyle) {
+        self.style = style
+        label = DashboardType.label(title, font: DashboardType.caption, color: style.inkSecondary)
+        glyph = symbol.map {
+            DashboardIconView(image: DashboardIcon.image($0, pointSize: 9, weight: .semibold,
+                                                         color: style.inkQuaternary))
+        }
+        super.init(frame: .zero)
+        addSubview(label)
+        glyph.map(addSubview)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setTitle(_ title: String, style: DashboardStyle) {
+        label.removeFromSuperview()
+        label = DashboardType.label(title, font: DashboardType.caption, color: style.inkSecondary)
+        addSubview(label)
+        needsLayout = true
+        needsDisplay = true
+    }
+
+    var intrinsicWidth: CGFloat {
+        ceil(label.fittingSize.width) + (glyph == nil ? 0 : 14) + DashboardSpace.sm * 2
+    }
+
+    override func layout() {
+        super.layout()
+        let size = label.fittingSize
+        label.frame = NSRect(x: DashboardSpace.sm, y: ((bounds.height - size.height) / 2).rounded(),
+                             width: min(size.width, bounds.width), height: size.height)
+        glyph?.frame = NSRect(x: label.frame.maxX + 3, y: (bounds.height - 12) / 2, width: 12, height: 12)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let lit = max(hover.value, press.value * 0.6)
+        guard lit > 0.001 else { return }
+        DashboardDraw.fill(bounds, radius: DashboardRadius.chip, color: style.hover.faded(lit))
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        NSCursor.pointingHand.set()
+    }
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        isPressed = false
+        NSCursor.arrow.set()
+    }
+    override func mouseDown(with event: NSEvent) { isPressed = true }
+    override func mouseUp(with event: NSEvent) {
+        isPressed = false
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
+    }
+}
+
+/// "Most repaired" / "A – Z". Two orders is the whole control; a menu for two
+/// choices is a menu nobody opens twice.
+final class DictionarySortControl: DictionaryTextControl {
+    init(style: DashboardStyle) {
+        super.init(title: "Most repaired", symbol: "chevron.up.chevron.down", style: style)
+    }
+}
+
+/// "Review N unused ›" / "Show all". The two labels this already carried imply
+/// a toggle; now it is one.
+final class DictionaryFootButton: DictionaryTextControl {
+    init(style: DashboardStyle) {
+        super.init(title: "", symbol: nil, style: style)
     }
 }

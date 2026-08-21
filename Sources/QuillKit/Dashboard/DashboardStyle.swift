@@ -18,6 +18,20 @@ import AppKit
 //     Dynamic `NSColor` would work for `draw(_:)` but not for the layer
 //     properties elsewhere in Quill, and one resolution rule is cheaper to hold
 //     in your head than two.
+//
+//     THE TRAP THAT FOLLOWS FROM THAT, and it has already cost one shipped bug:
+//     several entries below ARE system colours — `.labelColor`, `.separatorColor`,
+//     `.controlAccentColor` — which are dynamic catalog colours, and a dynamic
+//     colour resolves against whatever appearance is current *at the moment it is
+//     asked*. Inside `draw(_:)` that is the view's own appearance and everything
+//     is correct. Anywhere else — an initialiser, a `configure` method, a stored
+//     property — it is the SYSTEM's appearance, which on a Mac in dark mode hands
+//     the light palette a white ink.
+//
+//     `InsightsInlineLegend` did exactly that and drew a white dot on a white card
+//     in light mode, while the bar directly above it used the identical expression
+//     inside `draw(_:)` and was fine. So: derive from `style.ink` and friends AT
+//     DRAW TIME. Do not store the result.
 
 // MARK: - Scales
 

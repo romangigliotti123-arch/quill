@@ -5,58 +5,73 @@ import AppKit
 /// Dictation history: everything Quill has typed for you, and what it heard
 /// first.
 ///
-/// Shape: a searchable list on the left, one open record on the right. Wispr
-/// Flow uses the same screen for a single full-width column of finished
-/// paragraphs, which scans well and answers nothing — you cannot copy a line
-/// without selecting it by hand, cannot re-insert it at all, and cannot see
-/// that "Netlify" was heard as "net lify". Splitting the screen costs list
-/// width that a list of one-line utterances does not need, and buys a place to
-/// put the record's actions, its timings and the raw-vs-inserted diff.
+/// Shape: **one column**. The open record is a hero band across the top of the
+/// page, sized to what is in it; under it, the whole history at full width,
+/// dense, grouped by day. Click a row and the hero changes.
 ///
-/// The list is deliberately two lines per row rather than Flow's wrapped
-/// paragraph: a history you scan for *when* and *how long* wants a fixed row
-/// height, and the full text is one click away in the pane that has room for it.
+/// This replaced a split screen — a 452pt list on the left, an open record in a
+/// card on the right — and the reason is the reason Roman gave for the whole
+/// overhaul. The right-hand card was a fixed half of the window holding a
+/// sentence and a two-line change summary, so two thirds of it was empty on
+/// every record; the left-hand list was 452 points wide, so every dictation
+/// longer than six words truncated. A screen managed to be simultaneously
+/// starved and empty, in the same 1350 points.
+///
+/// The fix is not more tuning of the two columns. It is that a dictation history
+/// has ONE axis — time — and a screen with one axis is a column. Music's library
+/// is the reference and it is the right one: a hero that is as tall as its
+/// content and no taller, then rows down the page at the full width of the
+/// window, grouped by a date heading that is also the divider.
+///
+/// What that buys, concretely: the row text went from ~370 points to ~800, which
+/// is the difference between reading a dictation and reading the first six words
+/// of one; and the hero cannot leave a void, because nothing under it is pinned —
+/// the list takes whatever height is left.
 public final class DictationSectionView: NSView {
 
-    private static let listWidth: CGFloat = 452
-    private static let rowHeight: CGFloat = 56
-    private static let groupHeight: CGFloat = 30
+    /// One line of text with air around it. Music's track rows are in this band
+    /// and they are the densest list Apple ships to consumers.
+    private static let rowHeight: CGFloat = 44
+    private static let groupHeight: CGFloat = 34
+    /// The hero never grows past this. A very long dictation truncates in the
+    /// hero and stays complete in the record itself — a page whose top third is
+    /// a wall of text has stopped being a hero and become a document.
+    private static let heroMaxHeight: CGFloat = 320
+    private static let heroMinHeight: CGFloat = 116
+    private static let searchWidth: CGFloat = 300
+    private static let controlRowHeight: CGFloat = 34
 
     private let style: DashboardStyle
     private let records: [DictationRecord]
 
     private var filtered: [DictationRecord] = []
     private var selectedID: UUID?
+    /// Which record the hero is currently showing, so a reload that changes
+    /// nothing does not restart the cross-fade.
+    private var renderedHeroID: UUID?
     private var query: String = ""
 
-    // Header
-    private let eyebrow: NSTextField
-    private let heading: NSTextField
-    private let blurb: NSTextField
+    private let header: DashboardSectionHeader
     private let action: DashboardButton
     private let secondary: DashboardButton
 
-    // List
-    private let listWell: DashboardCardView
+    // The open record.
+    private var hero: DictationRecordView?
+
+    // The list.
     private let search: DictationSearchField
-    private let searchRule: DashboardRule
-    private let footerRule: DashboardRule
+    private let totals: NSTextField
+    private let listRule: DashboardRule
     private let scroll: NSScrollView
     private let listBody: DictationFlippedView
-    private let scrollFade: DictationFadeView
-    private var footerLabel: NSTextField?
     private var listItems: [ListItem] = []
-    private var listMessage: DictationMessageView?
+    private var listMessage: DashboardMessageView?
 
-    // Detail
-    private var detail: DictationDetailView?
-    private var detailPlaceholder: DictationMessageView?
-
-    // First run
-    private var emptyState: DictationMessageView?
+    // First run.
+    private var emptyState: DashboardMessageView?
 
     private enum ListItem {
-        case group(NSTextField)
+        case group(DictationGroupHeader)
         case row(DictationRowView)
     }
 
@@ -67,41 +82,33 @@ public final class DictationSectionView: NSView {
         self.records = records
         self.query = query
 
-        eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
-                                      color: style.inkTertiary)
-        heading = DashboardType.label("Dictation", font: DashboardType.display, color: style.ink)
-        blurb = DashboardType.label(records.isEmpty
-                                    ? "Every dictation is kept on this Mac, with the raw transcript beside what was actually typed."
-                                    : "",
-                                    font: DashboardType.body, color: style.inkSecondary,
-                                    lines: 2, lineHeight: 20)
         action = DashboardButton(title: DashboardSection.dictation.primaryAction.title,
                                  symbol: DashboardSection.dictation.primaryAction.symbol,
                                  kind: .primary, style: style)
         let second = DashboardSection.dictation.secondaryAction
         secondary = DashboardButton(title: second?.title ?? "Import", symbol: second?.symbol ?? "arrow.down.circle",
                                     kind: .secondary, style: style)
+        // No meta line under the title. The totals belong on the control row
+        // beside the search that filters them — a count under a heading is a
+        // subtitle, a count next to a filter is a readout.
+        header = DashboardSectionHeader(title: "Dictation",
+                                        trailing: records.isEmpty ? [] : [secondary, action],
+                                        style: style)
+        totals = DashboardType.label("", font: DashboardType.callout,
+                                     color: style.inkTertiary, alignment: .right)
 
-        listWell = DashboardCardView(style: style, elevation: .sunken, radius: DashboardRadius.card)
-        search = DictationSearchField(style: style,
-                                      placeholder: "Search \(records.count) dictation\(records.count == 1 ? "" : "s")")
-        searchRule = DashboardRule(color: style.hairline)
-        footerRule = DashboardRule(color: style.hairline)
+        search = DictationSearchField(style: style, placeholder: "Search")
+        listRule = DashboardRule(color: style.hairline)
         listBody = DictationFlippedView()
         scroll = NSScrollView()
-        scrollFade = DictationFadeView(color: style.card)
 
         super.init(frame: .zero)
 
-        addSubview(eyebrow)
-        addSubview(heading)
-        addSubview(blurb)
-        addSubview(secondary)
-        addSubview(action)
+        addSubview(header)
 
         // A real scroller, because a dictation history is a thousand rows long
         // by month three and a list that silently stops at eight is a list that
-        // loses your work. Backgroundless and borderless: the well is already
+        // loses your work. Backgroundless and borderless: the page is already
         // drawn, and NSScrollView's own chrome is the default look this window
         // exists to avoid.
         scroll.drawsBackground = false
@@ -115,12 +122,10 @@ public final class DictationSectionView: NSView {
         scroll.contentView.drawsBackground = false
         scroll.documentView = listBody
 
-        addSubview(listWell)
-        listWell.addSubview(search)
-        listWell.addSubview(searchRule)
-        listWell.addSubview(scroll)
-        listWell.addSubview(scrollFade)
-        listWell.addSubview(footerRule)
+        addSubview(search)
+        addSubview(totals)
+        addSubview(listRule)
+        addSubview(scroll)
 
         search.onChange = { [weak self] text in self?.apply(query: text) }
         search.text = query
@@ -128,8 +133,6 @@ public final class DictationSectionView: NSView {
         reload()
     }
 
-    /// The shipping path: real history, or the fixture set when there is none.
-    /// A section that screenshots as an empty rectangle is a section nobody can
     /// An empty history shows the empty state, NOT invented dictations.
     ///
     /// The old comment here argued that "a first launch that shows an empty
@@ -151,6 +154,13 @@ public final class DictationSectionView: NSView {
     /// tested without reading pixels.
     public var visibleRecordCount: Int { filtered.count }
 
+    private static func totalsText(_ records: [DictationRecord]) -> String {
+        guard !records.isEmpty else { return "" }
+        let words = records.reduce(0) { $0 + $1.wordCount }
+        return "\(DictationFormat.count(records.count)) dictation\(records.count == 1 ? "" : "s")"
+            + "  \u{00B7}  \(DictationFormat.count(words)) words"
+    }
+
     private func apply(query newValue: String) {
         query = newValue
         reload()
@@ -162,7 +172,7 @@ public final class DictationSectionView: NSView {
         guard selectedID != record.id else { return }
         selectedID = record.id
         for case .row(let row) in listItems { row.isSelected = row.recordID == record.id }
-        rebuildDetail()
+        rebuildHero()
         needsLayout = true
     }
 
@@ -181,25 +191,23 @@ public final class DictationSectionView: NSView {
             }
         }
         listItems = []
-        footerLabel?.removeFromSuperview()
-        footerLabel = nil
         listMessage?.removeFromSuperview()
         listMessage = nil
         emptyState?.removeFromSuperview()
         emptyState = nil
 
         guard !records.isEmpty else {
-            listWell.isHidden = true
+            search.isHidden = true
+            totals.isHidden = true
+            listRule.isHidden = true
             scroll.isHidden = true
-            detail?.removeFromSuperview()
-            detail = nil
-            detailPlaceholder?.removeFromSuperview()
-            detailPlaceholder = nil
+            hero?.removeFromSuperview()
+            hero = nil
             // First run is the one screen guaranteed to be seen, and it is a
             // teaching moment rather than an apology: the three steps are the
             // whole product, and a card sized to them beats a full-bleed well
             // with a paragraph floating in the middle of it.
-            let view = DictationMessageView(symbol: "waveform",
+            let view = DashboardMessageView(symbol: "waveform",
                                             title: "Nothing dictated yet",
                                             body: "Quill listens while you hold the key and types when you let go. Nothing is uploaded, and everything you say lands here.",
                                             steps: ["Hold \u{2325} anywhere \u{2014} any app, any text field.",
@@ -214,17 +222,23 @@ public final class DictationSectionView: NSView {
             return
         }
 
-        listWell.isHidden = false
         search.isHidden = false
-        searchRule.isHidden = false
+        totals.isHidden = false
+        listRule.isHidden = false
 
         filtered = records.filter(matches).sorted { $0.date > $1.date }
+        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        DashboardType.recolor(totals, style.inkTertiary)
+        totals.attributedStringValue = NSAttributedString(
+            string: searching
+                ? "\(DictationFormat.count(filtered.count)) of \(DictationFormat.count(records.count))"
+                : DictationSectionView.totalsText(records),
+            attributes: [.font: DashboardType.callout, .foregroundColor: style.inkTertiary])
 
         if filtered.isEmpty {
-            footerRule.isHidden = true
             scroll.isHidden = true
             let trimmed = query.trimmingCharacters(in: .whitespaces)
-            let view = DictationMessageView(symbol: "magnifyingglass",
+            let view = DashboardMessageView(symbol: "magnifyingglass",
                                             title: "No match for \u{201C}\(trimmed)\u{201D}",
                                             body: "Search reads the inserted text and the raw transcript. Neither contains that.",
                                             steps: [],
@@ -236,19 +250,17 @@ public final class DictationSectionView: NSView {
                 self?.search.text = ""
                 self?.apply(query: "")
             }
-            listWell.addSubview(view)
+            addSubview(view)
             listMessage = view
         } else {
-            footerRule.isHidden = false
             scroll.isHidden = false
             var lastGroup: String?
             for record in filtered {
                 let group = DictationFormat.dayTitle(record.date)
                 if group != lastGroup {
-                    let label = DashboardType.label(group, font: DashboardType.micro,
-                                                    color: style.inkQuaternary)
-                    listBody.addSubview(label)
-                    listItems.append(.group(label))
+                    let view = DictationGroupHeader(title: group, style: style)
+                    listBody.addSubview(view)
+                    listItems.append(.group(view))
                     lastGroup = group
                 }
                 let row = DictationRowView(record: record, highlight: query, style: style)
@@ -259,65 +271,66 @@ public final class DictationSectionView: NSView {
             }
         }
 
-        if selectedID == nil || !filtered.contains(where: { $0.id == selectedID }) {
-            selectedID = filtered.first?.id
-            for case .row(let row) in listItems { row.isSelected = row.recordID == selectedID }
+        // Selection follows the RECORDS, not the filter.
+        //
+        // This used to re-point `selectedID` at `filtered.first` whenever the open
+        // record stopped matching — and `filtered.first` is nil on a query with no
+        // results, so the hero was torn out and the whole page jumped up about 350
+        // points under the pointer, mid-keystroke, while you were still typing in
+        // the field. Clearing the query did not put it back either: it re-selected
+        // the newest dictation instead of the one you had open.
+        //
+        // A record that merely falls out of a filter has not gone anywhere. Mail
+        // does the same thing: the open message stays open and the list simply
+        // shows no selection, which `row.isSelected == false` already gives us.
+        if selectedID == nil || !records.contains(where: { $0.id == selectedID }) {
+            selectedID = records.first?.id
         }
-        rebuildDetail()
+        for case .row(let row) in listItems { row.isSelected = row.recordID == selectedID }
+        // Only when it actually changed. `reload()` runs on every keystroke, and
+        // rebuilding an identical hero re-ran the cross-fade against itself once
+        // per character.
+        if renderedHeroID != selectedID { rebuildHero() }
     }
 
-    private func rebuildDetail(animated: Bool = true) {
+    private func rebuildHero(animated: Bool = true) {
         // Cross-fade rather than cut.
         //
-        // This tore the old detail out and dropped the new one in with no
-        // animation at all, which is the "switching dictations" Roman named: the
-        // right-hand pane blinks and the eye has to re-find where it was. The
-        // outgoing view is kept alive just long enough to fade under the new one.
+        // Switching records used to tear the old view out and drop the new one
+        // in with no animation at all, which is the "blink" Roman named: the pane
+        // vanishes and the eye has to re-find where it was. The outgoing view is
+        // kept alive just long enough to fade under the new one.
         //
         // Position is deliberately NOT animated. The two views occupy the same
         // frame, so sliding one over the other would be motion for its own sake —
         // and the HIG is blunt that a frequent interaction given too much movement
         // reads as lag rather than as feedback.
-        let outgoing = detail ?? detailPlaceholder
-        detail = nil
-        detailPlaceholder = nil
-
-        func finish(_ incoming: NSView) {
-            guard animated, !DashboardMotion.isReduced, outgoing != nil else {
-                outgoing?.removeFromSuperview()
-                return
-            }
-            incoming.alphaValue = 0
-            DashboardMotion.spring(DashboardMotion.selectSpring) { _ in
-                incoming.animator().alphaValue = 1
-                outgoing?.animator().alphaValue = 0
-            } completion: {
-                outgoing?.removeFromSuperview()
-            }
-        }
-
+        let outgoing = hero
+        hero = nil
+        renderedHeroID = selectedID
         guard let selectedID, let record = records.first(where: { $0.id == selectedID }) else {
-            guard !records.isEmpty else { outgoing?.removeFromSuperview(); return }
-            let view = DictationMessageView(symbol: "doc.text",
-                                            title: "Nothing selected",
-                                            body: "Pick a dictation on the left to see what the recogniser heard against what Quill typed.",
-                                            steps: [], action: nil, actionSymbol: nil,
-                                            style: style, elevation: .raised)
-            addSubview(view)
-            detailPlaceholder = view
-            needsLayout = true
-            layoutSubtreeIfNeeded()
-            finish(view)
+            outgoing?.removeFromSuperview()
             return
         }
-        let view = DictationDetailView(record: record, style: style)
+        let view = DictationRecordView(record: record, style: style)
         addSubview(view)
-        detail = view
+        hero = view
         // Laid out before the fade starts, or the incoming view animates in at a
         // zero frame and arrives by resizing.
         needsLayout = true
         layoutSubtreeIfNeeded()
-        finish(view)
+
+        guard animated, !DashboardMotion.isReduced, outgoing != nil else {
+            outgoing?.removeFromSuperview()
+            return
+        }
+        view.alphaValue = 0
+        DashboardMotion.spring(DashboardMotion.selectSpring) { _ in
+            view.animator().alphaValue = 1
+            outgoing?.animator().alphaValue = 0
+        } completion: {
+            outgoing?.removeFromSuperview()
+        }
     }
 
     // MARK: - Layout
@@ -327,137 +340,157 @@ public final class DictationSectionView: NSView {
         let padX = DashboardMetrics.contentPaddingX
         let padY = DashboardMetrics.contentPaddingY
         let width = bounds.width - padX * 2
+        guard width > 0 else { return }
 
-        // The title starts at the padding, with nothing above it. Every section
-        // does the same, which is the only way their headings can agree.
-        var y = padY
-        eyebrow.frame = .zero
-
-        let headingSize = heading.fittingSize
-        heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 300), height: headingSize.height)
-        y += headingSize.height + 6
-
-        let blurbWidth = min(width - 300, 560)
-        let blurbHeight = blurb.stringValue.isEmpty ? 0 : DashboardType.size(blurb, width: blurbWidth).height
-        blurb.frame = NSRect(x: padX, y: y, width: blurbWidth, height: blurbHeight)
-        y += blurbHeight
-
-        // On first run the header's primary is hidden: the empty-state card owns
-        // the call to action, and the same button twice on a screen with nothing
-        // on it makes the screen look like it is begging.
-        // No eyebrow above the title any more, so the header buttons align to
-        // the title's own row rather than to a label that no longer exists.
-        let buttonY = padY
-        action.isHidden = records.isEmpty
-        let actionWidth = action.intrinsicWidth
-        action.frame = NSRect(x: bounds.width - padX - actionWidth, y: buttonY, width: actionWidth, height: 36)
-        let secondaryWidth = secondary.intrinsicWidth
-        secondary.frame = NSRect(x: (records.isEmpty ? bounds.width - padX : action.frame.minX - 10) - secondaryWidth,
-                                 y: buttonY, width: secondaryWidth, height: 36)
-
-        y += DashboardSpace.lg + 2
-        let columnsTop = y
-        let columnsHeight = max(200, bounds.height - columnsTop - padY)
+        header.frame = NSRect(x: padX, y: padY, width: width, height: header.height)
+        var y = DashboardSectionHeader.contentTop(for: header)
 
         if let emptyState {
             let cardWidth: CGFloat = 560
             let cardHeight = emptyState.fittingHeight(width: cardWidth)
+            let room = max(200, bounds.height - y - padY)
             // Optical centre, not geometric: a block centred by arithmetic in a
             // tall column always reads as having sunk.
             emptyState.frame = NSRect(x: padX + ((width - cardWidth) / 2).rounded(),
-                                      y: columnsTop + ((columnsHeight - cardHeight) * 0.42).rounded(),
+                                      y: y + ((room - cardHeight) * 0.42).rounded(),
                                       width: cardWidth, height: cardHeight)
             return
         }
 
-        let listWidth = DictationSectionView.listWidth
-        listWell.frame = NSRect(x: padX, y: columnsTop, width: listWidth, height: columnsHeight)
-        layoutList()
+        // The hero is as tall as what is in it. This is the single decision that
+        // removes the void: nothing below it is pinned to the bottom of the
+        // window, so a short record makes a short hero and the list simply gets
+        // longer. The old card was half the window whatever it held.
+        if let hero {
+            let natural = hero.fittingHeight(width: width)
+            let height = min(DictationSectionView.heroMaxHeight,
+                             max(DictationSectionView.heroMinHeight, natural))
+            hero.frame = NSRect(x: padX, y: y, width: width, height: height)
+            y += height + DashboardSpace.xl
+        }
 
-        let detailX = padX + listWidth + DashboardSpace.lg
-        let detailWidth = bounds.width - padX - detailX
-        let detailFrame = NSRect(x: detailX, y: columnsTop, width: detailWidth, height: columnsHeight)
-        detail?.frame = detailFrame
-        detailPlaceholder?.frame = detailFrame
-    }
+        // The control row: search on the left, nothing on the right. The totals
+        // that used to sit in a footer under the list are in the header's meta
+        // line now, beside the title they describe.
+        search.frame = NSRect(x: padX, y: y,
+                              width: min(DictationSectionView.searchWidth, width),
+                              height: DictationSectionView.controlRowHeight)
+        let totalsSize = totals.fittingSize
+        totals.frame = NSRect(x: bounds.width - padX - min(totalsSize.width, width / 2),
+                              y: y + ((DictationSectionView.controlRowHeight - totalsSize.height) / 2).rounded(),
+                              width: min(totalsSize.width, width / 2), height: totalsSize.height)
+        y += DictationSectionView.controlRowHeight + DashboardSpace.sm
+        listRule.frame = NSRect(x: padX, y: y, width: width, height: 1)
+        y += 1
 
-    private func layoutList() {
-        let pad = DashboardSpace.sm
-        let width = listWell.bounds.width
-        let height = listWell.bounds.height
-
-        search.frame = NSRect(x: pad, y: pad, width: width - pad * 2, height: 34)
-        let searchBottom = search.frame.maxY + pad
-        searchRule.frame = NSRect(x: 0, y: searchBottom, width: width, height: 1)
+        let listHeight = max(0, bounds.height - y - padY)
 
         if let listMessage {
-            scrollFade.isHidden = true
             // Held near the search field rather than centred in six hundred
-            // points of empty well: the answer to a query belongs next to the
+            // points of empty page: the answer to a query belongs next to the
             // query, not a screen below it.
-            listMessage.frame = NSRect(x: 0, y: searchBottom, width: width,
-                                       height: min(height - searchBottom, 400))
+            listMessage.frame = NSRect(x: padX, y: y, width: width,
+                                       height: listHeight)
             return
         }
 
-        // The footer is where the totals live — Flow parks the same numbers in a
-        // separate stats card on the far side of the window, which puts "how
-        // much have I said" a screen away from the thing that said it.
-        let footerHeight: CGFloat = 36
-        let footerTop = height - footerHeight
-        footerRule.frame = NSRect(x: 0, y: footerTop, width: width, height: 1)
-        scroll.frame = NSRect(x: 0, y: searchBottom + 1, width: width, height: footerTop - searchBottom - 1)
+        // No fade over the bottom of the list, and its absence is deliberate.
+        //
+        // A gradient to a colour is a lie in a translucent window: the page is a
+        // material, and the fade could only be painted in the material's FALLBACK
+        // colour — which is the one thing on screen guaranteed not to match what
+        // is actually behind it. Offscreen it showed as a pale band across the
+        // last row; on a real desktop it would be worse, because the material has
+        // the wallpaper in it and the band would not.
+        //
+        // A clipped row is what every Mac list does, and the overlay scroller says
+        // "there is more" without inventing a colour.
+        scroll.frame = NSRect(x: padX, y: y, width: width, height: listHeight)
+        layoutList(width: width)
+    }
 
-        var y = DashboardSpace.xs
-        var afterGroup = true
-        for item in listItems {
+    private func layoutList(width: CGFloat) {
+        var y: CGFloat = 0
+        for (index, item) in listItems.enumerated() {
             switch item {
-            case .group(let label):
-                let size = label.fittingSize
-                label.frame = NSRect(x: DashboardSpace.md + 2, y: y + 11, width: size.width, height: size.height)
+            case .group(let view):
+                // No rule above the first heading: the list's own top rule is
+                // already there, and two lines one row apart is a table.
+                view.showsTopRule = index > 0
+                view.frame = NSRect(x: 0, y: y, width: width, height: DictationSectionView.groupHeight)
                 y += DictationSectionView.groupHeight
-                // The heading is the divider; a hairline under it as well is one
-                // line too many.
-                afterGroup = true
             case .row(let row):
-                row.showsSeparator = !afterGroup
-                afterGroup = false
                 row.frame = NSRect(x: 0, y: y, width: width, height: DictationSectionView.rowHeight)
                 y += DictationSectionView.rowHeight
             }
         }
-        listBody.frame = NSRect(x: 0, y: 0, width: width, height: y + DashboardSpace.xs)
+        listBody.frame = NSRect(x: 0, y: 0, width: width, height: y + DashboardSpace.lg)
+    }
+}
 
-        // The list is clipped by the footer rule, and a hard clip through the
-        // middle of a row's second line looks like a rendering fault rather than
-        // a scroll position. Twenty-four points of fade turns the same cut into
-        // the standard "there is more below".
-        let overflows = listBody.frame.height > scroll.frame.height
-        scrollFade.isHidden = !overflows
-        scrollFade.frame = NSRect(x: 0, y: footerTop - 24, width: width, height: 24)
+// MARK: - Group heading
 
-        footerLabel?.removeFromSuperview()
-        let totalWords = filtered.reduce(0) { $0 + $1.wordCount }
-        let text = "\(filtered.count) dictation\(filtered.count == 1 ? "" : "s")  \u{00B7}  \(DictationFormat.count(totalWords)) words"
-        let label = DashboardType.label(text, font: DashboardType.caption, color: style.inkTertiary)
-        listWell.addSubview(label)
-        footerLabel = label
+/// A day, and the line that separates it from the day above.
+///
+/// The heading IS the divider — Music does exactly this, and it is why its
+/// library reads as a set of days rather than as a table with a caption on every
+/// tenth row. There are no rules between the rows themselves; Roman asked for
+/// that twice, and it holds here for the same reason it held before: the rows
+/// have their own internal hierarchy and the rhythm separates them.
+final class DictationGroupHeader: NSView {
+
+    var showsTopRule = true { didSet { needsDisplay = true } }
+
+    private let label: NSTextField
+    private let style: DashboardStyle
+
+    override var isFlipped: Bool { true }
+
+    init(title: String, style: DashboardStyle) {
+        self.style = style
+        label = DashboardType.label(title, font: DashboardType.headline, color: style.inkTertiary)
+        super.init(frame: .zero)
+        addSubview(label)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
         let size = label.fittingSize
-        label.frame = NSRect(x: DashboardSpace.md + 2,
-                             y: footerTop + ((footerHeight - size.height) / 2).rounded(),
-                             width: size.width, height: size.height)
+        label.frame = NSRect(x: 0, y: (bounds.height - size.height).rounded() - 6,
+                             width: min(size.width, bounds.width), height: size.height)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard showsTopRule else { return }
+        style.hairline.setFill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
     }
 }
 
 // MARK: - Row
 
-/// One dictation in the list: time gutter, the line as typed, and the numbers
-/// that decide whether it is the one you were looking for.
+/// One dictation, at the full width of the window.
+///
+/// Three columns and one line: when it was said, what was typed, and how much of
+/// it. That is a Music track row, and it is the right shape for the same reason —
+/// a list you scan by time wants a fixed row height and a stable gutter, and the
+/// thing you are actually reading wants every point of width that is left.
+///
+/// It used to be two lines in a 452pt column, with the second line carrying
+/// "13 words · 4.63 s · clean". The seconds are gone: that is release-to-inserted
+/// latency, which is the same instrumentation Roman had already thrown off the
+/// record card — *"I don't need to know the time it took... those little details
+/// are just bloating up the screen."* It is still measured, and Insights is still
+/// where a question about speed belongs. And "clean" is gone as a word, because
+/// printing it on nine rows out of ten makes it furniture; a row now says
+/// something about edits only when there were edits.
 final class DictationRowView: NSView {
 
     let recordID: UUID
     var onClick: (() -> Void)?
-    var showsSeparator = true { didSet { needsDisplay = true } }
     var isSelected = false {
         didSet {
             guard isSelected != oldValue else { return }
@@ -468,6 +501,7 @@ final class DictationRowView: NSView {
     private let style: DashboardStyle
     private let record: DictationRecord
     private let highlight: String
+    private let isClean: Bool
     private let editCount: Int
     private var time: NSTextField
     private var snippet: NSTextField
@@ -478,7 +512,15 @@ final class DictationRowView: NSView {
             hover.animate(to: isHovered ? 1 : 0)
         }
     }
+    private var isPressed = false {
+        didSet {
+            guard isPressed != oldValue else { return }
+            press.animate(to: isPressed ? 1 : 0,
+                          duration: isPressed ? DashboardMotion.press : DashboardMotion.quick)
+        }
+    }
     private lazy var hover = DashboardTween(view: self)
+    private lazy var press = DashboardTween(view: self)
 
     override var isFlipped: Bool { true }
 
@@ -489,6 +531,7 @@ final class DictationRowView: NSView {
         self.recordID = record.id
         let diff = TranscriptDiff.between(raw: record.rawText, inserted: record.insertedText)
         self.editCount = diff.editCount
+        self.isClean = diff.isClean
         time = NSTextField(labelWithString: "")
         snippet = NSTextField(labelWithString: "")
         meta = NSTextField(labelWithString: "")
@@ -508,8 +551,8 @@ final class DictationRowView: NSView {
         meta.removeFromSuperview()
 
         time = DashboardType.label(DictationFormat.time(record.date), font: DashboardType.mono,
-                                   color: isSelected ? style.inkSecondary : style.inkTertiary)
-        snippet = DashboardType.label(record.insertedText,
+                                   color: isSelected ? style.inkSecondary : style.inkQuaternary)
+        snippet = DashboardType.label(record.insertedText.isEmpty ? record.rawText : record.insertedText,
                                       font: isSelected ? DashboardType.bodyMedium : DashboardType.body,
                                       color: isSelected ? style.ink : style.inkSecondary)
         // Where the query actually hit. A filtered list that does not say why a
@@ -528,11 +571,11 @@ final class DictationRowView: NSView {
             }
             snippet.attributedStringValue = string
         }
-        var parts = ["\(record.wordCount) words"]
-        parts.append("\(DictationFormat.seconds(record.timings.endToEndMs)) s")
-        parts.append(editCount == 0 ? "clean" : "\(editCount) edit\(editCount == 1 ? "" : "s")")
+        var parts = ["\(DictationFormat.count(record.wordCount)) \(record.wordCount == 1 ? "word" : "words")"]
+        if !isClean && editCount > 0 { parts.append("\(editCount) edit\(editCount == 1 ? "" : "s")") }
         meta = DashboardType.label(parts.joined(separator: "  \u{00B7}  "),
-                                   font: DashboardType.caption, color: style.inkQuaternary)
+                                   font: DashboardType.caption, color: style.inkQuaternary,
+                                   alignment: .right)
 
         addSubview(time)
         addSubview(snippet)
@@ -543,56 +586,46 @@ final class DictationRowView: NSView {
 
     override func layout() {
         super.layout()
-        let leading = DashboardSpace.md + 2
-        let gutter: CGFloat = 66
-        let textX = leading + gutter
-        let textWidth = bounds.width - textX - DashboardSpace.md
+        let inset = DashboardSpace.sm
+        let gutter: CGFloat = 72
+        let metaWidth: CGFloat = 150
+        let textX = inset + gutter
+        let textWidth = max(40, bounds.width - textX - metaWidth - inset - DashboardSpace.md)
 
-        let snippetSize = snippet.fittingSize
-        snippet.frame = NSRect(x: textX, y: 11, width: textWidth, height: snippetSize.height)
+        func centre(_ field: NSTextField) -> CGFloat {
+            ((bounds.height - field.fittingSize.height) / 2).rounded()
+        }
 
-        let timeSize = time.fittingSize
-        time.frame = NSRect(x: leading,
-                            y: 11 + ((snippetSize.height - timeSize.height) / 2).rounded(),
-                            width: gutter - 8, height: timeSize.height)
-
-        let metaSize = meta.fittingSize
-        meta.frame = NSRect(x: textX, y: 11 + snippetSize.height + 3,
-                            width: min(metaSize.width, textWidth), height: metaSize.height)
+        snippet.frame = NSRect(x: textX, y: centre(snippet), width: textWidth,
+                               height: snippet.fittingSize.height)
+        time.frame = NSRect(x: inset, y: centre(time), width: gutter - 10, height: time.fittingSize.height)
+        meta.frame = NSRect(x: bounds.width - inset - metaWidth, y: centre(meta),
+                            width: metaWidth, height: meta.fittingSize.height)
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        let body = bounds.insetBy(dx: 0, dy: 1)
         if isSelected {
-            DashboardDraw.raisedSurface(bounds.insetBy(dx: 6, dy: 2), radius: DashboardRadius.row,
-                                        fillColor: style.raised, topColor: style.raisedTop,
-                                        style: style, shadow: style.shadowRaised, flipped: true)
-            // A two-point stub of accent on the leading edge. The pill already
-            // says "selected"; this says which of eight identical pills, at a
-            // glance, from across the room.
+            DashboardDraw.fill(body, radius: DashboardRadius.row, color: style.raised)
+            // A stub of accent on the leading edge. The fill already says
+            // "selected"; this says which of eight identical fills, at a glance,
+            // from across the room.
             NSGraphicsContext.saveGraphicsState()
-            DashboardDraw.path(bounds.insetBy(dx: 6, dy: 2), DashboardRadius.row).addClip()
+            DashboardDraw.path(body, DashboardRadius.row).addClip()
             style.accent.setFill()
-            NSRect(x: 6, y: 2, width: 2.5, height: bounds.height - 4).fill()
+            NSRect(x: body.minX, y: body.minY, width: 2.5, height: body.height).fill()
             NSGraphicsContext.restoreGraphicsState()
         } else if hover.value > 0.001 {
-            DashboardDraw.fill(bounds.insetBy(dx: 6, dy: 2), radius: DashboardRadius.row,
+            DashboardDraw.fill(body, radius: DashboardRadius.row,
                                color: style.hover.faded(hover.value))
         }
-        // No separator between rows. Roman, pointing at a screenshot of exactly
-        // this: "the lines in between each dictation — I don't really like that
-        // either."
-        //
-        // He is right, and the reason is that they were doing a job nothing needed
-        // done. Each row is already two lines with its own internal hierarchy —
-        // a time, a sentence, a metadata line — and the vertical rhythm separates
-        // them perfectly well. A rule between every pair turns a list into a
-        // table, and a table is what you reach for when the rows are otherwise
-        // indistinguishable. These are not.
-        //
-        // `showsSeparator` is still computed and still passed in, because the
-        // date grouping uses it to know which row ENDS a day. Only the line is
-        // gone.
-        _ = showsSeparator
+        // The press, on top of whichever of the two is showing. A scrim rather
+        // than an alpha change: fading the row would take its text with it and
+        // read as "disabled" for as long as the finger is down.
+        if press.value > 0.001 {
+            DashboardDraw.fill(body, radius: DashboardRadius.row,
+                               color: NSColor(white: style.isDark ? 1 : 0, alpha: 0.07 * press.value))
+        }
     }
 
     override func updateTrackingAreas() {
@@ -604,8 +637,13 @@ final class DictationRowView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        isPressed = false
+    }
+    override func mouseDown(with event: NSEvent) { isPressed = true }
     override func mouseUp(with event: NSEvent) {
+        isPressed = false
         if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
     }
 }
@@ -632,6 +670,13 @@ final class DictationSearchField: NSView, NSTextFieldDelegate {
     private let icon: DashboardIconView
     private let field: NSTextField
     private let clear: DictationClearButton
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hover.animate(to: isHovered ? 1 : 0)
+        }
+    }
+    private lazy var hover = DashboardTween(view: self)
 
     override var isFlipped: Bool { true }
 
@@ -698,12 +743,54 @@ final class DictationSearchField: NSView, NSTextFieldDelegate {
         clear.frame = NSRect(x: bounds.width - 28, y: (bounds.height - 20) / 2, width: 20, height: 20)
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        NSCursor.iBeam.set()
+    }
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        NSCursor.arrow.set()
+    }
+
+    /// The whole well is the target, not just the editable strip inside it.
+    ///
+    /// The `NSTextField` occupies x=32 to width-34, so clicking the magnifier, the
+    /// padding, or anywhere in the 10 points before the text did nothing at all —
+    /// a search box that ignores a third of its own surface. Every Mac search field
+    /// focuses from anywhere inside its bezel.
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(field)
+        // Put the caret where they clicked rather than selecting everything: a
+        // click into a field with a query already in it is almost always an edit,
+        // and select-all arms the next keystroke to wipe it.
+        if let editor = field.currentEditor() {
+            editor.selectedRange = NSRange(location: (field.stringValue as NSString).length, length: 0)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        // Nothing to commit — `mouseDown` already moved focus. Present so the
+        // field counts as a control that answers the mouse, which is the thing
+        // the dead-filter bug taught us to assert.
+        _ = event
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        // Filled with the *panel* colour rather than a card colour: inside a
-        // sunken well, an input has to read as one step further in, and in dark
-        // mode that means darker, not lighter.
-        DashboardDraw.fill(bounds, radius: DashboardRadius.control, color: style.panel)
-        DashboardDraw.stroke(bounds, radius: DashboardRadius.control, color: style.hairline)
+        // A field on the page rather than inside a well, so it is drawn as a
+        // tint of the page rather than as a hole in a card. The border warms
+        // under the pointer — the one place in this window where the user is
+        // about to type, and the only cue that it is a field at all.
+        DashboardDraw.fill(bounds, radius: DashboardRadius.control, color: style.card)
+        DashboardDraw.stroke(bounds, radius: DashboardRadius.control,
+                             color: style.hairline.mixed(with: style.hairlineStrong, hover.value))
     }
 }
 
@@ -761,169 +848,13 @@ final class DictationClearButton: NSView {
                                        owner: self))
     }
 
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        NSCursor.arrow.set()
+    }
     override func mouseExited(with event: NSEvent) { isHovered = false }
     override func mouseUp(with event: NSEvent) {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
-    }
-}
-
-// MARK: - Message states
-
-/// Empty states, all three of them, from one view: first run, no search match,
-/// and nothing selected. They differ by copy, by whether they offer an action,
-/// and by whether they teach — which is not enough difference to justify three
-/// layouts.
-///
-/// It measures itself. First run gets a card sized to its content and centred,
-/// not a full-bleed well with a paragraph floating in the middle of it: a screen
-/// whose only content is an apology should not also be the biggest empty
-/// rectangle in the app.
-final class DictationMessageView: NSView {
-
-    enum Elevation { case none, sunken, raised }
-
-    var onAction: (() -> Void)?
-
-    private let style: DashboardStyle
-    private let elevation: Elevation
-    private let disc: DashboardIconView
-    private let title: NSTextField
-    private let body: NSTextField
-    private var stepNumbers: [NSTextField] = []
-    private var stepTexts: [NSTextField] = []
-    private let button: DashboardButton?
-
-    private static let discSize: CGFloat = 52
-    private static let stepHeight: CGFloat = 30
-
-    override var isFlipped: Bool { true }
-
-    init(symbol: String,
-         title: String,
-         body: String,
-         steps: [String],
-         action: String?,
-         actionSymbol: String?,
-         style: DashboardStyle,
-         elevation: Elevation) {
-        self.style = style
-        self.elevation = elevation
-        disc = DashboardIconView(image: DashboardIcon.image(symbol, pointSize: 18, weight: .regular,
-                                                            color: style.inkTertiary))
-        self.title = DashboardType.label(title, font: DashboardType.title, color: style.ink, alignment: .center)
-        self.body = DashboardType.label(body, font: DashboardType.body, color: style.inkTertiary,
-                                        lines: 3, lineHeight: 21, alignment: .center)
-        self.button = action.map {
-            DashboardButton(title: $0, symbol: actionSymbol,
-                            kind: steps.isEmpty ? .secondary : .primary, style: style)
-        }
-        super.init(frame: .zero)
-        addSubview(disc)
-        addSubview(self.title)
-        addSubview(self.body)
-        for (index, step) in steps.enumerated() {
-            stepNumbers.append(DashboardType.label("\(index + 1)", font: DashboardType.micro,
-                                                   color: style.inkTertiary, alignment: .center))
-            stepTexts.append(DashboardType.label(step, font: DashboardType.callout, color: style.inkSecondary))
-        }
-        stepNumbers.forEach(addSubview)
-        stepTexts.forEach(addSubview)
-        self.button.map(addSubview)
-        self.button?.onClick = { [weak self] in self?.onAction?() }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func bodyWidth(for width: CGFloat) -> CGFloat {
-        min(width - DashboardSpace.xl * 2, 420)
-    }
-
-    /// Content height plus the card's own padding. Used by the section to size
-    /// the card before it is laid out, so the same numbers drive both.
-    func fittingHeight(width: CGFloat) -> CGFloat {
-        let inner = DictationMessageView.discSize + DashboardSpace.lg
-            + title.fittingSize.height + DashboardSpace.xs
-            + DashboardType.size(body, width: bodyWidth(for: width)).height
-            + (stepTexts.isEmpty ? 0 : DashboardSpace.lg + CGFloat(stepTexts.count) * DictationMessageView.stepHeight)
-            + (button == nil ? 0 : DashboardSpace.lg + 36)
-        return inner + DashboardSpace.xxl * 2
-    }
-
-    override func layout() {
-        super.layout()
-        let width = bounds.width
-        let bodyW = bodyWidth(for: width)
-        let titleSize = title.fittingSize
-        let bodyHeight = DashboardType.size(body, width: bodyW).height
-        let total = fittingHeight(width: width) - DashboardSpace.xxl * 2
-
-        var y = ((bounds.height - total) / 2).rounded()
-        let disc = DictationMessageView.discSize
-        discFrame = NSRect(x: ((width - disc) / 2).rounded(), y: y, width: disc, height: disc)
-        self.disc.frame = NSRect(x: discFrame.minX + 16, y: y + 16, width: 20, height: 20)
-        y += disc + DashboardSpace.lg
-
-        title.frame = NSRect(x: ((width - titleSize.width) / 2).rounded(), y: y,
-                             width: titleSize.width, height: titleSize.height)
-        y += titleSize.height + DashboardSpace.xs
-
-        body.frame = NSRect(x: ((width - bodyW) / 2).rounded(), y: y, width: bodyW, height: bodyHeight)
-        y += bodyHeight
-
-        if !stepTexts.isEmpty {
-            y += DashboardSpace.lg
-            // Steps are left-aligned as a block, centred as a group: three
-            // centred sentences of different lengths read as a poem, not a list.
-            let textWidth = stepTexts.map { $0.fittingSize.width }.max() ?? 0
-            let blockWidth = 26 + DashboardSpace.sm + textWidth
-            let x = ((width - blockWidth) / 2).rounded()
-            numberFrames = []
-            for (index, text) in stepTexts.enumerated() {
-                let number = stepNumbers[index]
-                let discRect = NSRect(x: x, y: y + 3, width: 22, height: 22)
-                numberFrames.append(discRect)
-                let numberSize = number.fittingSize
-                number.frame = NSRect(x: discRect.minX, y: discRect.midY - numberSize.height / 2 + 0.5,
-                                      width: discRect.width, height: numberSize.height)
-                let size = text.fittingSize
-                text.frame = NSRect(x: x + 26 + DashboardSpace.sm,
-                                    y: discRect.midY - size.height / 2,
-                                    width: min(size.width, width - x - 26 - DashboardSpace.sm - DashboardSpace.xl),
-                                    height: size.height)
-                y += DictationMessageView.stepHeight
-            }
-        }
-
-        if let button {
-            y += DashboardSpace.lg
-            let buttonWidth = button.intrinsicWidth
-            button.frame = NSRect(x: ((width - buttonWidth) / 2).rounded(), y: y, width: buttonWidth, height: 36)
-        }
-        needsDisplay = true
-    }
-
-    private var discFrame: NSRect = .zero
-    private var numberFrames: [NSRect] = []
-
-    override func draw(_ dirtyRect: NSRect) {
-        switch elevation {
-        case .none: break
-        case .sunken: DashboardDraw.sunkenSurface(bounds, radius: DashboardRadius.card, style: style, flipped: true)
-        case .raised:
-            DashboardDraw.raisedSurface(bounds, radius: DashboardRadius.card,
-                                        fillColor: style.raised, topColor: style.raisedTop,
-                                        style: style, shadow: style.shadowCard, flipped: true)
-        }
-        guard discFrame != .zero else { return }
-        DashboardDraw.fill(discFrame, radius: discFrame.width / 2,
-                           color: elevation == .raised ? style.card : style.panel)
-        DashboardDraw.stroke(discFrame, radius: discFrame.width / 2, color: style.hairline)
-        for rect in numberFrames {
-            DashboardDraw.fill(rect, radius: rect.width / 2, color: style.card)
-            DashboardDraw.stroke(rect, radius: rect.width / 2, color: style.hairline)
-        }
     }
 }
 
@@ -932,30 +863,6 @@ final class DictationMessageView: NSView {
 /// row one at the bottom and the scroll position at the wrong end.
 final class DictationFlippedView: NSView {
     override var isFlipped: Bool { true }
-}
-
-/// The soft bottom edge of the scrolling list. Transparent to the mouse, so the
-/// rows it covers still scroll and still click.
-final class DictationFadeView: NSView {
-
-    private let color: NSColor
-
-    override var isFlipped: Bool { true }
-
-    init(color: NSColor) {
-        self.color = color
-        super.init(frame: .zero)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    override func draw(_ dirtyRect: NSRect) {
-        DashboardDraw.gradient(bounds, radius: 0,
-                               top: color.withAlphaComponent(0), bottom: color, flipped: true)
-    }
 }
 
 // MARK: - Provider
@@ -980,10 +887,13 @@ public final class DictationSectionProvider: NSObject, DashboardSectionProvider 
     }
 }
 
-/// `QUILL_DICTATION_SHOTS=/dir` renders the section's three states in both
-/// themes and exits. Same argument as `DashboardPreviewRenderer.runIfRequested`:
-/// the states that are hardest to get right are the ones nobody launches the app
-/// to look at.
+/// `QUILL_DICTATION_SHOTS=/dir` renders the section's states in both themes and
+/// exits. Same argument as `DashboardPreviewRenderer.runIfRequested`: the states
+/// that are hardest to get right are the ones nobody launches the app to look at.
+///
+/// This is wired into `main.swift`. It was not, for its whole existence — the
+/// entry point was written, documented and never called, so `QUILL_DICTATION_SHOTS`
+/// silently launched the app instead of rendering anything.
 public enum DictationSectionShots {
 
     @discardableResult

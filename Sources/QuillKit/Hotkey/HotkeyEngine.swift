@@ -36,6 +36,13 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     /// rebind take effect on the next key press instead of the next launch.
     private let bindings: HotkeyBindingProviding
     private let retryInterval: TimeInterval
+    /// The last insertion, and whether it is still safe to take back.
+    ///
+    /// Held here rather than reached through the delegate because the decision to
+    /// swallow ⌥⌫ has to be made synchronously, on this thread, in the callback —
+    /// the delegate is main-actor and by the time it could answer, the event has
+    /// been passed through and is gone.
+    private let undo: InsertionUndoing?
 
     private var machine: HotkeyStateMachine
     private var armTimer: Timer?
@@ -85,11 +92,13 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     public init(
         bindings: HotkeyBindingProviding = QuillSettings.shared,
         timing: HotkeyStateMachine.Timing = .default,
-        retryInterval: TimeInterval = 2.0
+        retryInterval: TimeInterval = 2.0,
+        undo: InsertionUndoing? = nil
     ) {
         self.bindings = bindings
         self.machine = HotkeyStateMachine(timing: timing)
         self.retryInterval = retryInterval
+        self.undo = undo
     }
 
     // Only ever reached if the engine was never started, or was already stopped:
@@ -142,6 +151,8 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     }
 
     public func stop() {
+        // Stopping is the longest blind spell of all.
+        undo?.discard()
         lock.lock()
         guard worker != nil else { lock.unlock(); return }
         stopping = true
@@ -316,6 +327,21 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             NSLog("[quill] tap disabled (%@) and re-enabled — events in that window were lost",
                   type == .tapDisabledByTimeout ? "timeout" : "user input")
             apply(machine.handle(.tapInterrupted, at: Self.now()))
+            // THE UNDO RECORD DIES HERE TOO, and this line is the difference
+            // between ⌥⌫ being safe and it deleting the user's own paragraph.
+            //
+            // The whole defensibility of overriding a standard macOS binding rests
+            // on "any keystroke since the insertion disarms it" — and that guard
+            // is implemented by discarding on `.keyDown`, which is a branch this
+            // one returns before reaching. The log two lines up already says what
+            // that costs: *events in that window were lost*. So the user can type
+            // a paragraph the tap never sees, press ⌥⌫ expecting a word delete,
+            // and get N backspaces over their own text instead, in a document
+            // Quill cannot put back.
+            //
+            // Blind is the same as disarmed. There is no version of "I did not see
+            // what happened" that justifies deleting anything.
+            undo?.discard()
             return false
         }
 
@@ -374,6 +400,24 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             // after the event is passed through it is gone and live typing needs
             // to be able to put it back.
             pendingKeystroke = Self.text(of: event)
+            if let undo, UndoChord.claims(keyCode: keyCode, flags: flags,
+                                          gesture: machine.state,
+                                          hasInsertion: undo.isArmed) {
+                // The machine still sees it. In `.armed` there is a speculative
+                // capture open — the Option of the chord opened it — and it has to
+                // be thrown away like any other chord that turned out not to be a
+                // gesture.
+                apply(machine.handle(.keyDown(keyCode: keyCode, isBare: isBare),
+                                     at: Self.now()))
+                undo.requestUndo()
+                return true
+            }
+            // Any other real keystroke means the caret may have moved or the text
+            // may have changed, so the last insertion stops being safe to take
+            // back. Blunt on purpose: working out which keys are harmless is a
+            // list that would be wrong the first time an app did something
+            // clever, and being wrong here deletes the user's own words.
+            undo?.discard()
             return apply(machine.handle(.keyDown(keyCode: keyCode, isBare: isBare),
                                         at: Self.now()))
 
@@ -460,6 +504,12 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     // MARK: - Why it failed
 
     private func reportUnavailable() {
+        // Same rule as the tap-disabled branch: no tap means no keystrokes seen,
+        // and an undo record that survives a blind spell is a licence to delete
+        // whatever the user typed during it. Secure Input is the common case —
+        // while any app has it on, no event tap can be installed at all, and
+        // Roman dictates into a terminal that has a setting for it.
+        undo?.discard()
         let reason = Self.unavailabilityReason()
         lock.lock()
         let alreadySaid = (lastReportedReason == reason)

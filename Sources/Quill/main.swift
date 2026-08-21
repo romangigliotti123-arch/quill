@@ -75,6 +75,27 @@ if DashboardPreviewRenderer.runIfRequested() {
     exit(0)
 }
 
+// QUILL_DICTATION_SHOTS=/dir renders the Dictation section's four states against
+// the fixture set. This entry point existed, was documented, and was never
+// called from here — so asking for it launched the app and rendered nothing,
+// silently, which is how the four states hardest to reach by hand went unlooked
+// at for the life of the screen.
+if DictationSectionShots.runIfRequested() {
+    exit(0)
+}
+
+// QUILL_LAYOUT_PROBE=1 prints the numbers a render can only hint at — where each
+// section puts its title, how far its content reaches, and how much of the panel
+// nothing ever touches. The title alignment was fixed once from screenshots and
+// drifted straight back on the sections nobody rendered; this is what makes that
+// checkable in one second rather than by eye.
+if ProcessInfo.processInfo.environment["QUILL_LAYOUT_PROBE"] != nil {
+    let probeApp = NSApplication.shared
+    probeApp.setActivationPolicy(.prohibited)
+    MainActor.assumeIsolated { _ = DashboardLayoutProbe.runIfRequested() }
+    exit(0)
+}
+
 // QUILL_RESIZE_SWEEP=/dir drives the REAL window through a range of sizes and
 // captures each one. The renderer above builds a fresh tree at a fixed size, so
 // it can only ever say a layout is right at that size — a control left lit by a

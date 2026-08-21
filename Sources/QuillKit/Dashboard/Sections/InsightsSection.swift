@@ -31,9 +31,7 @@ public final class InsightsView: NSView {
 
     private let scroll = NSScrollView()
     private let content = InsightsFlippedView()
-    private let eyebrow: NSTextField
-    private let heading: NSTextField
-    private let blurb: NSTextField
+    private var header: DashboardSectionHeader!
     private var segmented: InsightsSegmented
     private var sampleChip: DashboardChip?
 
@@ -42,7 +40,7 @@ public final class InsightsView: NSView {
     private var volumeCard: InsightsStatCard
     private var paceCard: InsightsStatCard
     private var savedCard: InsightsStatCard
-    private var latencyCard: InsightsLatencyCard
+    private var activityCard: InsightsActivityCard
     private var fixesCard: InsightsFixesCard
     private var streakCard: InsightsStreakCard
 
@@ -76,10 +74,6 @@ public final class InsightsView: NSView {
         self.range = range
         metrics = InsightsMetrics.compute(records: records, vocabulary: vocabulary, range: range)
 
-        eyebrow = DashboardType.label("",
-                                      font: DashboardType.eyebrow, color: style.inkTertiary)
-        heading = DashboardType.label("Insights",
-                                      font: DashboardType.display, color: style.ink)
         // A chip in the corner is the least a sample screen owes the reader. This
         // page shows a 23-day streak and 5,169 words; someone glancing at it will
         // believe those are theirs unless the page says otherwise in words, near
@@ -87,12 +81,6 @@ public final class InsightsView: NSView {
         // because "this is not yours" without "here is how it becomes yours" is
         // just an apology.
         let realSoFar = HistoryStore().all.filter { !$0.isMeasurement }.count
-        blurb = DashboardType.label(
-            isSample
-                ? "These are example figures. Your own appear once you have dictated \(InsightsFixture.minimumRealRecords) times — \(realSoFar) so far."
-                : "",
-            font: DashboardType.body, color: style.inkSecondary,
-            lines: 2, lineHeight: 20)
         segmented = InsightsSegmented(titles: InsightsRange.allCases.map(\.title),
                                       selectedIndex: InsightsRange.allCases.firstIndex(of: range) ?? 1,
                                       style: style)
@@ -100,7 +88,7 @@ public final class InsightsView: NSView {
         volumeCard = InsightsStatCard(style: style)
         paceCard = InsightsStatCard(style: style)
         savedCard = InsightsStatCard(style: style)
-        latencyCard = InsightsLatencyCard(style: style)
+        activityCard = InsightsActivityCard(style: style)
         fixesCard = InsightsFixesCard(style: style)
         streakCard = InsightsStreakCard(style: style)
 
@@ -122,16 +110,19 @@ public final class InsightsView: NSView {
         scroll.documentView = content
         addSubview(scroll)
 
-        content.addSubview(eyebrow)
-        content.addSubview(heading)
-        content.addSubview(blurb)
+        // The shared header, so this screen's title is placed by the same code as
+        // every other one. It used to stack an empty eyebrow above the title and a
+        // blurb below it, both of which were already being zeroed out at layout —
+        // three views to draw one word.
+        header = DashboardSectionHeader(title: "Insights", style: style)
+        content.addSubview(header)
         content.addSubview(segmented)
         if isSample {
             let chip = DashboardChip(text: "Sample data", tone: .outline, style: style)
             content.addSubview(chip)
             sampleChip = chip
         }
-        [volumeCard, paceCard, savedCard, latencyCard, fixesCard, streakCard]
+        [volumeCard, paceCard, savedCard, activityCard, fixesCard, streakCard]
             .forEach(content.addSubview)
 
         segmented.onChange = { [weak self] index in
@@ -214,7 +205,7 @@ public final class InsightsView: NSView {
                 : .none
         )
 
-        latencyCard.configure(metrics: m)
+        activityCard.configure(metrics: m)
         fixesCard.configure(metrics: m)
         streakCard.configure(metrics: m)
     }
@@ -229,12 +220,13 @@ public final class InsightsView: NSView {
         let width = bounds.width - padX * 2
         guard width > 0 else { return }
 
-        // Header.
-        var y = padY
-        eyebrow.frame = .zero
+        // Header. The range switch sits on the title's row, where every other
+        // section puts its actions.
+        header.frame = NSRect(x: padX, y: padY, width: width, height: header.height)
 
         let segmentedWidth = segmented.intrinsicWidth
-        segmented.frame = NSRect(x: bounds.width - padX - segmentedWidth, y: y - 3,
+        segmented.frame = NSRect(x: bounds.width - padX - segmentedWidth,
+                                 y: padY + ((header.height - 32) / 2).rounded(),
                                  width: segmentedWidth, height: 32)
         if let sampleChip {
             sampleChip.frame = NSRect(x: segmented.frame.minX - 10 - sampleChip.frame.width,
@@ -242,14 +234,7 @@ public final class InsightsView: NSView {
                                       width: sampleChip.frame.width, height: sampleChip.frame.height)
         }
 
-        let headingSize = heading.fittingSize
-        heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 220), height: headingSize.height)
-        y += headingSize.height + 5
-
-        let blurbWidth = min(width - 260, 640)
-        let blurbHeight = blurb.stringValue.isEmpty ? 0 : DashboardType.size(blurb, width: blurbWidth).height
-        blurb.frame = NSRect(x: padX, y: y, width: blurbWidth, height: blurbHeight)
-        y += blurbHeight + (blurbHeight > 0 ? 30 : 12)
+        var y = DashboardSectionHeader.contentTop(for: header) - DashboardSpace.xs
 
         // Three stat cards, then two panels, then the year band. Heights are
         // derived from what is left rather than fixed, so the page fills the
@@ -290,7 +275,7 @@ public final class InsightsView: NSView {
         y += statHeight + gap
 
         let fixesWidth: CGFloat = 366
-        latencyCard.frame = NSRect(x: padX, y: y, width: width - fixesWidth - gap, height: panelHeight)
+        activityCard.frame = NSRect(x: padX, y: y, width: width - fixesWidth - gap, height: panelHeight)
         fixesCard.frame = NSRect(x: padX + width - fixesWidth, y: y, width: fixesWidth, height: panelHeight)
         y += panelHeight + gap
 
@@ -507,264 +492,266 @@ final class InsightsCardHeader: NSView {
     var height: CGFloat { titleField.fittingSize.height }
 }
 
-// MARK: - Latency card
+// MARK: - Activity card
 
-/// The card Flow cannot draw.
-public final class InsightsLatencyCard: NSView {
+/// Words a day — the biggest panel on the page, and the one about the person
+/// rather than about the software.
+///
+/// It replaced a response-time histogram. Roman: *"the graph part shouldn't
+/// really show the response time of how the actual app works, because that's
+/// more so just bragging about how good the app is when it should more so focus
+/// on the actual user's stats."*
+///
+/// The latency numbers are not deleted — they are still measured on every
+/// dictation, still on the record, and still what the rig scores. They are just
+/// not what the largest thing on a screen called Insights should be spending
+/// itself on.
+///
+/// The headline follows the pointer. Hover a column and the number becomes that
+/// day; move off and it goes back to the average. Health and Fitness both do
+/// exactly this, and it is better than a tooltip for the same reason: the number
+/// is already the biggest thing on the card, so putting the answer there costs
+/// nothing and covers nothing.
+public final class InsightsActivityCard: NSView {
 
     private var style: DashboardStyle
     private let header: InsightsCardHeader
-    private let plot: InsightsLatencyPlot
+    private let chart: InsightsDailyChart
     private var primary = NSTextField(labelWithString: "")
-    private var primaryCaption: NSTextField
-    private var secondary = NSTextField(labelWithString: "")
-    private var secondaryCaption: NSTextField
+    private var caption: NSTextField
     private var footnote: NSTextField
-    private var footnoteMeta: NSTextField
-    private let numbersDivider: DashboardRule
-    private var legend: [InsightsLegendDot] = []
+
+    private var averageValue: [(text: String, isUnit: Bool)] = []
+    private var averageCaption = ""
 
     public override var isFlipped: Bool { true }
 
     public init(style: DashboardStyle) {
         self.style = style
         header = InsightsCardHeader(style: style)
-        plot = InsightsLatencyPlot(firstWord: [], endToEnd: [], p50: 0, p90: 0, style: style)
-        primaryCaption = DashboardType.label("", font: .systemFont(ofSize: 11.5, weight: .regular),
-                                             color: style.inkTertiary, tracking: 0)
-        secondaryCaption = DashboardType.label("", font: .systemFont(ofSize: 11.5, weight: .regular),
-                                               color: style.inkTertiary, tracking: 0)
+        chart = InsightsDailyChart(style: style)
+        caption = DashboardType.label("", font: .systemFont(ofSize: 11.5, weight: .regular),
+                                      color: style.inkTertiary, tracking: 0)
         footnote = DashboardType.label("", font: .systemFont(ofSize: 11, weight: .regular),
                                        color: style.inkQuaternary, tracking: 0)
-        footnoteMeta = DashboardType.label("", font: DashboardType.micro,
-                                           color: style.inkQuaternary, alignment: .right)
-        numbersDivider = DashboardRule(color: style.hairline)
         super.init(frame: .zero)
-        for field in [primary, secondary] {
-            field.isBezeled = false
-            field.drawsBackground = false
-            field.isEditable = false
-            field.isSelectable = false
-            field.maximumNumberOfLines = 1
-            field.cell?.usesSingleLineMode = true
-        }
-        [header, plot, primary, primaryCaption, secondary, secondaryCaption,
-         footnote, footnoteMeta, numbersDivider].forEach(addSubview)
+        primary.isBezeled = false
+        primary.drawsBackground = false
+        primary.isEditable = false
+        primary.isSelectable = false
+        primary.maximumNumberOfLines = 1
+        primary.cell?.usesSingleLineMode = true
+        [header, chart, primary, caption, footnote].forEach(addSubview)
+
+        chart.onHover = { [weak self] day in self?.show(day) }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    private func number(_ text: String, unit: String, color: NSColor, size: CGFloat) -> NSAttributedString {
-        let line = NSMutableAttributedString(string: text, attributes: [
-            .font: NSFont.systemFont(ofSize: size, weight: .medium),
-            .foregroundColor: color,
-            .kern: -0.8,
-        ])
-        line.append(NSAttributedString(string: " " + unit, attributes: [
-            .font: NSFont.systemFont(ofSize: size * 0.47, weight: .medium),
-            .foregroundColor: style.inkTertiary,
-            .kern: 0,
-        ]))
+    private func number(_ parts: [(text: String, isUnit: Bool)], size: CGFloat) -> NSAttributedString {
+        let line = NSMutableAttributedString()
+        for part in parts {
+            line.append(NSAttributedString(string: part.text, attributes: [
+                .font: NSFont.systemFont(ofSize: part.isUnit ? size * 0.45 : size,
+                                         weight: .medium),
+                .foregroundColor: part.isUnit ? style.inkTertiary : style.ink,
+                .kern: part.isUnit ? 0 : -0.8,
+            ]))
+        }
         return line
     }
 
+    /// The hovered bucket, or back to the average when there is none.
+    private func show(_ bucket: InsightsBucket?) {
+        guard let bucket else {
+            primary.attributedStringValue = number(averageValue, size: 30)
+            setCaption(averageCaption)
+            needsLayout = true
+            return
+        }
+        primary.attributedStringValue = number(
+            [(InsightsFormat.count(bucket.words), false), ("  words", true)], size: 30)
+        setCaption(bucket.label
+                   + (bucket.sessions > 0
+                      ? "  \u{00B7}  \(bucket.sessions) dictation\(bucket.sessions == 1 ? "" : "s")"
+                      : "  \u{00B7}  nothing dictated"))
+        needsLayout = true
+    }
+
+    private func setCaption(_ text: String) {
+        caption.removeFromSuperview()
+        caption = DashboardType.label(text, font: .systemFont(ofSize: 11.5, weight: .regular),
+                                      color: style.inkTertiary, tracking: 0)
+        addSubview(caption)
+    }
+
     public func configure(metrics m: InsightsMetrics) {
-        header.configure(title: "Response time",
-                         meta: "\(InsightsFormat.count(m.endToEndMs.count)) dictations")
+        let bucketing = InsightsActivityCard.bucketing(for: m.range)
+        let buckets = InsightsActivityCard.bucket(m.dailyWords, by: bucketing)
+        header.configure(title: "Words \(bucketing.headline)",
+                         meta: m.activeDays > 0
+                             ? "\(InsightsFormat.count(m.activeDays)) active day\(m.activeDays == 1 ? "" : "s")"
+                             : "")
 
-        // The headline is release → text, not key-down → text.
-        //
-        // This card used to show `endToEndP50` under the words "median, key
-        // release to text on screen". Those are different quantities: end-to-end
-        // starts when the key goes DOWN, so it contains however long the person
-        // spoke. Against a corpus of five-second clips it read 12.11s and made
-        // the fastest thing about this app look like the slowest, while the
-        // figure it claimed to be — what you wait through after letting go — was
-        // three milliseconds.
-        primary.attributedStringValue = m.hasReleaseLatency
-            ? number(InsightsFormat.seconds(m.releaseP50), unit: "s", color: style.accent, size: 30)
-            : number("—", unit: "", color: style.inkTertiary, size: 30)
-        primaryCaption.removeFromSuperview()
-        primaryCaption = DashboardType.label(
-            m.hasReleaseLatency
-                // Short on purpose. A caption sits under its number and shares
-                // the line with a second measurement — the long version pushed
-                // the first-word figure past the legend, where the layout rule
-                // correctly hid it, and the card lost the one number it did have.
-                ? "median, after you stop talking"
-                : "not measured yet",
-            font: .systemFont(ofSize: 11.5, weight: .regular),
-            color: style.inkTertiary, tracking: 0)
-        addSubview(primaryCaption)
+        // The average across ALL buckets, not just the ones with something in
+        // them. "You average 300 words a day" is a false claim if you dictated on
+        // six days out of thirty, and the honest version is the one the dashed
+        // line in the chart is actually drawn at.
+        let total = buckets.reduce(0) { $0 + $1.words }
+        let mean = buckets.isEmpty ? 0 : Int((Double(total) / Double(buckets.count)).rounded())
+        averageValue = buckets.isEmpty || total == 0
+            ? [("\u{2014}", true)]
+            : [(InsightsFormat.count(mean), false), ("  words", true)]
+        averageCaption = buckets.isEmpty || total == 0
+            ? "nothing dictated \(m.range.phrase)"
+            : "\(bucketing.headline) on average, over \(InsightsFormat.count(buckets.count)) \(bucketing.unitPlural)"
 
-        secondary.attributedStringValue = number(InsightsFormat.seconds(m.firstWordP50), unit: "s",
-                                                 color: style.ink, size: 22)
-        secondaryCaption.removeFromSuperview()
-        secondaryCaption = DashboardType.label("median, key press to first word",
-                                               font: .systemFont(ofSize: 11.5, weight: .regular),
-                                               color: style.inkTertiary, tracking: 0)
-        addSubview(secondaryCaption)
-
-        // The distribution follows the headline. Where there is no release data
-        // yet the chart falls back to end-to-end rather than drawing nothing, and
-        // the footnote below says which of the two is on screen — an unlabelled
-        // fallback is how this card got into trouble in the first place.
-        plot.firstWord = m.firstWordMs
-        plot.endToEnd = m.hasReleaseLatency ? m.releaseMs : m.endToEndMs
-        plot.markerP50 = m.hasReleaseLatency ? m.releaseP50 : m.endToEndP50
-        plot.markerP90 = m.hasReleaseLatency ? m.releaseP90 : m.endToEndP90
-        plot.needsDisplay = true
+        chart.buckets = buckets
+        chart.style = style
+        show(nil)
 
         footnote.removeFromSuperview()
         footnote = DashboardType.label(
-            m.hasReleaseLatency
-                ? "No server in the path — the slow tail is this Mac under load, not a network."
-                : "Chart is key-down to text — older history carries no release stamp.",
+            buckets.isEmpty ? "" : "One column \(bucketing.headline). The dashed line is your average.",
             font: .systemFont(ofSize: 11, weight: .regular),
             color: style.inkQuaternary, tracking: 0)
         addSubview(footnote)
 
-        // The two numbers the chart cannot show: what the worst hundredth costs,
-        // and how often the thorough cleanup pass beat its deadline instead of
-        // falling back to the fast one.
-        footnoteMeta.removeFromSuperview()
-        let p99 = m.hasReleaseLatency ? m.releaseP99 : m.endToEndP99
-        footnoteMeta = DashboardType.label("p99 \(InsightsFormat.seconds(p99))s · thorough cleanup \(InsightsFormat.percent(m.thoroughShare))",
-                                           font: DashboardType.micro,
-                                           color: style.inkQuaternary, alignment: .right)
-        addSubview(footnoteMeta)
-
-        legend.forEach { $0.removeFromSuperview() }
-        legend = [
-            InsightsLegendDot(text: "first word", color: style.inkTertiary, filled: false, style: style),
-            InsightsLegendDot(text: "fully inserted", color: style.accent, filled: true, style: style),
-        ]
-        legend.forEach(addSubview)
-
         needsLayout = true
+    }
+
+    // MARK: - Bucketing
+
+    /// How wide one column is, and what to call it.
+    ///
+    /// Thirty daily columns against a real habit is twenty-four empty slots and
+    /// one spike — a chart that reads as broken rather than as sparse. The bucket
+    /// has to widen with the window, which is what every Apple health chart does
+    /// and what the first version of this card did not.
+    enum Bucketing {
+        case day, week, month
+
+        var headline: String {
+            switch self {
+            case .day: return "a day"
+            case .week: return "a week"
+            case .month: return "a month"
+            }
+        }
+        var unitPlural: String {
+            switch self {
+            case .day: return "days"
+            case .week: return "weeks"
+            case .month: return "months"
+            }
+        }
+        var size: Int {
+            switch self {
+            case .day: return 1
+            case .week: return 7
+            case .month: return 30
+            }
+        }
+    }
+
+    static func bucketing(for range: InsightsRange) -> Bucketing {
+        switch range.days {
+        case .some(let d) where d <= 10: return .day
+        case .some(let d) where d <= 45: return .week
+        default: return .month
+        }
+    }
+
+    private static let dayLabel: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("EEE d MMM")
+        return f
+    }()
+    private static let shortLabel: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("d MMM")
+        return f
+    }()
+    private static let monthLabel: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMM")
+        return f
+    }()
+
+    /// Buckets are filled from the END of the series backwards, so the last
+    /// column is always a whole, current period. Filling forwards leaves the
+    /// newest bucket a stub — the one column a person actually looks at, drawn
+    /// short for a reason that has nothing to do with how much they said.
+    static func bucket(_ days: [InsightsMetrics.Day], by bucketing: Bucketing) -> [InsightsBucket] {
+        guard !days.isEmpty else { return [] }
+        guard bucketing != .day else {
+            return days.map {
+                InsightsBucket(start: $0.date, words: $0.words, sessions: $0.sessions,
+                               label: dayLabel.string(from: $0.date))
+            }
+        }
+        let size = bucketing.size
+        var out: [InsightsBucket] = []
+        var end = days.count
+        while end > 0 {
+            let start = max(0, end - size)
+            let slice = days[start..<end]
+            guard let first = slice.first else { break }
+            out.append(InsightsBucket(
+                start: first.date,
+                words: slice.reduce(0) { $0 + $1.words },
+                sessions: slice.reduce(0) { $0 + $1.sessions },
+                label: bucketing == .month
+                    ? monthLabel.string(from: first.date)
+                    : shortLabel.string(from: first.date)))
+            end = start
+        }
+        return out.reversed()
     }
 
     public override func layout() {
         super.layout()
         let pad: CGFloat = 20
         let inner = bounds.width - pad * 2
+        guard inner > 0 else { return }
 
         header.frame = NSRect(x: pad, y: 19, width: inner, height: 20)
         var y: CGFloat = 19 + header.height + 16
 
         let primarySize = primary.fittingSize
-        primary.frame = NSRect(x: pad, y: y, width: primarySize.width, height: primarySize.height)
-        let primaryCaptionSize = primaryCaption.fittingSize
-        primaryCaption.frame = NSRect(x: pad, y: y + primarySize.height + 1,
-                                      width: primaryCaptionSize.width, height: primaryCaptionSize.height)
+        primary.frame = NSRect(x: pad, y: y, width: min(primarySize.width, inner), height: primarySize.height)
+        let captionSize = caption.fittingSize
+        caption.frame = NSRect(x: pad, y: y + primarySize.height + 1,
+                               width: min(captionSize.width, inner), height: captionSize.height)
+        y += primarySize.height + captionSize.height + 16
 
-        // The second number is set on the *baseline* of the first, not on its
-        // box — 22pt and 30pt boxes centred against each other look like a
-        // mistake, and their captions have to share one line to read as a pair.
-        // A hairline between the pair. Without it the two captions run together
-        // into one sentence at a glance, and the second number looks like a
-        // continuation of the first rather than a different measurement.
-        let secondX = pad + max(primarySize.width, primaryCaptionSize.width) + 37
-        let secondarySize = secondary.fittingSize
-        let secondaryCaptionSize = secondaryCaption.fittingSize
-        // Baselines, not boxes. Bottom-aligning a 22pt field against a 30pt one
-        // leaves the smaller number sitting two points low, which is exactly far
-        // enough to look like a bug and not far enough to spot straight away.
-        let baselineDrop = primary.firstBaselineOffsetFromTop - secondary.firstBaselineOffsetFromTop
-        secondary.frame = NSRect(x: secondX, y: (y + baselineDrop).rounded(),
-                                 width: secondarySize.width, height: secondarySize.height)
-        secondaryCaption.frame = NSRect(x: secondX, y: y + primarySize.height + 1,
-                                        width: secondaryCaptionSize.width, height: secondaryCaptionSize.height)
-
-        // Legend rides on the same line as the numbers, hard right.
-        // The legend owns the right edge. Work out where it starts BEFORE placing
-        // the secondary column, so the two cannot occupy the same pixels — at
-        // 1120pt wide they did, and "3.07 s" printed straight through "first word".
-        var legendLeftEdge = bounds.width - pad
-        for dot in legend { legendLeftEdge -= dot.intrinsicWidth + 14 }
-
-        let secondaryFits = secondX + max(secondarySize.width, secondaryCaptionSize.width) < legendLeftEdge - 12
-        secondary.isHidden = !secondaryFits
-        secondaryCaption.isHidden = !secondaryFits
-        numbersDivider.isHidden = !secondaryFits
-
-        var legendX = bounds.width - pad
-        for dot in legend.reversed() {
-            let width = dot.intrinsicWidth
-            legendX -= width
-            dot.frame = NSRect(x: legendX, y: y + 6, width: width, height: 16)
-            legendX -= 16
+        // The card is the ceiling, and the 60pt chart floor is not.
+        //
+        // A `max(60, ...)` floor with no cap put the footnote at y + 60 + 10 inside
+        // a 180pt card at the minimum window size — so "One column a week. The
+        // dashed line is your average." was drawn OUTSIDE its own card, floating
+        // on the page in the 24-point gutter above the streak band. A floor and a
+        // hard container cannot both win; the container has to.
+        //
+        // So the footnote is what gives way. It is a legend for a chart that is
+        // legible without it, and losing it is much cheaper than losing the chart
+        // or printing on the page.
+        let bottomPad: CGFloat = 18
+        let available = max(0, bounds.height - y - bottomPad)
+        let footnoteHeight = footnote.stringValue.isEmpty ? 0 : footnote.fittingSize.height
+        let footnoteFits = footnoteHeight > 0 && available - footnoteHeight - 10 >= 60
+        footnote.isHidden = !footnoteFits
+        let chartHeight = max(0, footnoteFits ? available - footnoteHeight - 10 : available)
+        chart.frame = NSRect(x: pad, y: y, width: inner, height: chartHeight)
+        if footnoteFits {
+            footnote.frame = NSRect(x: pad, y: y + chartHeight + 10,
+                                    width: min(footnote.fittingSize.width, inner), height: footnoteHeight)
         }
-
-        numbersDivider.frame = NSRect(x: (secondX - 19).rounded(), y: y + 4, width: 1,
-                                      height: primarySize.height + primaryCaptionSize.height - 3)
-
-        y += primarySize.height + primaryCaptionSize.height + 12
-
-        let footnoteHeight = DashboardType.size(footnote, width: inner).height
-        let plotHeight = max(70, bounds.height - y - footnoteHeight - 18 - 8)
-        plot.frame = NSRect(x: pad, y: y, width: inner, height: plotHeight)
-        let footnoteSize = footnote.fittingSize
-        let metaSize = footnoteMeta.fittingSize
-        // The meta is the harder number to lose, so it keeps its width and the
-        // prose gives way. Overlapping them made both unreadable.
-        let availableForProse = max(0, inner - metaSize.width - 16)
-        footnote.frame = NSRect(x: pad, y: y + plotHeight + 8,
-                                width: min(footnoteSize.width, availableForProse), height: footnoteHeight)
-        footnote.isHidden = availableForProse < 120
-        footnoteMeta.frame = NSRect(x: bounds.width - pad - metaSize.width,
-                                    y: (y + plotHeight + 8 + (footnoteHeight - metaSize.height) / 2).rounded(),
-                                    width: metaSize.width, height: metaSize.height)
     }
 
     public override func draw(_ dirtyRect: NSRect) {
         DashboardDraw.sunkenSurface(bounds, radius: DashboardRadius.card, style: style, flipped: true)
-    }
-}
-
-/// A legend entry: a swatch that matches how the series is drawn — filled for a
-/// filled curve, ringed for an outlined one — plus its name.
-final class InsightsLegendDot: NSView {
-
-    private let label: NSTextField
-    private let color: NSColor
-    private let filled: Bool
-
-    override var isFlipped: Bool { true }
-
-    init(text: String, color: NSColor, filled: Bool, style: DashboardStyle) {
-        self.color = color
-        self.filled = filled
-        label = DashboardType.label(text, font: .systemFont(ofSize: 11, weight: .medium),
-                                    color: style.inkTertiary, tracking: 0)
-        super.init(frame: .zero)
-        addSubview(label)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    var intrinsicWidth: CGFloat { 14 + ceil(label.fittingSize.width) }
-
-    override func layout() {
-        super.layout()
-        let size = label.fittingSize
-        label.frame = NSRect(x: 14, y: ((bounds.height - size.height) / 2).rounded(),
-                             width: size.width, height: size.height)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let rect = NSRect(x: 0, y: (bounds.height - 8) / 2, width: 8, height: 8)
-        if filled {
-            color.setFill()
-            NSBezierPath(ovalIn: rect).fill()
-        } else {
-            color.withAlphaComponent(0.8).setStroke()
-            let path = NSBezierPath(ovalIn: rect.insetBy(dx: 0.6, dy: 0.6))
-            path.lineWidth = 1.2
-            path.stroke()
-        }
     }
 }
 
@@ -836,9 +823,9 @@ public final class InsightsFixesCard: NSView {
         inlineLegend.removeFromSuperview()
         inlineLegend = InsightsInlineLegend(items: [
             (text: "\(InsightsFormat.count(m.wordsCorrected)) corrected",
-             color: style.ink.withAlphaComponent(style.isDark ? 0.82 : 0.78)),
+             color: { $0.ink.withAlphaComponent($0.isDark ? 0.82 : 0.78) }),
             (text: "\(InsightsFormat.count(m.dictionaryFixes)) from your dictionary",
-             color: style.accent),
+             color: { $0.accent }),
         ], style: style)
         addSubview(inlineLegend)
 
@@ -968,12 +955,31 @@ final class InsightsStackedBar: NSView {
 /// are the part of this card Flow does not have.
 final class InsightsInlineLegend: NSView {
 
-    private var swatches: [NSColor] = []
+    /// The swatch colours are held as CLOSURES, not as colours.
+    ///
+    /// This drew "41 corrected" with a white dot on a white card in light mode,
+    /// while the bar directly above it — using the identical expression,
+    /// `style.ink.withAlphaComponent(0.78)` — drew correctly.
+    ///
+    /// The difference is *when* the expression ran. `style.ink` is `.labelColor`,
+    /// a dynamic catalog colour, and a dynamic colour resolves against whatever
+    /// appearance is current at the moment it is asked. Inside `draw(_:)` that is
+    /// the view's own appearance, which is right. The bar computed it there. The
+    /// legend computed it in `configure(metrics:)` — no drawing appearance in
+    /// scope — so it resolved against the SYSTEM appearance instead. This Mac is
+    /// in dark mode, so the light theme was handed white.
+    ///
+    /// Nothing about the light render looked wrong except one seven-point dot, and
+    /// the same class of bug is waiting anywhere a system colour is stored rather
+    /// than asked for at draw time.
+    private var swatches: [(DashboardStyle) -> NSColor] = []
     private var labels: [NSTextField] = []
+    private let style: DashboardStyle
 
     override var isFlipped: Bool { true }
 
-    init(items: [(text: String, color: NSColor)], style: DashboardStyle) {
+    init(items: [(text: String, color: (DashboardStyle) -> NSColor)], style: DashboardStyle) {
+        self.style = style
         super.init(frame: .zero)
         for item in items {
             swatches.append(item.color)
@@ -1007,7 +1013,7 @@ final class InsightsInlineLegend: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         for (start, color) in zip(positions(), swatches) {
-            color.setFill()
+            color(style).setFill()
             NSBezierPath(ovalIn: NSRect(x: start, y: (bounds.height - 7) / 2, width: 7, height: 7)).fill()
         }
     }

@@ -141,33 +141,57 @@ import Testing
     // Roman, looking at the app: "all of the tabs don't have the exact layout —
     // the heading of the tab at the top is in different positions."
     //
-    // Measured across five rendered sections, the titles spread 65 points. Two
-    // causes: some sections put a small-caps eyebrow above the title and some did
-    // not, so the titles could never line up; and Transforms sized its header box
-    // at a fixed 26pt around a 28pt face, which crops the leading and lifts the
-    // glyphs. Both are fixed, and this stops either coming back.
+    // THIS TEST USED TO PASS WHILE MATCHING NOTHING. It looked for the title with
+    // `$0.font?.pointSize == DashboardType.display.pointSize`, and every label in
+    // this app is built by setting `attributedStringValue`, which never touches
+    // the cell's font — so `field.font` answered 13pt for a 28pt heading, the
+    // predicate was false everywhere, `tops` came back empty, and
+    // `guard let low = values.min() else { return }` returned a pass. It was green
+    // for its whole life while three sections sat twenty-four points out of line.
     //
-    // Asserted on the frames rather than on pixels: a render is slow, needs a
-    // window server, and answers the same question less precisely.
+    // Two changes stop that recurring: the title is found through
+    // `DashboardLayoutProbe.title(in:)`, which reads the attributed string and
+    // also checks the WEIGHT (the 28pt metric face would otherwise match), and the
+    // count is asserted before the spread is. A test that can find nothing must
+    // fail, not pass.
     var tops: [DashboardSection: CGFloat] = [:]
-    for section in [DashboardSection.dictation, .insights, .dictionary, .snippets, .transforms] {
-        guard let view = DashboardSectionRegistry.shared.dashboardView(for: section, style: .dark)
-        else { continue }
-        view.frame = NSRect(origin: .zero,
-                            size: DashboardMetrics.sectionFrame(
-                                in: DashboardMetrics.panelFrame(in: DashboardMetrics.windowSize)).size)
-        view.layoutSubtreeIfNeeded()
-
-        func titles(in v: NSView) -> [NSTextField] {
-            v.subviews.flatMap { ($0 as? NSTextField).map { [$0] } ?? titles(in: $0) }
-        }
-        // The title is the one drawn in the display face.
-        let title = titles(in: view).first { $0.font?.pointSize == DashboardType.display.pointSize }
-        if let title { tops[section] = view.convert(title.frame.origin, from: title.superview).y }
+    for section in DashboardSection.allCases {
+        guard let reading = DashboardLayoutProbe.measure(section, style: .dark) else { continue }
+        #expect(reading.titleTop >= 0, "\(section.rawValue) has no display-face title")
+        tops[section] = reading.titleTop
     }
 
+    // The whole app, not the five sections that happened to be listed here before.
+    // Style, Notetaker and Scratchpad were the three that had drifted, and they
+    // were the three not covered.
+    #expect(tops.count == DashboardSection.allCases.count,
+            "only measured \(tops.count) of \(DashboardSection.allCases.count) sections")
+
     let values = Array(tops.values)
-    guard let low = values.min(), let high = values.max() else { return }
+    let low = try! #require(values.min())
+    let high = try! #require(values.max())
     #expect(high - low <= 2,
             "section titles span \(Int(high - low))pt: \(tops.map { "\($0.key.rawValue) \(Int($0.value))" }.sorted())")
+}
+
+@Test @MainActor func theTitleFinderCanActuallyFail() {
+    // The guard on the guard.
+    //
+    // The point of the test above is that it fails when a title moves; that is
+    // only true if the finder finds titles at all. This asserts the finder's
+    // discrimination directly, so a future refactor that breaks it — a different
+    // label factory, a weight change — is caught here rather than by every
+    // alignment test quietly going vacuous again.
+    let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+    #expect(DashboardLayoutProbe.title(in: container) == nil, "found a title in an empty view")
+
+    // A 28pt REGULAR label is a metric, not a heading, and must not match.
+    let metric = DashboardType.label("2,646", font: DashboardType.metric, color: .black)
+    container.addSubview(metric)
+    #expect(DashboardLayoutProbe.title(in: container) == nil,
+            "a 28pt metric was mistaken for a section title")
+
+    let heading = DashboardType.label("Dictation", font: DashboardType.display, color: .black)
+    container.addSubview(heading)
+    #expect(DashboardLayoutProbe.title(in: container) === heading)
 }

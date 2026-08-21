@@ -38,6 +38,10 @@ public final class DictationCoordinator {
     /// otherwise the release-and-paste path below runs exactly as it always did.
     private let liveTyper: LiveTyper
     private var isLive = false
+    /// Remembers the last insertion so ⌥⌫ can take it back. Optional because
+    /// every path in this file works without one, and a test that does not care
+    /// about the chord should not have to build one.
+    private let undo: InsertionUndo?
 
     /// How long the thorough cleanup is allowed to take before we give up on it
     /// and insert the fast version. Past roughly a quarter second the pause
@@ -84,9 +88,11 @@ public final class DictationCoordinator {
         snippets: SnippetStore = .shared,
         settings: QuillSettings = .shared,
         liveTyper: LiveTyper = LiveTyper(),
+        undo: InsertionUndo? = nil,
         context: @escaping @MainActor () -> AppContext = { AppContext.current() }
     ) {
         self.context = context
+        self.undo = undo
         self.settings = settings
         self.liveTyper = liveTyper
         self.hotkey = hotkey
@@ -257,6 +263,10 @@ public final class DictationCoordinator {
         // whatever the user was in when they pressed the key, and it is the only
         // window it is ever safe to type into during this dictation.
         capturedContext = context()
+        // Whatever was inserted last is about to stop being the last thing at the
+        // caret — live typing starts writing into that same field, and a paste
+        // lands after it. Either way the record is stale from here on.
+        undo?.discard()
         isLive = settings.liveText && liveTyper.begin()
         overlay.show(.listening(level: 0))
     }
@@ -449,10 +459,16 @@ public final class DictationCoordinator {
 
             switch result {
             case .inserted:
+                // Recorded here and only here: this is the one branch where text
+                // is believed to be on screen, and the undo chord may not fire
+                // against a sentence that never landed.
+                self.undo?.record(final)
                 overlay.show(.inserted(words: final.split(separator: " ").count))
             case .fellBackToClipboard(let reason):
+                self.undo?.discard()
                 overlay.show(.error("Copied to clipboard — \(reason)"))
             case .failed(let reason):
+                self.undo?.discard()
                 overlay.show(.error(reason))
             }
 

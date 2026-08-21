@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import CoreGraphics
 import Foundation
 
 /// The keystrokes live typing issues, behind a seam.
@@ -13,6 +14,11 @@ import Foundation
 public protocol KeystrokeEmitting: Sendable {
     @discardableResult func type(_ text: String) -> Bool
     @discardableResult func backspace(times: Int) -> Bool
+    /// Posts a modified chord. Used to put back a keystroke Quill swallowed and
+    /// then decided not to act on, so the app still sees it — the undo chord
+    /// overrides a standard binding, and that is only safe while a refusal
+    /// leaves the original keystroke intact.
+    @discardableResult func chord(key: CGKeyCode, flags: CGEventFlags) -> Bool
 }
 
 public struct SystemKeystrokes: KeystrokeEmitting {
@@ -20,6 +26,9 @@ public struct SystemKeystrokes: KeystrokeEmitting {
     @discardableResult public func type(_ text: String) -> Bool { SyntheticKeyboard.type(text) }
     @discardableResult public func backspace(times: Int) -> Bool {
         SyntheticKeyboard.backspace(times: times)
+    }
+    @discardableResult public func chord(key: CGKeyCode, flags: CGEventFlags) -> Bool {
+        SyntheticKeyboard.postChord(key: key, flags: flags)
     }
 }
 

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import QuillKit
@@ -101,6 +102,7 @@ private func waitFor(_ timeout: Duration = .seconds(2),
 private struct SilentKeys: KeystrokeEmitting {
     func type(_ text: String) -> Bool { true }
     func backspace(times: Int) -> Bool { true }
+    func chord(key: CGKeyCode, flags: CGEventFlags) -> Bool { true }
 }
 
 @Test func theChangeOfMindRuleNeedsBothHalves() {

@@ -792,3 +792,156 @@ public final class InsightsSegmented: NSView {
         selectedIndex = index
     }
 }
+
+// MARK: - Words over time
+
+/// Words dictated over time, bucketed to fit the range.
+///
+/// This is the chart Roman asked for by name: *"the graph part shouldn't really
+/// show the response time of how the actual app works, because that's more so
+/// just bragging about how good the app is when it should more so focus on the
+/// actual user's stats. For example, the graph should be how many words they
+/// have dictated this month or this week."*
+///
+/// He is right about more than the content. A response-time histogram is a chart
+/// about the software; every other card on this page is a chart about the person
+/// using it, and the one panel breaking that rule was also the largest.
+///
+/// **The bucket follows the range, and that is not a detail.** Thirty daily
+/// columns against a real dictation habit is twenty-four empty slots, one spike
+/// and a chart that reads as broken — which is exactly what the first version of
+/// this drew. Health and Fitness bucket by day at a week, by week at a month and
+/// by month at a year, for this reason. So does this.
+public struct InsightsBucket: Sendable, Equatable {
+    public let start: Date
+    public let words: Int
+    public let sessions: Int
+    /// What the hover readout calls this bucket — "Thu 14 Aug", "week of 18 Aug".
+    public let label: String
+
+    public init(start: Date, words: Int, sessions: Int, label: String) {
+        self.start = start
+        self.words = words
+        self.sessions = sessions
+        self.label = label
+    }
+}
+
+public final class InsightsDailyChart: NSView {
+
+    public var buckets: [InsightsBucket] = [] { didSet { needsDisplay = true } }
+    public var style: DashboardStyle { didSet { needsDisplay = true } }
+    /// Fires with the bucket under the pointer, or nil when it leaves. The card
+    /// swaps its headline for that bucket rather than floating a tooltip over the
+    /// bars — the number is already the biggest thing on the card, so showing it
+    /// there costs nothing and covers nothing.
+    public var onHover: ((InsightsBucket?) -> Void)?
+
+    private var hoveredIndex: Int? {
+        didSet {
+            guard hoveredIndex != oldValue else { return }
+            needsDisplay = true
+            onHover?(hoveredIndex.flatMap { buckets.indices.contains($0) ? buckets[$0] : nil })
+        }
+    }
+
+    private static let axisHeight: CGFloat = 18
+
+    public override var isFlipped: Bool { true }
+
+    public init(style: DashboardStyle) {
+        self.style = style
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    private var average: Double {
+        guard !buckets.isEmpty else { return 0 }
+        return Double(buckets.reduce(0) { $0 + $1.words }) / Double(buckets.count)
+    }
+
+    private var plotHeight: CGFloat { max(10, bounds.height - InsightsDailyChart.axisHeight) }
+
+    private func columnRect(_ index: Int, peak: Double) -> NSRect {
+        let pitch = bounds.width / CGFloat(max(1, buckets.count))
+        // Wide buckets get wide bars. A 5-bucket month drawn with the 3pt bars a
+        // 90-day window needs looks like a chart that failed to load.
+        let width = max(3, min(64, (pitch - max(3, pitch * 0.28)).rounded()))
+        let x = (CGFloat(index) * pitch + (pitch - width) / 2).rounded()
+        let value = Double(buckets[index].words)
+        let height = value <= 0 ? 3 : max(4, (plotHeight * CGFloat(value / peak)).rounded())
+        return NSRect(x: x, y: plotHeight - height, width: width, height: height)
+    }
+
+    public override func draw(_ dirtyRect: NSRect) {
+        guard !buckets.isEmpty else { return }
+        let peak = max(1, Double(buckets.map(\.words).max() ?? 1))
+        let radius: CGFloat = 3
+
+        // The floor. Without it a run of empty buckets is a row of disconnected
+        // stubs; with it, it is a series with a hole in it, which is the truth.
+        style.hairline.setFill()
+        NSRect(x: 0, y: plotHeight - 0.5, width: bounds.width, height: 1).fill()
+
+        // The average, behind the bars. A reference line drawn on top of the data
+        // it describes is a line crossing things out.
+        let mean = average
+        if mean > 0 {
+            let y = (plotHeight - plotHeight * CGFloat(mean / peak)).rounded() + 0.5
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 0, y: y))
+            path.line(to: NSPoint(x: bounds.width, y: y))
+            path.lineWidth = 1
+            path.setLineDash([3, 3], count: 2, phase: 0)
+            style.inkQuaternary.setStroke()
+            path.stroke()
+        }
+
+        let quiet = style.ink.withAlphaComponent(style.isDark ? 0.34 : 0.24)
+        let empty = style.ink.withAlphaComponent(style.isDark ? 0.10 : 0.07)
+        for index in buckets.indices {
+            let rect = columnRect(index, peak: peak)
+            let lit = index == hoveredIndex
+            let color = buckets[index].words <= 0 ? empty : (lit ? style.ink : quiet)
+            DashboardDraw.fill(rect, radius: radius, color: color)
+        }
+
+        // Two labels, at the ends. A dated axis under sixty columns is a row of
+        // overlapping numbers; the ends are the only two a person reads anyway.
+        guard let first = buckets.first, let last = buckets.last else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: DashboardType.micro,
+            .foregroundColor: style.inkQuaternary,
+        ]
+        let y = plotHeight + 4
+        NSAttributedString(string: first.label, attributes: attributes).draw(at: NSPoint(x: 0, y: y))
+        if buckets.count > 1 {
+            let tail = NSAttributedString(string: last.label, attributes: attributes)
+            tail.draw(at: NSPoint(x: bounds.width - ceil(tail.size().width), y: y))
+        }
+    }
+
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .mouseMoved,
+                                                 .activeInActiveApp, .inVisibleRect],
+                                       owner: self))
+    }
+
+    /// Nearest column to the pointer, not the one under it. A 4pt bar with 2pt of
+    /// gap either side is a target you cannot hit, and a chart that only responds
+    /// when you land on ink feels broken rather than precise.
+    public override func mouseMoved(with event: NSEvent) {
+        guard !buckets.isEmpty else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard point.y <= plotHeight else { hoveredIndex = nil; return }
+        let pitch = bounds.width / CGFloat(buckets.count)
+        hoveredIndex = max(0, min(buckets.count - 1, Int(point.x / max(1, pitch))))
+    }
+
+    public override func mouseExited(with event: NSEvent) { hoveredIndex = nil }
+}

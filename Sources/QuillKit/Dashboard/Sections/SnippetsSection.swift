@@ -46,9 +46,7 @@ public final class SnippetsSectionView: NSView {
     private var filter: String = ""
 
     // Header
-    private let eyebrow: NSTextField
-    private let heading: NSTextField
-    private let blurb: NSTextField
+    private var header: DashboardSectionHeader!
     private let stat: NSTextField
     private let newButton: DashboardButton
 
@@ -75,11 +73,6 @@ public final class SnippetsSectionView: NSView {
         self.store = store
         self.style = style
 
-        eyebrow = DashboardType.label("", font: DashboardType.eyebrow,
-                                      color: style.inkTertiary)
-        heading = DashboardType.label("Snippets", font: DashboardType.display, color: style.ink)
-        blurb = DashboardType.label("",
-                                    font: DashboardType.body, color: style.inkSecondary)
         stat = NSTextField(labelWithString: "")
         newButton = DashboardButton(title: "New snippet", symbol: "plus", kind: .primary, style: style)
 
@@ -98,11 +91,12 @@ public final class SnippetsSectionView: NSView {
 
         super.init(frame: .zero)
 
-        addSubview(eyebrow)
-        addSubview(heading)
-        addSubview(blurb)
+        // The shared header, so this title lands where the other nine do. It was
+        // the last section still placing its own, and it also stacked an empty
+        // eyebrow and an empty blurb to do it.
+        header = DashboardSectionHeader(title: "Snippets", trailing: [newButton], style: style)
+        addSubview(header)
         addSubview(stat)
-        addSubview(newButton)
         addSubview(listCard)
         addSubview(editor)
         addSubview(emptyState)
@@ -263,28 +257,17 @@ public final class SnippetsSectionView: NSView {
         let padY = DashboardMetrics.contentPaddingY
         let width = bounds.width - padX * 2
 
-        var y = padY
-        eyebrow.frame = .zero
+        header.frame = NSRect(x: padX, y: padY, width: width, height: header.height)
 
-        let headingSize = heading.fittingSize
-        heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 260), height: headingSize.height)
-        y += headingSize.height + 7
-
-        let blurbSize = blurb.fittingSize
-        blurb.frame = NSRect(x: padX, y: y, width: min(blurbSize.width, width - 300), height: blurbSize.height)
-
-        let buttonWidth = newButton.intrinsicWidth
-        newButton.frame = NSRect(x: bounds.width - padX - buttonWidth,
-                                 y: padY, width: buttonWidth, height: 36)
-
-        // The stat sits on the blurb's baseline, right-aligned under the button.
-        // Two things on one optical line rather than a third stacked element.
+        // The stat sits under the button, right-aligned, on the meta line's own
+        // row. It used to hang off an empty blurb's baseline, which meant its
+        // position depended on a label with no text in it.
         let statSize = stat.fittingSize
         stat.frame = NSRect(x: bounds.width - padX - statSize.width,
-                            y: y + ((blurbSize.height - statSize.height) / 2).rounded(),
+                            y: padY + header.height + 6,
                             width: statSize.width, height: statSize.height)
 
-        y += blurbSize.height + 30
+        var y = DashboardSectionHeader.contentTop(for: header) + statSize.height
 
         let columnHeight = max(240, bounds.height - y - padY)
         // The library is capped rather than fixed: at the window's minimum size a

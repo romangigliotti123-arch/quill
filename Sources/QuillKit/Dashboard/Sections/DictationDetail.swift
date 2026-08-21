@@ -41,6 +41,16 @@ enum DictationFormat {
         decimal.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
+    /// "1 word", not "1 words".
+    ///
+    /// The record card said "1 words · 54 wpm" on any one-word dictation, which
+    /// on this Mac is a large share of them ("hello?", "yes", "undo"). A grammar
+    /// slip on the one line of a screen a person reads every time is not a small
+    /// thing — it is the detail that makes the rest look unchecked.
+    static func plural(_ value: Int, _ singular: String, _ plural: String? = nil) -> String {
+        "\(count(value)) \(value == 1 ? singular : (plural ?? singular + "s"))"
+    }
+
     /// Milliseconds as seconds, to two places under ten and one above. "19.4 s"
     /// of audio does not need hundredths; "0.42 s" of latency is the whole point.
     static func seconds(_ ms: Int?) -> String {
@@ -55,45 +65,56 @@ enum DictationFormat {
     }
 }
 
-// MARK: - Detail
+// MARK: - The open record
 
-/// One record, opened.
+/// One record, opened — the hero at the top of the Dictation page.
 ///
 /// This is the half of the screen Wispr Flow does not have. Their history is a
 /// list of finished paragraphs — useful for finding something you said, useless
 /// for deciding whether to trust it. Quill already stores what the recogniser
-/// heard *and* what got typed, so the record view leads with the difference
-/// between them, and the raw text stops being a column nobody can see.
-public final class DictationDetailView: NSView {
+/// heard *and* what got typed, so the record leads with the difference between
+/// them, and the raw text stops being a column nobody can see.
+///
+/// It **sizes itself**, and that is the load-bearing part. The view it replaced
+/// was pinned to a half-window card with a metric band welded to its bottom
+/// edge, so a four-word dictation left four hundred points of empty card under
+/// it and there was nothing the layout could do about it. Here, `fittingHeight`
+/// is the height, the page asks for it, and the list underneath takes whatever
+/// is left. A short record makes a short hero. There is no state in which this
+/// view is mostly empty, because there is no state in which it is bigger than
+/// what it holds.
+///
+/// One container, not two. The old card put the transcript in a bordered well
+/// *inside* the bordered card, which is two frames to say "this is the text" —
+/// and empty space inside a border reads as a hole where the same space on a
+/// plain surface reads as whitespace.
+public final class DictationRecordView: NSView {
 
     /// The transcript is the most-read text on the screen and gets a size of its
-    /// own, one step above body. Everything else here comes from `DashboardType`.
-    private static let transcriptFont = NSFont.systemFont(ofSize: 15, weight: .regular)
-    private static let transcriptLeading: CGFloat = 27
+    /// own. It went up from 15 to 19 with the width: at 1024 points a 15pt line
+    /// runs to about 130 characters, which is roughly twice the measure anything
+    /// is comfortable to read at.
+    private static let transcriptFont = NSFont.systemFont(ofSize: 19, weight: .regular)
+    private static let transcriptLeading: CGFloat = 28
+    private static let transcriptMaxLines = 5
+    /// Nothing is read at more than this. Full-bleed prose across 1024 points is
+    /// a wall; every editorial page in the world sets a measure and this is one.
+    private static let transcriptMaxWidth: CGFloat = 760
+    private static let pad = DashboardSpace.lg
 
     private let record: DictationRecord
     private let diff: TranscriptDiff
     private let style: DashboardStyle
 
     private let title: NSTextField
-    private let meta: NSTextField
     private let copyButton: DashboardButton
     private let insertButton: DashboardButton
-    private let headerRule: DashboardRule
 
-    private let eyebrow: NSTextField
-    private let legend: NSTextField
-
-    private let well: DashboardCardView
     private let transcript: NSTextField
-    private let wellRule: DashboardRule
-    private let notesEyebrow: NSTextField
+    private let legend: NSTextField?
+    private let rule: DashboardRule?
     private var noteTags: [DashboardChip] = []
     private var noteTexts: [NSTextField] = []
-
-    private let footerRule: DashboardRule
-    private var metrics: [DictationMetricView] = []
-    private var metricRules: [DashboardRule] = []
 
     public override var isFlipped: Bool { true }
 
@@ -102,72 +123,52 @@ public final class DictationDetailView: NSView {
         self.style = style
         self.diff = TranscriptDiff.between(raw: record.rawText, inserted: record.insertedText)
 
-        title = DashboardType.label("\(DictationFormat.dayTitle(record.date)), \(DictationFormat.time(record.date))",
-                                    font: DashboardType.headline, color: style.ink)
-
-        var metaParts = ["\(record.wordCount) words"]
-        if let wpm = DictationFormat.wordsPerMinute(record) { metaParts.append("\(wpm) wpm") }
-        metaParts.append(record.inputDevice ?? "Unknown input")
-        metaParts.append(record.timings.usedThoroughCleanup ? "Thorough cleanup" : "Fast cleanup")
-        meta = DashboardType.label(metaParts.joined(separator: "  \u{00B7}  "),
-                                   font: DashboardType.caption, color: style.inkTertiary)
+        // Everything a person actually wants on this line, and nothing else.
+        //
+        // It used to read "1 words · 54 wpm · MacBook Air Microphone · Fast
+        // cleanup". Words per minute is an Insights number; which microphone was
+        // open is a Settings fact; and "Fast cleanup" versus "Thorough cleanup" is
+        // the name of an internal deadline that no user has a decision to make
+        // about. Three of the four were instrumentation from the latency work,
+        // sitting permanently on a card about what somebody said.
+        title = DashboardType.label(
+            "\(DictationFormat.dayTitle(record.date)), \(DictationFormat.time(record.date))"
+            + "   \u{00B7}   \(DictationFormat.plural(record.wordCount, "word"))",
+            font: DashboardType.headline, color: style.inkTertiary)
 
         copyButton = DashboardButton(title: "Copy", symbol: "doc.on.doc", kind: .secondary, style: style)
         insertButton = DashboardButton(title: "Re-insert", symbol: "text.insert", kind: .primary, style: style)
-        headerRule = DashboardRule(color: style.hairline)
 
-        eyebrow = DashboardType.label("Heard vs inserted", font: DashboardType.eyebrow,
-                                      color: style.inkTertiary)
-        legend = DictationDetailView.legendLabel(style: style)
+        transcript = DictationRecordView.transcriptLabel(diff: diff, style: style)
 
-        well = DashboardCardView(style: style, elevation: .sunken, radius: DashboardRadius.card)
-        transcript = DictationDetailView.transcriptLabel(diff: diff, style: style)
-        wellRule = DashboardRule(color: style.hairline)
-        notesEyebrow = DashboardType.label(diff.isClean ? "Nothing to fix" : "\(diff.editCount) edits",
-                                           font: DashboardType.eyebrow,
-                                           color: style.inkTertiary)
-        footerRule = DashboardRule(color: style.hairline)
+        // The legend and the change summary only exist when something changed.
+        // On a clean dictation they were a rule, a heading and a sentence saying
+        // nothing happened — three rows of furniture to report an absence.
+        let notes = Array(diff.notes.prefix(3))
+        if notes.isEmpty {
+            legend = nil
+            rule = nil
+        } else {
+            legend = DictationRecordView.legendLabel(style: style)
+            rule = DashboardRule(color: style.hairline)
+        }
 
         super.init(frame: .zero)
 
         addSubview(title)
-        addSubview(meta)
         addSubview(copyButton)
         addSubview(insertButton)
-        addSubview(headerRule)
-        addSubview(eyebrow)
-        addSubview(legend)
-        addSubview(well)
-        well.addSubview(transcript)
-        well.addSubview(wellRule)
-        well.addSubview(notesEyebrow)
+        addSubview(transcript)
+        legend.map(addSubview)
+        rule.map(addSubview)
 
-        for note in diff.notes.prefix(3) {
-            let tag = DashboardChip(text: note.tag, tone: .neutral, style: style)
+        for note in notes {
+            let tag = DashboardChip(text: note.tag, tone: .neutral, style: style, uppercase: false)
             let text = DashboardType.label(note.text, font: DashboardType.callout, color: style.inkSecondary)
-            well.addSubview(tag)
-            well.addSubview(text)
+            addSubview(tag)
+            addSubview(text)
             noteTags.append(tag)
             noteTexts.append(text)
-        }
-        if diff.notes.isEmpty {
-            let text = DashboardType.label("The recogniser got this one exactly right \u{2014} nothing was dropped, corrected or recased.",
-                                           font: DashboardType.callout, color: style.inkSecondary, lines: 2, lineHeight: 18)
-            well.addSubview(text)
-            noteTexts.append(text)
-        }
-
-        addSubview(footerRule)
-        for (index, spec) in footerSpecs.enumerated() {
-            let view = DictationMetricView(value: spec.value, unit: spec.unit, caption: spec.caption,
-                                           accent: spec.accent, style: style)
-            addSubview(view)
-            metrics.append(view)
-            if index > 0 {
-                let rule = DashboardRule(color: style.hairline)
-                addSubview(rule)
-                metricRules.append(rule)
-            }
         }
 
         copyButton.onClick = { [weak self] in self?.copyToPasteboard() }
@@ -178,25 +179,6 @@ public final class DictationDetailView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     // MARK: - Content
-
-    private var footerSpecs: [(value: String, unit: String, caption: String, accent: Bool)] {
-        // Empty. Roman: "I don't need to know the time it took for the
-        // transcription to start after I press the button. Those little details
-        // are just bloating up the screen."
-        //
-        // There were four: release to text, first word, cleanup pass, audio
-        // captured. They are engineering instrumentation — they were added while
-        // the latency work was being done, and they answered questions the person
-        // doing that work had. Someone reading back what they said has none of
-        // those questions, and four numbers across the bottom of every card is a
-        // permanent tax for an occasional curiosity.
-        //
-        // The measurements themselves are untouched: every timing is still
-        // recorded on the DictationRecord and still drives the Insights screen,
-        // which is where a question about speed actually belongs. This only stops
-        // repeating them on a card about what was said.
-        []
-    }
 
     /// The two treatments, shown once, using the exact attributes the transcript
     /// uses. A legend drawn from a second set of constants is a legend that goes
@@ -275,8 +257,8 @@ public final class DictationDetailView: NSView {
         field.drawsBackground = false
         field.isEditable = false
         field.isSelectable = true
-        field.maximumNumberOfLines = 24
-        field.lineBreakMode = .byWordWrapping
+        field.maximumNumberOfLines = transcriptMaxLines
+        field.lineBreakMode = .byTruncatingTail
         field.cell?.usesSingleLineMode = false
         field.attributedStringValue = line
         return field
@@ -339,183 +321,94 @@ public final class DictationDetailView: NSView {
 
     // MARK: - Layout
 
+    /// The measure grows with the window, but slowly, and never to the edge.
+    ///
+    /// A fixed cap is the right typographic answer and the wrong one for a card:
+    /// at 1700 points the text sat in the left half of a bordered box and the
+    /// right half was empty, which reads as a layout that failed rather than as a
+    /// column that was set. Scaling at 62% keeps the line inside a readable
+    /// measure at every size the window can be dragged to, and the floor stops it
+    /// getting narrower than it was at 1350.
+    private func textWidth(for width: CGFloat) -> CGFloat {
+        let inner = width - DictationRecordView.pad * 2
+        return min(inner, max(DictationRecordView.transcriptMaxWidth, min(inner * 0.62, 980)))
+    }
+
+    private var noteRowHeight: CGFloat { 26 }
+
+    /// The height this record wants. The page asks before it places it, so the
+    /// same arithmetic decides the frame and the layout inside it.
+    public func fittingHeight(width: CGFloat) -> CGFloat {
+        let pad = DictationRecordView.pad
+        var height = pad
+            + ceil(title.fittingSize.height)
+            + DashboardSpace.md
+            + min(DashboardType.size(transcript, width: textWidth(for: width)).height,
+                  CGFloat(DictationRecordView.transcriptMaxLines) * DictationRecordView.transcriptLeading)
+        if !noteTexts.isEmpty {
+            height += DashboardSpace.lg + 1 + DashboardSpace.md
+                + CGFloat(noteTexts.count) * noteRowHeight - 4
+        }
+        return ceil(height + pad)
+    }
+
     public override func layout() {
         super.layout()
-        let pad = DashboardSpace.lg
+        let pad = DictationRecordView.pad
         let width = bounds.width
-
-        let titleSize = title.fittingSize
-        title.frame = NSRect(x: pad, y: pad, width: min(titleSize.width, width - 260), height: titleSize.height)
+        guard width > pad * 2 else { return }
 
         let insertWidth = insertButton.intrinsicWidth
-        insertButton.frame = NSRect(x: width - pad - insertWidth, y: pad - 4, width: insertWidth, height: 30)
+        insertButton.frame = NSRect(x: width - pad - insertWidth, y: pad - 5, width: insertWidth, height: 30)
         let copyWidth = copyButton.intrinsicWidth
         copyButton.frame = NSRect(x: insertButton.frame.minX - DashboardSpace.xs - copyWidth,
                                   y: insertButton.frame.minY, width: copyWidth, height: 30)
 
-        let metaSize = meta.fittingSize
-        meta.frame = NSRect(x: pad, y: pad + titleSize.height + 7,
-                            width: min(metaSize.width, width - pad * 2), height: metaSize.height)
+        let titleSize = title.fittingSize
+        title.frame = NSRect(x: pad, y: pad,
+                             width: min(titleSize.width, copyButton.frame.minX - pad - DashboardSpace.md),
+                             height: ceil(titleSize.height))
 
-        let headerBottom = meta.frame.maxY + DashboardSpace.md + 2
-        headerRule.frame = NSRect(x: 0, y: headerBottom, width: width, height: 1)
+        var y = title.frame.maxY + DashboardSpace.md
+        let text = textWidth(for: width)
+        let transcriptHeight = min(DashboardType.size(transcript, width: text).height,
+                                   CGFloat(DictationRecordView.transcriptMaxLines)
+                                   * DictationRecordView.transcriptLeading)
+        transcript.frame = NSRect(x: pad, y: y, width: text, height: transcriptHeight)
+        y += transcriptHeight
 
-        let eyebrowSize = eyebrow.fittingSize
-        eyebrow.frame = NSRect(x: pad, y: headerBottom + DashboardSpace.lg,
-                               width: eyebrowSize.width, height: eyebrowSize.height)
-        let legendSize = legend.fittingSize
-        legend.frame = NSRect(x: width - pad - legendSize.width,
-                              y: eyebrow.frame.midY - legendSize.height / 2,
-                              width: legendSize.width, height: legendSize.height)
+        guard let rule else { return }
+        y += DashboardSpace.lg
+        rule.frame = NSRect(x: pad, y: y, width: width - pad * 2, height: 1)
+        y += 1 + DashboardSpace.md
 
-        // The metric band is pinned to the bottom edge; everything between it
-        // and the eyebrow belongs to the well.
-        let bandHeight: CGFloat = 84
-        let bandTop = bounds.height - bandHeight
-        footerRule.frame = NSRect(x: 0, y: bandTop, width: width, height: 1)
-
-        let count = CGFloat(metrics.count)
-        let inner = width - pad * 2
-        let cell = inner / count
-        for (index, metric) in metrics.enumerated() {
-            metric.frame = NSRect(x: pad + cell * CGFloat(index), y: bandTop + DashboardSpace.lg,
-                                  width: cell, height: bandHeight - DashboardSpace.lg * 2 + 8)
-        }
-        for (index, rule) in metricRules.enumerated() {
-            rule.frame = NSRect(x: (pad + cell * CGFloat(index + 1)).rounded() - 8,
-                                y: bandTop + 26, width: 1, height: 34)
+        // The legend sits on the summary's first row, right-aligned. It explains
+        // the two treatments in the transcript above and belongs beside the list
+        // of what they were, not floating on its own line.
+        if let legend {
+            let size = legend.fittingSize
+            legend.frame = NSRect(x: width - pad - size.width, y: y + 3,
+                                  width: size.width, height: size.height)
         }
 
-        let wellTop = eyebrow.frame.maxY + DashboardSpace.md
-        let wellCeiling = bandTop - DashboardSpace.lg - wellTop
-        // The well hugs its content rather than stretching to the band. A
-        // stretched well puts its slack *inside* a bordered container, and empty
-        // space inside a border reads as a hole; the same slack below the well,
-        // on the card's own surface, reads as whitespace. Same pixels, opposite
-        // impressions.
-        let wellHeight = min(wellCeiling, wellContentHeight(width: inner))
-        well.frame = NSRect(x: pad, y: wellTop, width: inner, height: max(140, wellHeight))
-        layoutWell()
-    }
-
-    private var wellPad: CGFloat { DashboardSpace.md + 2 }
-
-    private func noteBlockHeight(textWidth: CGFloat) -> CGFloat {
-        let rows: CGFloat = noteTags.isEmpty
-            ? (noteTexts.first.map { DashboardType.size($0, width: textWidth).height } ?? 0)
-            : CGFloat(noteTags.count) * 26
-        return notesEyebrow.fittingSize.height + 10 + rows
-    }
-
-    private func wellContentHeight(width: CGFloat) -> CGFloat {
-        let textWidth = width - wellPad * 2
-        return wellPad
-            + DashboardType.size(transcript, width: textWidth).height
-            + DashboardSpace.md + 1 + DashboardSpace.md
-            + noteBlockHeight(textWidth: textWidth)
-            + wellPad
-    }
-
-    private func layoutWell() {
-        let pad = wellPad
-        let width = well.bounds.width
-        let height = well.bounds.height
-        let textWidth = width - pad * 2
-
-        let notesHeight = noteBlockHeight(textWidth: textWidth)
-        // Clamped, so a very long dictation truncates its transcript rather than
-        // pushing the change summary out of the card.
-        let transcriptHeight = min(DashboardType.size(transcript, width: textWidth).height,
-                                   height - pad * 2 - DashboardSpace.md * 2 - 1 - notesHeight)
-        transcript.frame = NSRect(x: pad, y: pad, width: textWidth, height: max(0, transcriptHeight))
-
-        wellRule.frame = NSRect(x: pad, y: transcript.frame.maxY + DashboardSpace.md, width: textWidth, height: 1)
-
-        let notesTop = wellRule.frame.maxY + DashboardSpace.md
-        let notesEyebrowSize = notesEyebrow.fittingSize
-        notesEyebrow.frame = NSRect(x: pad, y: notesTop, width: notesEyebrowSize.width, height: notesEyebrowSize.height)
-
-        var noteY = notesTop + notesEyebrowSize.height + 10
+        let legendGutter = (legend?.fittingSize.width ?? 0) + DashboardSpace.lg
         for (index, tag) in noteTags.enumerated() {
-            tag.frame = NSRect(x: pad, y: noteY + 2, width: tag.frame.width, height: tag.frame.height)
-            let text = noteTexts[index]
-            let size = text.fittingSize
-            text.frame = NSRect(x: pad + 66, y: noteY + ((tag.frame.height - size.height) / 2).rounded() + 2,
-                                width: min(size.width, textWidth - 66), height: size.height)
-            noteY += 26
-        }
-        if noteTags.isEmpty, let text = noteTexts.first {
-            text.frame = NSRect(x: pad, y: noteY, width: textWidth,
-                                height: DashboardType.size(text, width: textWidth).height)
+            tag.frame = NSRect(x: pad, y: y + 2, width: tag.frame.width, height: tag.frame.height)
+            let label = noteTexts[index]
+            let size = label.fittingSize
+            let available = width - pad * 2 - 70 - (index == 0 ? legendGutter : 0)
+            label.frame = NSRect(x: pad + 70,
+                                 y: y + ((tag.frame.height - size.height) / 2).rounded() + 2,
+                                 width: min(size.width, max(40, available)), height: size.height)
+            y += noteRowHeight
         }
     }
 
     public override func draw(_ dirtyRect: NSRect) {
-        // Raised, against the list's sunken well. The open record is the thing
-        // in focus, and depth is how a screen says that without a border colour.
-        DashboardDraw.raisedSurface(bounds, radius: DashboardRadius.card,
-                                    fillColor: style.raised, topColor: style.raisedTop,
-                                    style: style, shadow: style.shadowCard, flipped: true)
-    }
-}
-
-// MARK: - Metric
-
-/// One number in the record's footer band. Borderless on purpose — four framed
-/// tiles inside an already-framed card is three frames too many; hairline
-/// dividers say "one instrument, four readings".
-final class DictationMetricView: NSView {
-
-    private let value: NSTextField
-    private let caption: NSTextField
-
-    override var isFlipped: Bool { true }
-
-    init(value: String, unit: String, caption: String, accent: Bool, style: DashboardStyle) {
-        let line = NSMutableAttributedString(string: value, attributes: [
-            .font: DashboardType.metricSmall,
-            // Emphasis by weight, not by hue.
-            //
-            // This was `style.accent`, and the accent now follows the system —
-            // which on Roman's Mac is Graphite. The one number meant to stand out
-            // came out grey while its three neighbours were white, so the
-            // emphasised metric read as the DISABLED one. Exactly backwards, and
-            // invisible until it was looked at on screen.
-            //
-            // A hue that can be turned off cannot carry meaning. The other three
-            // step back instead.
-            .foregroundColor: accent ? style.ink : style.inkSecondary,
-            .kern: -0.4,
-        ])
-        line.append(NSAttributedString(string: " " + unit, attributes: [
-            .font: NSFont.systemFont(ofSize: 11.5, weight: .medium),
-            .foregroundColor: style.inkTertiary,
-        ]))
-        let field = NSTextField(labelWithString: "")
-        field.isBezeled = false
-        field.drawsBackground = false
-        field.isEditable = false
-        field.isSelectable = false
-        field.maximumNumberOfLines = 1
-        field.cell?.usesSingleLineMode = true
-        field.attributedStringValue = line
-        self.value = field
-        self.caption = DashboardType.label(caption, font: DashboardType.caption, color: style.inkTertiary)
-
-        super.init(frame: .zero)
-        addSubview(field)
-        addSubview(self.caption)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layout() {
-        super.layout()
-        let valueSize = value.fittingSize
-        value.frame = NSRect(x: 0, y: 0, width: min(valueSize.width, bounds.width), height: valueSize.height)
-        let captionSize = caption.fittingSize
-        caption.frame = NSRect(x: 0, y: valueSize.height + 4,
-                               width: min(captionSize.width, bounds.width), height: captionSize.height)
+        // A tint of the page, not a slab on it. `raised` at full width is a grey
+        // rectangle the size of a paragraph; the card tint plus a hairline says
+        // "this is one object" without competing with the text inside it.
+        DashboardDraw.fill(bounds, radius: DashboardRadius.card, color: style.card)
+        DashboardDraw.stroke(bounds, radius: DashboardRadius.card, color: style.hairline)
     }
 }
