@@ -467,7 +467,17 @@ final class DictationMetricView: NSView {
     init(value: String, unit: String, caption: String, accent: Bool, style: DashboardStyle) {
         let line = NSMutableAttributedString(string: value, attributes: [
             .font: DashboardType.metricSmall,
-            .foregroundColor: accent ? style.accent : style.ink,
+            // Emphasis by weight, not by hue.
+            //
+            // This was `style.accent`, and the accent now follows the system —
+            // which on Roman's Mac is Graphite. The one number meant to stand out
+            // came out grey while its three neighbours were white, so the
+            // emphasised metric read as the DISABLED one. Exactly backwards, and
+            // invisible until it was looked at on screen.
+            //
+            // A hue that can be turned off cannot carry meaning. The other three
+            // step back instead.
+            .foregroundColor: accent ? style.ink : style.inkSecondary,
             .kern: -0.4,
         ])
         line.append(NSAttributedString(string: " " + unit, attributes: [

@@ -38,6 +38,14 @@ public final class DashboardRootView: NSView, SidebarDelegate {
     /// rather than sitting behind it.
     private let panel: DashboardMaterialView
     private let statusPill: DashboardStatusPill
+    /// The one-pixel line between sidebar and content.
+    ///
+    /// A view rather than a stroke in `draw(_:)`, because draw runs on the root
+    /// and both materials are subviews ON TOP of it — the line was being painted
+    /// and then immediately covered, which is why the two surfaces met at a hard
+    /// tonal step with nothing between them. Every AppKit split view draws this
+    /// line, and its absence is most of why the join looked wrong.
+    private let divider = NSView()
     private var sectionView: NSView?
 
     public override var isFlipped: Bool { true }
@@ -67,6 +75,9 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         addSubview(sidebarMaterial)
         addSubview(sidebar)
         addSubview(panel)
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = style.hairlineStrong.cgColor
+        addSubview(divider)
         addSubview(statusPill)
         sidebar.delegate = self
         // No fade on the first paint: there is nothing to cross-fade from, and
@@ -171,6 +182,7 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         sidebar.style = newStyle
         sidebarMaterial.restyle(fallback: newStyle.canvasBottom)
         panel.restyle(fallback: newStyle.canvasTop)
+        divider.layer?.backgroundColor = newStyle.hairlineStrong.cgColor
         statusPill.style = newStyle
         // Not animated. A theme change is not a navigation, and cross-fading here
         // leaves two section views parented for 0.18s — which the offscreen
@@ -191,6 +203,7 @@ public final class DashboardRootView: NSView, SidebarDelegate {
                                        width: DashboardMetrics.sidebarWidth, height: bounds.height)
         sidebar.frame = sidebarMaterial.frame
         panel.frame = DashboardMetrics.panelFrame(in: bounds.size)
+        divider.frame = NSRect(x: DashboardMetrics.sidebarWidth - 1, y: 0, width: 1, height: bounds.height)
         sectionView?.frame = DashboardMetrics.sectionFrame(in: panel.bounds)
 
         let size = statusPill.fittingSize
@@ -210,10 +223,9 @@ public final class DashboardRootView: NSView, SidebarDelegate {
     /// The one line kept is the divider. A sidebar and a content area that meet
     /// with no seam read as one flat surface at most desktop backgrounds, and
     /// AppKit's own split views draw exactly this hairline.
-    public override func draw(_ dirtyRect: NSRect) {
-        style.hairline.setFill()
-        NSRect(x: DashboardMetrics.sidebarWidth - 1, y: 0, width: 1, height: bounds.height).fill()
-    }
+    /// Nothing. The materials cover this view entirely and the divider is a
+    /// subview, so anything painted here is painted for nobody.
+    public override func draw(_ dirtyRect: NSRect) {}
 }
 
 // MARK: - Status pill
