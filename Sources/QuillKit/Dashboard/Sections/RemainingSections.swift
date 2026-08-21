@@ -185,6 +185,11 @@ public final class ScratchpadSectionView: NSView {
     private var hero: ScratchpadNoteView?
     private var rows: [ScratchpadRow] = []
     private var rule: DashboardRule?
+    /// The list scrolls. Without it the eighth note onward was laid out past the
+    /// bottom of the section and simply never seen — a notes app that silently
+    /// stops showing your notes.
+    private let scroll = NSScrollView()
+    private let listDocument = DictationFlippedView()
     private var empty: DashboardMessageView?
     private var selectedID: UUID?
 
@@ -230,6 +235,18 @@ public final class ScratchpadSectionView: NSView {
         let line = DashboardRule(color: style.hairline)
         addSubview(line)
         rule = line
+
+        scroll.drawsBackground = false
+        scroll.backgroundColor = .clear
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.contentView.drawsBackground = false
+        scroll.documentView = listDocument
+        addSubview(scroll)
+
         buildRows()
     }
 
@@ -241,10 +258,11 @@ public final class ScratchpadSectionView: NSView {
         rows = notes.filter { $0.id != selectedID }.map { note in
             let row = ScratchpadRow(note: note, style: style)
             row.onClick = { [weak self] in self?.select(note) }
-            addSubview(row)
+            listDocument.addSubview(row)
             return row
         }
         rule?.isHidden = rows.isEmpty
+        scroll.isHidden = rows.isEmpty
     }
 
     private func select(_ note: Note) {
@@ -307,7 +325,11 @@ public final class ScratchpadSectionView: NSView {
             // is prose — unlike a dictation it can be pages long — so it earns
             // more height than a transcript does, and the rest of the page is a
             // short list rather than the other way round.
-            let listHeight = CGFloat(rows.count) * ScratchpadSectionView.rowHeight
+            // Capped at four rows' worth. The list scrolls, so a note count of
+            // forty must not squeeze the open note down to its floor — past a few
+            // rows the list has said "there are more" and the rest is scrolling.
+            let visibleRows = min(CGFloat(rows.count), 4)
+            let listHeight = visibleRows * ScratchpadSectionView.rowHeight
                 + (rows.isEmpty ? 0 : DashboardSpace.xl + 1)
             let available = max(160, bounds.height - y - padY - listHeight)
             hero.frame = NSRect(x: padX, y: y, width: width,
@@ -318,10 +340,14 @@ public final class ScratchpadSectionView: NSView {
         guard !rows.isEmpty else { return }
         rule?.frame = NSRect(x: padX, y: y, width: width, height: 1)
         y += 1
+        scroll.frame = NSRect(x: padX, y: y, width: width, height: max(0, bounds.height - y - padY))
+
+        var rowY: CGFloat = 0
         for row in rows {
-            row.frame = NSRect(x: padX, y: y, width: width, height: ScratchpadSectionView.rowHeight)
-            y += ScratchpadSectionView.rowHeight
+            row.frame = NSRect(x: 0, y: rowY, width: width, height: ScratchpadSectionView.rowHeight)
+            rowY += ScratchpadSectionView.rowHeight
         }
+        listDocument.frame = NSRect(x: 0, y: 0, width: width, height: rowY)
     }
 }
 
@@ -502,14 +528,33 @@ final class ScratchpadRow: NSView {
         let metaWidth: CGFloat = 200
         let textWidth = max(40, bounds.width - inset * 2 - metaWidth - DashboardSpace.md)
 
+        // The text block is centred as a block, and the meta is centred on the
+        // TITLE rather than on the row.
+        //
+        // The title was pinned at a hard y: 10 while the meta centred in the row,
+        // so they only agreed when the note had a body line under the title — and
+        // an empty note is exactly what the "New note" button produces. Every
+        // freshly made note therefore read as a broken row, with its own metadata
+        // sitting eleven points below its name.
+        //
+        // Keyed off `note.body.isEmpty`, not off the preview's fitting height: an
+        // empty NSTextField still reports a non-zero height, so a height test does
+        // not detect the empty case at all.
         let titleSize = title.fittingSize
-        title.frame = NSRect(x: inset, y: 10, width: min(titleSize.width, textWidth), height: titleSize.height)
+        let hasPreview = !note.body.isEmpty
         let previewSize = preview.fittingSize
-        preview.frame = NSRect(x: inset, y: 10 + titleSize.height + 3,
+        let blockHeight = titleSize.height + (hasPreview ? previewSize.height + 3 : 0)
+        let top = ((bounds.height - blockHeight) / 2).rounded()
+
+        title.frame = NSRect(x: inset, y: top, width: min(titleSize.width, textWidth),
+                             height: titleSize.height)
+        preview.isHidden = !hasPreview
+        preview.frame = NSRect(x: inset, y: top + titleSize.height + 3,
                                width: textWidth, height: previewSize.height)
+
         let metaSize = meta.fittingSize
         meta.frame = NSRect(x: bounds.width - inset - metaWidth,
-                            y: ((bounds.height - metaSize.height) / 2).rounded(),
+                            y: (title.frame.midY - metaSize.height / 2).rounded(),
                             width: metaWidth, height: metaSize.height)
     }
 
@@ -580,8 +625,15 @@ public final class StyleSectionView: NSView {
         // Traits, with their evidence. A learned setting shown without its support
         // count is indistinguishable from a guess, and this is a feature people
         // are right to distrust.
+        // No count until there is one. "0 corrections seen" sat directly above two
+        // rows reading "british · 2" and "uses them · 2", so the card contradicted
+        // itself in a single glance — and the rows are not wrong: those are seeded
+        // traits at full support, and `promptRules()` emits them on every dictation.
+        // The header was the false half. Same shape as the trust card beside it,
+        // which already passes nil when it has nothing to report.
         traits = SectionCard(style: style, title: "What Quill has learned",
-                             trailing: "\(DictationFormat.plural(profile.correctionCount, "correction")) seen")
+                             trailing: profile.correctionCount == 0 ? nil
+                                 : "\(DictationFormat.plural(profile.correctionCount, "correction")) seen")
         // An unlearned trait says so. Showing a default as though it were a
         // finding is how a learning feature earns distrust it cannot recover from.
         func described<V>(_ trait: StyleTrait<V>, _ render: (V) -> String) -> String {

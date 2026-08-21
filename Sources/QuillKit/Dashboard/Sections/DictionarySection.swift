@@ -197,7 +197,7 @@ public final class DictionarySectionView: NSView {
 
     // MARK: - Selection
 
-    private func show(_ entry: DictionaryEntry) {
+    private func show(_ entry: DictionaryEntry?) {
         let replacement = DictionaryDetailView(entry: entry, style: style)
         replacement.frame = detail.frame
         replaceSubview(detail, with: replacement)
@@ -271,11 +271,26 @@ struct DictionaryColumns {
         termX = 18
         termW = (inner * 0.34).rounded()
         heardX = (termX + termW + 12).rounded()
-        barW = (inner * 0.145).rounded()
         countW = 58
         countX = (18 + inner - countW).rounded()
+
+        // The bar gives way before the words do.
+        //
+        // Every column but "Heard instead" took a share off the top and that one
+        // took the remainder, so at the minimum window it collapsed to 34 points —
+        // the heading and every value in it truncated to three characters. It is
+        // the column carrying the evidence this whole screen is built on: what the
+        // recogniser actually said instead.
+        //
+        // So the proportion bar is the flexible one now. It is a redundant
+        // encoding — the number it visualises is printed immediately to its right
+        // — and it can shrink to nothing without costing a fact.
+        let wanted = (inner * 0.145).rounded()
+        let floorForHeard: CGFloat = 96
+        let roomForBar = max(0, countX - 14 - (heardX + floorForHeard) - 14)
+        barW = min(wanted, roomForBar)
         barX = (countX - 14 - barW).rounded()
-        heardW = barX - 14 - heardX
+        heardW = max(0, barX - 14 - heardX)
     }
 }
 
@@ -284,7 +299,7 @@ struct DictionaryColumns {
 /// The well: filter strip, column headings, rows, footer.
 final class DictionaryListView: NSView {
 
-    var onSelect: ((DictionaryEntry) -> Void)?
+    var onSelect: ((DictionaryEntry?) -> Void)?
 
     /// Everything, unfiltered. `entries` is what the list is currently showing.
     private let allEntries: [DictionaryEntry]
@@ -300,9 +315,16 @@ final class DictionaryListView: NSView {
     private var unusedOnly = false
     private var sortByName = false
 
+    static let rowHeight: CGFloat = 44
+
     private let segmented: DictionarySegmented
     private let sortControl: DictionarySortControl
     private let footButton: DictionaryFootButton
+    private let scroll = NSScrollView()
+    private let listDocument = DictionaryFlippedView()
+    /// Shown when a filter empties the list. Lazily built, because the common
+    /// case never needs it.
+    private var emptyLabel: NSTextField?
     private let headTerm: NSTextField
     private let headHeard: NSTextField
     private let headCount: NSTextField
@@ -338,6 +360,19 @@ final class DictionaryListView: NSView {
         layer?.cornerRadius = DashboardRadius.card
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
+
+        // Backgroundless and borderless: the well is already drawn, and
+        // NSScrollView's own chrome is the default look this window avoids.
+        scroll.drawsBackground = false
+        scroll.backgroundColor = .clear
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.contentView.drawsBackground = false
+        scroll.documentView = listDocument
+        addSubview(scroll)
 
         addSubview(segmented)
         addSubview(sortControl)
@@ -379,11 +414,43 @@ final class DictionaryListView: NSView {
             let row = DictionaryTermRow(entry: entry, maxRepairs: maxRepairs, style: style)
             row.isSelected = index == selected
             row.onClick = { [weak self] in self?.select(index) }
-            addSubview(row)
+            // Into the scrolling document, not straight onto the card. Parented
+            // here they were laid out at document-relative coordinates on the
+            // card itself, so row one printed through the filter strip.
+            listDocument.addSubview(row)
             rows.append(row)
         }
+        updateEmptyState()
         footButton.setTitle(unusedOnly ? "Show all" : unusedTitle, style: style)
-        footButton.isHidden = !unusedOnly && unusedCount == 0
+        // Not offered beside an empty list. "Review 132 unused" next to a card
+        // showing nothing is an invitation into a state the user is already in.
+        footButton.isHidden = (!unusedOnly && unusedCount == 0) || (rows.isEmpty && !unusedOnly)
+    }
+
+    /// A filter that finds nothing has to say so.
+    ///
+    /// Tapping "Learned" on this Mac is one click from a blank card: the tile
+    /// above it reads "142 added by you · 0 learned". It used to leave the list
+    /// empty with only column headings, a footer reading "Showing 0 of 0", and an
+    /// inspector still showing the term you had selected before — which is exactly
+    /// the failure the comment above `applyFilter` says the filter exists to avoid.
+    private func updateEmptyState() {
+        emptyLabel?.removeFromSuperview()
+        emptyLabel = nil
+        guard rows.isEmpty else { return }
+        let text: String
+        if unusedOnly { text = "Nothing unused here." }
+        else {
+            switch filter {
+            case .all: text = "No terms yet."
+            case .manual: text = "You haven't added any terms yet."
+            case .learned: text = "Quill hasn't learned any terms yet."
+            }
+        }
+        let label = DashboardType.label(text, font: DashboardType.callout,
+                                        color: style.inkTertiary, alignment: .center)
+        addSubview(label)
+        emptyLabel = label
     }
 
     private var unusedCount: Int { allEntries.filter { !$0.hasFired }.count }
@@ -408,10 +475,11 @@ final class DictionaryListView: NSView {
         buildRows()
         needsLayout = true
         layoutSubtreeIfNeeded()
-        // The inspector follows the list. A filter that leaves the right-hand
-        // card showing a term the list no longer contains is worse than no
-        // filter at all.
-        if let first = entries.first { onSelect?(first) }
+        // The inspector follows the list, INCLUDING to nothing. A filter that
+        // leaves the right-hand card showing a term the list no longer contains is
+        // worse than no filter at all, and an empty result is the case where that
+        // bites hardest — the stale term is the only thing left on screen.
+        onSelect?(entries.first)
     }
 
     /// How many rows survived the current filter. Pinned by a test, because
@@ -440,9 +508,17 @@ final class DictionaryListView: NSView {
         // The sort control is secondary; the filter tabs are how you navigate. When
         // there is not room for both, the sort goes rather than printing through
         // "Learned".
+        // The sort control loses its label rather than itself.
+        //
+        // It used to be hidden outright when the strip got tight, which at the
+        // documented minimum window size meant the control that was just made real
+        // could not be reached at all. The glyph alone is 30 points against a
+        // ~54-point budget, so it always fits; `DictionaryTextControl` centres the
+        // chevron when there is no label to sit beside.
+        let full = sortControl.intrinsicWidth
+        let roomy = inset + segmented.intrinsicWidth + 16 + full <= bounds.width - inset
+        sortControl.showsLabel = roomy
         let sortWidth = sortControl.intrinsicWidth
-        let sortFits = inset + segmented.intrinsicWidth + 16 + sortWidth <= bounds.width - inset
-        sortControl.isHidden = !sortFits
         sortControl.frame = NSRect(x: bounds.width - inset - sortWidth, y: 15,
                                    width: sortWidth, height: 26)
 
@@ -454,36 +530,60 @@ final class DictionaryListView: NSView {
         headCount.frame = NSRect(x: columns.countX, y: headY, width: columns.countW, height: headHeight)
         headRule.frame = NSRect(x: inset, y: headY + headHeight + 7, width: bounds.width - inset * 2, height: 1)
 
-        // Rows fill what is left above a footer that always keeps its 38 points.
-        // The height is fitted rather than fixed: as many whole rows as will
-        // clear 40 points, then stretched to land exactly on the footer rule.
-        // A list that stops 30 points short of its own container reads as
-        // clipped; one that ends on the rule reads as a list.
+        // The list SCROLLS. It used to show as many whole rows as fitted and set
+        // `isHidden = true` on the rest — so with 142 terms, 135 of them could not
+        // be reached by any means. The screen announced a number it would not let
+        // you look at, on the one tab whose whole argument is "here is the evidence".
+        //
+        // The stretch-to-the-footer-rule trick that used to live here has to go
+        // with it: a scrolling document view needs a constant row height, and the
+        // old `min(46, available / visible)` was deliberately elastic so the last
+        // visible row would land exactly on the rule. Rows are a flat 44 now and
+        // the overflow scrolls, which is the honest version of the same intent.
         let top = headRule.frame.maxY + 4
         let footerHeight: CGFloat = 36
-        let available = bounds.height - top - footerHeight
-        let visible = max(0, min(rows.count, Int((available / 40).rounded(.down))))
-        let rowHeight = visible == 0 ? 42 : min(46, available / CGFloat(visible))
+        let listHeight = max(0, bounds.height - top - footerHeight)
+        scroll.frame = NSRect(x: 0, y: top, width: bounds.width, height: listHeight)
 
+        var y: CGFloat = 0
         for (index, row) in rows.enumerated() {
-            guard index < visible else {
-                row.isHidden = true
-                continue
-            }
             row.isHidden = false
-            row.frame = NSRect(x: 0, y: top + rowHeight * CGFloat(index), width: bounds.width, height: rowHeight)
-            // No rule under the last visible row, and none touching the edge of
-            // the selection pill — a hairline meeting a raised corner reads as a
-            // seam rather than a divider.
-            row.showsRule = index < visible - 1 && index != selected && index + 1 != selected
+            row.frame = NSRect(x: 0, y: y, width: bounds.width, height: DictionaryListView.rowHeight)
+            y += DictionaryListView.rowHeight
+            // Indexed off the row COUNT, not off what happens to be on screen.
+            // Keyed off `visible` it would have dropped the hairline from row nine
+            // onward and put a stray one under the last row of the document.
+            row.showsRule = index < rows.count - 1 && index != selected && index + 1 != selected
+        }
+        listDocument.frame = NSRect(x: 0, y: 0, width: bounds.width, height: y)
+
+        if let emptyLabel {
+            emptyLabel.isHidden = !rows.isEmpty
+            let size = emptyLabel.fittingSize
+            emptyLabel.frame = NSRect(x: inset, y: top + ((listHeight - size.height) * 0.42).rounded(),
+                                      width: bounds.width - inset * 2, height: size.height)
         }
 
         let footTop = bounds.height - footerHeight
         footRule.frame = NSRect(x: inset, y: footTop, width: bounds.width - inset * 2, height: 1)
-        let shown = min(visible, rows.count)
+        // "Showing 7 of 142" is stale by construction once the list scrolls, and
+        // the sort clause was duplicated state — the sort control an inch away
+        // already names the live order in its own label. What is left is the one
+        // number that is still true, and it is short enough that it cannot clip.
+        //
+        // The paragraph style is the second half of that: the frame is clamped to
+        // `roomForCount`, so without a break mode this field hard-cut mid-word with
+        // no ellipsis ("sorted b"). A longer count or a wider footer button would
+        // do it again.
+        let truncating = NSMutableParagraphStyle()
+        truncating.lineBreakMode = .byTruncatingTail
         footLabel.attributedStringValue = NSAttributedString(
-            string: "Showing \(shown) of \(rows.count) · sorted by \(sortByName ? "name" : "repairs")",
-            attributes: [.font: DashboardType.caption, .foregroundColor: style.inkTertiary])
+            string: rows.count == allEntries.count
+                ? DictationFormat.plural(rows.count, "term")
+                : "\(DictationFormat.count(rows.count)) of \(DictationFormat.count(allEntries.count))",
+            attributes: [.font: DashboardType.caption,
+                         .foregroundColor: style.inkTertiary,
+                         .paragraphStyle: truncating])
         let footSize = footLabel.fittingSize
         let actionSize = footButton.isHidden ? .zero : NSSize(width: footButton.intrinsicWidth, height: 24)
         // "Review 6 unused" is a control and keeps its width; the count beside it
@@ -1291,6 +1391,17 @@ class DictionaryTextControl: NSView {
     fileprivate var label: NSTextField
     fileprivate let glyph: DashboardIconView?
     fileprivate var style: DashboardStyle
+    /// When false the control is its glyph and nothing else. Used where the strip
+    /// is too tight for a word but hiding the control outright would take the
+    /// only way to change the order off the screen.
+    var showsLabel = true {
+        didSet {
+            guard showsLabel != oldValue else { return }
+            label.isHidden = !showsLabel
+            toolTip = showsLabel ? nil : label.attributedStringValue.string
+            needsLayout = true
+        }
+    }
 
     private var isHovered = false {
         didSet {
@@ -1328,17 +1439,27 @@ class DictionaryTextControl: NSView {
     func setTitle(_ title: String, style: DashboardStyle) {
         label.removeFromSuperview()
         label = DashboardType.label(title, font: DashboardType.caption, color: style.inkSecondary)
+        label.isHidden = !showsLabel
         addSubview(label)
+        if !showsLabel { toolTip = title }
         needsLayout = true
         needsDisplay = true
     }
 
     var intrinsicWidth: CGFloat {
-        ceil(label.fittingSize.width) + (glyph == nil ? 0 : 14) + DashboardSpace.sm * 2
+        guard showsLabel else { return glyph == nil ? 26 : 30 }
+        return ceil(label.fittingSize.width) + (glyph == nil ? 0 : 14) + DashboardSpace.sm * 2
     }
 
     override func layout() {
         super.layout()
+        guard showsLabel else {
+            // Centred in its own box rather than anchored to a zero-width label,
+            // which is where a hidden title would otherwise leave it.
+            glyph?.frame = NSRect(x: ((bounds.width - 12) / 2).rounded(),
+                                  y: (bounds.height - 12) / 2, width: 12, height: 12)
+            return
+        }
         let size = label.fittingSize
         label.frame = NSRect(x: DashboardSpace.sm, y: ((bounds.height - size.height) / 2).rounded(),
                              width: min(size.width, bounds.width), height: size.height)
@@ -1389,4 +1510,10 @@ final class DictionaryFootButton: DictionaryTextControl {
     init(style: DashboardStyle) {
         super.init(title: "", symbol: nil, style: style)
     }
+}
+
+/// Top-down inside a scroll view. `NSScrollView`'s document view is bottom-up by
+/// default, which would put the most-repaired term at the bottom.
+final class DictionaryFlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

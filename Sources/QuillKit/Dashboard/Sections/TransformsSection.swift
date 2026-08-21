@@ -391,12 +391,27 @@ final class TransformDetailView: NSView {
             // paragraph rather than stacked one per line: seven lines of quoted
             // fragments is a column of noise, and the same seven read fine as a
             // sentence.
-            invocations.append(transform.triggers.map { "\u{201C}\($0)\u{201D}" }
-                                .joined(separator: "   \u{00B7}   "))
+            // Non-breaking spaces INSIDE each phrase, and a non-breaking space
+            // before each separator. These are strings the user has to say
+            // verbatim, and word-wrap was as happy to break inside one as between
+            // two — "format that as bullet / points" is two broken fragments, and
+            // a line ending on a naked · delimits nothing. This leaves exactly one
+            // legal break per gap: after the separator.
+            //
+            // Applied to the DISPLAY copy only. `transform.triggers` is matched
+            // exactly by CommandRouter, so substituting the spaces in the data
+            // would stop every one of these phrases from firing.
+            invocations.append(transform.triggers
+                .map { "\u{201C}\($0.replacingOccurrences(of: " ", with: "\u{00A0}"))\u{201D}" }
+                .joined(separator: "\u{00A0}\u{00B7}   "))
         }
-        add(DashboardType.label(invocations.joined(separator: "   \u{00B7}   "),
+        // Uncapped. Removing break opportunities can push a transform with many
+        // triggers past three lines, and `.byWordWrapping` with a line cap clips
+        // with no ellipsis — it would swallow the tail silently, which is the one
+        // outcome worse than an ugly wrap.
+        add(DashboardType.label(invocations.joined(separator: "\u{00A0}\u{00B7}   "),
                                 font: DashboardType.callout, color: style.inkSecondary,
-                                lines: 3, lineHeight: 19))
+                                lines: 0, lineHeight: 19))
 
         heading("With no network")
         if transform.worksOffline {
@@ -435,9 +450,15 @@ final class TransformDetailView: NSView {
 
     /// Up to the first full stop, keeping the stop. Falls back to the whole
     /// string when there is no sentence break to find.
+    ///
+    /// Whitespace is collapsed on the way out, and that is not tidying. These are
+    /// model instructions, and Email's contains a literal newline inside
+    /// `"Cheers,\nRoman"` — which arrived in the hero as a sentence cut after
+    /// `"Cheers,` with an orphan line reading `Roman".` under it. Anything written
+    /// for a model can carry line breaks; nothing rendered as one line may.
     static func firstSentence(of text: String) -> String {
-        guard let stop = text.firstIndex(of: ".") else { return text }
-        return String(text[...stop])
+        let sentence = text.firstIndex(of: ".").map { String(text[...$0]) } ?? text
+        return sentence.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     /// The height this transform wants, so the page can size the hero to it

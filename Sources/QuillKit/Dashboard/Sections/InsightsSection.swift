@@ -196,7 +196,15 @@ public final class InsightsView: NSView {
         savedCard.configure(
             value: hasSpokenTime ? InsightsFormat.duration(m.savedSeconds) : [("—", true)],
             caption: "saved against typing it out",
-            footnote: hasSpokenTime ? "\(spoken) spoken vs \(typed) typed at 40 wpm"
+            // The spoken half is dropped, not the denominator. At the minimum
+            // window this footnote had 188 points and needed ~195, so it truncated
+            // to "...typed at 40" — deleting the unit from the one number this
+            // card exists to publish. The comment above says why that matters: a
+            // saved-time figure with its typing speed hidden is marketing.
+            //
+            // What went is also the part shown twice: the split-bar accessory and
+            // the "54m saved" value already carry how long you spoke.
+            footnote: hasSpokenTime ? "vs \(typed) typed at 40 wpm"
                                     : "needs the length of what you spoke",
             chip: nil,
             accent: false,

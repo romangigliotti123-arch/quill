@@ -289,3 +289,76 @@ import Testing
     #expect(InsightsActivityCard.bucketing(for: .month) == .week)
     #expect(InsightsActivityCard.bucketing(for: .all) == .month)
 }
+
+// MARK: - Lists that hold more than fits
+
+/// A list that silently stops is worse than a short list, because the number it
+/// prints beside itself says otherwise.
+///
+/// The Dictionary showed as many whole rows as fitted and set `isHidden = true`
+/// on the rest — with 142 terms, 135 of them could not be reached by any means,
+/// on the one screen whose entire argument is "here is the evidence". The
+/// Scratchpad had the same shape: no scroll view, so the eighth note onward was
+/// laid out past the bottom of the section and never seen.
+@Test @MainActor func everyLongListCanReachItsLastRow() {
+    let frame = DashboardMetrics.sectionFrame(
+        in: DashboardMetrics.panelFrame(in: DashboardMetrics.minWindowSize))
+
+    func scrollers(in view: NSView) -> [NSScrollView] {
+        view.subviews.flatMap { ($0 as? NSScrollView).map { [$0] } ?? scrollers(in: $0) }
+    }
+
+    // Deliberately more entries than could ever fit, so a section that clips
+    // rather than scrolls is caught by the document height rather than by taste.
+    let entries = (0..<60).map { index in
+        DictionaryEntry(term: "term\(index)", substitutions: index, added: "today")
+    }
+    let dictionary = DictionarySectionView(style: .dark, entries: entries)
+    dictionary.frame = NSRect(origin: .zero, size: frame.size)
+    dictionary.layoutSubtreeIfNeeded()
+
+    let lists = scrollers(in: dictionary)
+    let list = try! #require(lists.first, "the dictionary list does not scroll")
+    let document = try! #require(list.documentView)
+    #expect(document.frame.height > list.frame.height,
+            "60 terms fitted in \(Int(list.frame.height))pt without scrolling — rows are being dropped")
+    // Every row is in the document, not hidden.
+    #expect(document.subviews.filter { $0 is DictionaryTermRow }.count == entries.count)
+    #expect(document.subviews.allSatisfy { !$0.isHidden })
+
+    let notes = (0..<30).map { Note(title: "Note \($0)", body: "body \($0)") }
+    let scratchpad = ScratchpadSectionView(style: .dark, notes: notes)
+    scratchpad.frame = NSRect(origin: .zero, size: frame.size)
+    scratchpad.layoutSubtreeIfNeeded()
+
+    let noteList = try! #require(scrollers(in: scratchpad).first, "the note list does not scroll")
+    let noteDocument = try! #require(noteList.documentView)
+    #expect(noteDocument.frame.height > noteList.frame.height,
+            "30 notes fitted without scrolling")
+}
+
+/// The column carrying the evidence must not be the one that collapses.
+///
+/// Every column but "Heard instead" took a fixed share and that one took the
+/// remainder, so at the documented minimum window it fell to 34 points and the
+/// heading and every value in it truncated to three characters.
+@Test func theHeardColumnKeepsAReadableWidthAtEverySize() {
+    // 344 is the narrowest list the app can produce: at the documented minimum
+    // window the section is 826pt, content 734, and the inspector takes a fixed
+    // 366 plus a 24pt gap. Sweeping below that would be asserting against sizes
+    // the layout never hands out.
+    let narrowest = DashboardMetrics.sectionFrame(
+        in: DashboardMetrics.panelFrame(in: DashboardMetrics.minWindowSize)).width
+        - DashboardMetrics.contentPaddingX * 2 - 366 - DashboardSpace.lg
+    #expect(narrowest <= 350, "the narrowest list is \(Int(narrowest))pt — update this test")
+
+    for width in stride(from: Double(narrowest), through: 900.0, by: 10.0) {
+        let columns = DictionaryColumns(width: CGFloat(width))
+        #expect(columns.heardW >= 96,
+                "at \(Int(width))pt the heard column is \(Int(columns.heardW))pt")
+        // And the bar it borrows from never goes negative or crosses the count.
+        #expect(columns.barW >= 0)
+        #expect(columns.barX >= columns.heardX + columns.heardW)
+        #expect(columns.barX + columns.barW <= columns.countX)
+    }
+}

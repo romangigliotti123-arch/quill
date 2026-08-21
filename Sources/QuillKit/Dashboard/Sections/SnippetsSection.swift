@@ -382,6 +382,19 @@ final class SnippetRowView: NSView {
     override func layout() {
         super.layout()
         let inset: CGFloat = 20
+        // One thing in the right-hand slot, not two on top of each other.
+        //
+        // The count sat at `width - 18 - max(34, …)` and the chip at
+        // `width - 18 - ~40`, so the chip's rect fully contained the count's — and
+        // `.outline` draws a stroke with no fill, so the digits read straight
+        // through the word OFF. Invisible in the fixtures because every seeded
+        // snippet is enabled.
+        //
+        // The count is what goes. A disabled snippet's firing count is not what a
+        // person wants at the moment they are looking at whether it is on, and the
+        // alternative — moving the chip left — would truncate the trigger phrase on
+        // every row in the list to make room for a state most of them are not in.
+        count.isHidden = offChip != nil
         let countSize = count.fittingSize
         count.frame = NSRect(x: bounds.width - 18 - max(34, countSize.width), y: 15,
                              width: max(34, countSize.width), height: countSize.height)
@@ -754,9 +767,16 @@ final class SnippetsPreviewPanel: NSView {
         let result = SnippetExpander().expand(spoken, using: [snippet])
         let firing = result.firings.first
 
+        // Full ink for the matched phrase, and let the marker behind it carry the
+        // emphasis — the "Quill types" line below already does exactly this.
+        //
+        // It used `style.accentInk`, which is `.controlAccentColor`, and on a
+        // Graphite accent that is a mid grey: the one phrase the panel exists to
+        // point at came out three times LIGHTER than the ordinary text around it.
+        // Emphasis by a hue that can be turned off is not emphasis.
         spokenLine.set(text: spoken,
                        highlight: firing?.sourceRange ?? NSRange(location: 0, length: 0),
-                       color: style.inkSecondary, highlightColor: style.accentInk)
+                       color: style.inkSecondary, highlightColor: style.ink)
 
         let (typed, range) = Self.condense(result.text, highlight: firing?.outputRange)
         typedLine.set(text: typed, highlight: range,
