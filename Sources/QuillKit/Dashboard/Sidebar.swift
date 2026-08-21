@@ -51,9 +51,23 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     }
 
     /// Everything above the rule.
+    /// Ordered by what it is worth to someone who just wants the app to work,
+    /// which is not the order the features were built in.
+    ///
+    /// Insights first, because it is the only screen that answers "is this thing
+    /// actually helping me" — Roman's own call, and the right one: it is the
+    /// screen you open on purpose rather than the one you land on. Dictation
+    /// second, because it is the record of what you said and the place you go to
+    /// recover something.
+    ///
+    /// Then the two that make the app better at its job the more you use them:
+    /// Dictionary teaches it your words, Snippets saves you typing the same
+    /// thing again. Style and Transforms are tuning — real value, but only once
+    /// the basics are right. Notetaker and Scratchpad are the two that a person
+    /// can go a month without opening, so they go last.
     public static let primary: [DashboardSection] = [
-        .dictation, .notetaker, .insights, .dictionary,
-        .snippets, .style, .transforms, .scratchpad,
+        .insights, .dictation, .dictionary, .snippets,
+        .style, .transforms, .notetaker, .scratchpad,
     ]
 
     /// Everything below it.

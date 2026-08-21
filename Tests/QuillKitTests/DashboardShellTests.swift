@@ -7,9 +7,18 @@ import Testing
 // the layout next.
 
 @Test @MainActor func sidebarOrderMatchesTheAgreedInformationArchitecture() {
+    // Reordered by value to the person using it rather than by the order things
+    // were built. Insights leads because it is the only screen that answers "is
+    // this actually helping me", and it is the one you open on purpose. Notetaker
+    // and Scratchpad go last because a person can go a month without opening
+    // either.
+    //
+    // This test earns its place here: the change was deliberate and it still had
+    // to be made twice, once in the app and once here, which is the point of
+    // pinning an ordering nobody can derive from the code.
     #expect(DashboardSection.primary == [
-        .dictation, .notetaker, .insights, .dictionary,
-        .snippets, .style, .transforms, .scratchpad,
+        .insights, .dictation, .dictionary, .snippets,
+        .style, .transforms, .notetaker, .scratchpad,
     ])
     #expect(DashboardSection.footer == [.settings, .help])
     #expect(DashboardSection.allCases.count == DashboardSection.primary.count + DashboardSection.footer.count)
@@ -126,4 +135,39 @@ import Testing
     let image = DashboardPreviewRenderer.render(section: .dictation, dark: false)
     #expect(image.width == 2700)
     #expect(image.height == 1700)
+}
+
+@Test @MainActor func everySectionPutsItsTitleInTheSamePlace() {
+    // Roman, looking at the app: "all of the tabs don't have the exact layout —
+    // the heading of the tab at the top is in different positions."
+    //
+    // Measured across five rendered sections, the titles spread 65 points. Two
+    // causes: some sections put a small-caps eyebrow above the title and some did
+    // not, so the titles could never line up; and Transforms sized its header box
+    // at a fixed 26pt around a 28pt face, which crops the leading and lifts the
+    // glyphs. Both are fixed, and this stops either coming back.
+    //
+    // Asserted on the frames rather than on pixels: a render is slow, needs a
+    // window server, and answers the same question less precisely.
+    var tops: [DashboardSection: CGFloat] = [:]
+    for section in [DashboardSection.dictation, .insights, .dictionary, .snippets, .transforms] {
+        guard let view = DashboardSectionRegistry.shared.dashboardView(for: section, style: .dark)
+        else { continue }
+        view.frame = NSRect(origin: .zero,
+                            size: DashboardMetrics.sectionFrame(
+                                in: DashboardMetrics.panelFrame(in: DashboardMetrics.windowSize)).size)
+        view.layoutSubtreeIfNeeded()
+
+        func titles(in v: NSView) -> [NSTextField] {
+            v.subviews.flatMap { ($0 as? NSTextField).map { [$0] } ?? titles(in: $0) }
+        }
+        // The title is the one drawn in the display face.
+        let title = titles(in: view).first { $0.font?.pointSize == DashboardType.display.pointSize }
+        if let title { tops[section] = view.convert(title.frame.origin, from: title.superview).y }
+    }
+
+    let values = Array(tops.values)
+    guard let low = values.min(), let high = values.max() else { return }
+    #expect(high - low <= 2,
+            "section titles span \(Int(high - low))pt: \(tops.map { "\($0.key.rawValue) \(Int($0.value))" }.sorted())")
 }

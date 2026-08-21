@@ -231,8 +231,7 @@ public final class InsightsView: NSView {
 
         // Header.
         var y = padY
-        let eyebrowSize = eyebrow.stringValue.isEmpty ? .zero : eyebrow.fittingSize
-        eyebrow.frame = NSRect(x: padX, y: y, width: eyebrowSize.width, height: eyebrowSize.height)
+        eyebrow.frame = .zero
 
         let segmentedWidth = segmented.intrinsicWidth
         segmented.frame = NSRect(x: bounds.width - padX - segmentedWidth, y: y - 3,
@@ -243,7 +242,6 @@ public final class InsightsView: NSView {
                                       width: sampleChip.frame.width, height: sampleChip.frame.height)
         }
 
-        y += eyebrowSize.height + (eyebrowSize.height > 0 ? 9 : 0)
         let headingSize = heading.fittingSize
         heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 220), height: headingSize.height)
         y += headingSize.height + 5

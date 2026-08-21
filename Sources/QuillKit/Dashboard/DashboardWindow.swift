@@ -140,17 +140,23 @@ public final class DashboardRootView: NSView, SidebarDelegate {
         // velocity it was already carrying. A spring redirects. Apple's guidance
         // is that anything a person can interrupt should be one.
         //
-        // The rise is smaller than it was. 6pt of travel under an 0.18s ease read
-        // as a slide; 4pt under a settling spring reads as the page arriving,
-        // which is the difference between noticing the animation and noticing the
-        // content.
-        let rise: CGFloat = 4
-        view.setFrameOrigin(NSPoint(x: view.frame.origin.x, y: view.frame.origin.y - rise))
-
+        // Fade only. No movement, and the reason is a bug rather than taste.
+        //
+        // Roman: "some of them have the tab sort of drop down and fade in, and
+        // then other ones just have it fade in." He is right, and the cause is
+        // that the rise animated the view's frame ORIGIN while the root's
+        // layout() sets that same origin every time it runs. Any section that
+        // triggers a layout pass mid-animation — the scrolling ones do, the
+        // static ones do not — had its rise stomped and simply faded. Two
+        // different animations from one piece of code, decided by whether the
+        // incoming screen happened to lay itself out.
+        //
+        // Animating position on a view whose position is owned by a layout method
+        // is a race that cannot be won, so it does not move at all now. Every
+        // section fades, identically, which is also what the HIG asks for on an
+        // interaction this frequent.
         DashboardMotion.spring(DashboardMotion.viewSpring) { _ in
             view.animator().alphaValue = 1
-            view.animator().setFrameOrigin(NSPoint(x: view.frame.origin.x,
-                                                   y: view.frame.origin.y + rise))
             outgoing?.animator().alphaValue = 0
         } completion: {
             outgoing?.removeFromSuperview()

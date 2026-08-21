@@ -264,9 +264,7 @@ public final class SnippetsSectionView: NSView {
         let width = bounds.width - padX * 2
 
         var y = padY
-        let eyebrowSize = eyebrow.fittingSize
-        eyebrow.frame = NSRect(x: padX, y: y, width: eyebrowSize.width, height: eyebrowSize.height)
-        y += eyebrowSize.height + 10
+        eyebrow.frame = .zero
 
         let headingSize = heading.fittingSize
         heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 260), height: headingSize.height)
@@ -277,7 +275,7 @@ public final class SnippetsSectionView: NSView {
 
         let buttonWidth = newButton.intrinsicWidth
         newButton.frame = NSRect(x: bounds.width - padX - buttonWidth,
-                                 y: padY + eyebrowSize.height + 4, width: buttonWidth, height: 36)
+                                 y: padY, width: buttonWidth, height: 36)
 
         // The stat sits on the blurb's baseline, right-aligned under the button.
         // Two things on one optical line rather than a third stacked element.

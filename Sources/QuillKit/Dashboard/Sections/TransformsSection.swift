@@ -146,8 +146,11 @@ public final class TransformsSectionView: NSView {
         let width = bounds.width - padX * 2
         guard width > 0 else { return }
 
-        header.frame = NSRect(x: padX, y: padY, width: width, height: 26)
-        let top = padY + 26 + DashboardSpace.lg
+        // Height from the type, not a constant. A 26pt box around a 28pt face
+        // crops the leading and lifts the title above every other section's.
+        let headerHeight = ceil(DashboardType.display.ascender - DashboardType.display.descender)
+        header.frame = NSRect(x: padX, y: padY, width: width, height: headerHeight)
+        let top = padY + headerHeight + DashboardSpace.lg
         let bottom = bounds.height - padY
         let height = max(120, bottom - top)
 

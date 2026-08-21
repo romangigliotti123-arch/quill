@@ -328,10 +328,10 @@ public final class DictationSectionView: NSView {
         let padY = DashboardMetrics.contentPaddingY
         let width = bounds.width - padX * 2
 
+        // The title starts at the padding, with nothing above it. Every section
+        // does the same, which is the only way their headings can agree.
         var y = padY
-        let eyebrowSize = eyebrow.fittingSize
-        eyebrow.frame = NSRect(x: padX, y: y, width: eyebrowSize.width, height: eyebrowSize.height)
-        y += eyebrowSize.height + 10
+        eyebrow.frame = .zero
 
         let headingSize = heading.fittingSize
         heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 300), height: headingSize.height)
@@ -345,7 +345,9 @@ public final class DictationSectionView: NSView {
         // On first run the header's primary is hidden: the empty-state card owns
         // the call to action, and the same button twice on a screen with nothing
         // on it makes the screen look like it is begging.
-        let buttonY = padY + eyebrowSize.height + 6
+        // No eyebrow above the title any more, so the header buttons align to
+        // the title's own row rather than to a label that no longer exists.
+        let buttonY = padY
         action.isHidden = records.isEmpty
         let actionWidth = action.intrinsicWidth
         action.frame = NSRect(x: bounds.width - padX - actionWidth, y: buttonY, width: actionWidth, height: 36)

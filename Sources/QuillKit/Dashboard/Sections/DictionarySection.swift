@@ -214,9 +214,7 @@ public final class DictionarySectionView: NSView {
         let width = bounds.width - padX * 2
 
         var y = padY
-        let eyebrowSize = eyebrow.fittingSize
-        eyebrow.frame = NSRect(x: padX, y: y, width: eyebrowSize.width, height: eyebrowSize.height)
-        y += eyebrowSize.height + 10
+        eyebrow.frame = .zero
 
         let headingSize = heading.fittingSize
         heading.frame = NSRect(x: padX, y: y, width: min(headingSize.width, width - 260), height: headingSize.height)
@@ -229,7 +227,7 @@ public final class DictionarySectionView: NSView {
 
         let addWidth = addButton.intrinsicWidth
         addButton.frame = NSRect(x: bounds.width - padX - addWidth,
-                                 y: padY + eyebrowSize.height + 6, width: addWidth, height: 36)
+                                 y: padY, width: addWidth, height: 36)
         let importWidth = importButton.intrinsicWidth
         importButton.frame = NSRect(x: addButton.frame.minX - 10 - importWidth,
                                     y: addButton.frame.minY, width: importWidth, height: 36)

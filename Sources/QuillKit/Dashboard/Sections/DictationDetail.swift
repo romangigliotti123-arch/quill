@@ -180,15 +180,22 @@ public final class DictationDetailView: NSView {
     // MARK: - Content
 
     private var footerSpecs: [(value: String, unit: String, caption: String, accent: Bool)] {
-        // Four readings that do not repeat each other, and none that repeats the
-        // meta line above. The edit count was here first and had already been
-        // said twice on the same card.
-        [
-            (DictationFormat.seconds(record.timings.endToEndMs), "s", "release to text", true),
-            (DictationFormat.seconds(record.timings.timeToFirstWordMs), "s", "first word", false),
-            (DictationFormat.seconds(record.timings.finalToInsertedMs), "s", "cleanup pass", false),
-            (DictationFormat.seconds(record.timings.audioDurationMs), "s", "audio captured", false),
-        ]
+        // Empty. Roman: "I don't need to know the time it took for the
+        // transcription to start after I press the button. Those little details
+        // are just bloating up the screen."
+        //
+        // There were four: release to text, first word, cleanup pass, audio
+        // captured. They are engineering instrumentation — they were added while
+        // the latency work was being done, and they answered questions the person
+        // doing that work had. Someone reading back what they said has none of
+        // those questions, and four numbers across the bottom of every card is a
+        // permanent tax for an occasional curiosity.
+        //
+        // The measurements themselves are untouched: every timing is still
+        // recorded on the DictationRecord and still drives the Insights screen,
+        // which is where a question about speed actually belongs. This only stops
+        // repeating them on a card about what was said.
+        []
     }
 
     /// The two treatments, shown once, using the exact attributes the transcript
