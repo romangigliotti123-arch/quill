@@ -927,40 +927,40 @@ public final class DashboardMark: NSView {
 
     public override func draw(_ dirtyRect: NSRect) {
         let rect = bounds
-        DashboardDraw.shadowed(style.shadowRaised, flipped: true) {
-            style.fill.setFill()
-            DashboardDraw.path(rect, 8).fill()
-        }
-        DashboardDraw.gradient(rect, radius: 8,
-                               top: style.isDark ? NSColor(white: 1, alpha: 1) : NSColor(srgbRed: 0.19, green: 0.20, blue: 0.24, alpha: 1),
-                               bottom: style.fill,
-                               flipped: true)
 
-        // The nib: a lens shape with a slit and a vent hole, punched out of the
-        // tile in the tile's own background colour.
+        // Flat, and the same reason as the app icon: Apple's current guidance is
+        // not to bake gradients or highlights into a mark, because the system
+        // lights it. This drew a shadow and a vertical gradient; both are gone.
+        style.fill.setFill()
+        DashboardDraw.path(rect, rect.width * 0.2237).fill()
+
+        // The same nib as Scripts/make_icon.swift, and it has to STAY the same —
+        // the icon in the Dock and the mark in the sidebar are one identity, and
+        // the two drifting apart is the exact failure this comment exists to
+        // prevent. Both were leaf-shaped until now: symmetric, pointed at each
+        // end, widest in the middle. A nib has a broad shoulder and one point.
         let w = rect.width, h = rect.height
+        func p(_ fx: CGFloat, _ fy: CGFloat) -> NSPoint { NSPoint(x: w * fx, y: h * fy) }
+
         let nib = NSBezierPath()
-        let top = NSPoint(x: w * 0.5, y: h * 0.18)
-        let bottom = NSPoint(x: w * 0.5, y: h * 0.84)
-        nib.move(to: top)
-        nib.curve(to: bottom,
-                  controlPoint1: NSPoint(x: w * 0.80, y: h * 0.38),
-                  controlPoint2: NSPoint(x: w * 0.66, y: h * 0.70))
-        nib.curve(to: top,
-                  controlPoint1: NSPoint(x: w * 0.34, y: h * 0.70),
-                  controlPoint2: NSPoint(x: w * 0.20, y: h * 0.38))
+        let tip = p(0.5, 0.10), shoulder = p(0.5, 0.92)
+        nib.move(to: tip)
+        nib.curve(to: shoulder, controlPoint1: p(0.30, 0.30), controlPoint2: p(0.14, 0.78))
+        nib.curve(to: tip, controlPoint1: p(0.86, 0.78), controlPoint2: p(0.70, 0.30))
         style.onFill.setFill()
         nib.fill()
 
-        // Slit + vent, cut back to the tile.
+        // The sidebar mark is drawn around 24pt, so it sits in the band where the
+        // icon shows its slit but not its vent — a 2.6pt hole is a smudge. Same
+        // rule, same reason: detail only where it resolves.
         style.fill.setFill()
-        let slit = NSBezierPath()
-        slit.move(to: NSPoint(x: w * 0.5 - 0.7, y: h * 0.30))
-        slit.line(to: NSPoint(x: w * 0.5 + 0.7, y: h * 0.30))
-        slit.line(to: NSPoint(x: w * 0.5 + 0.7, y: h * 0.72))
-        slit.line(to: NSPoint(x: w * 0.5 - 0.7, y: h * 0.72))
-        slit.close()
-        slit.fill()
-        NSBezierPath(ovalIn: NSRect(x: w * 0.5 - 2.1, y: h * 0.50, width: 4.2, height: 4.2)).fill()
+        let slitWidth = max(w * 0.045, 1)
+        NSBezierPath(rect: NSRect(x: w * 0.5 - slitWidth / 2, y: h * 0.16,
+                                  width: slitWidth, height: h * 0.44)).fill()
+        if w >= 40 {
+            let vent = w * 0.11
+            NSBezierPath(ovalIn: NSRect(x: w * 0.5 - vent / 2, y: h * 0.555,
+                                        width: vent, height: vent)).fill()
+        }
     }
 }

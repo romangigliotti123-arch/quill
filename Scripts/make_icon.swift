@@ -44,33 +44,85 @@ func render(size: CGFloat) -> NSBitmapImageRep {
     let tile = NSRect(x: margin, y: margin, width: size - margin * 2, height: size - margin * 2)
     let radius = tile.width * 0.2237   // Apple's ratio for app tiles
 
-    // Warm near-black, matching DashboardStyle.light.fill (#1A1712).
-    let base = NSColor(srgbRed: 0.102, green: 0.090, blue: 0.071, alpha: 1)
-    let lift = NSColor(srgbRed: 0.196, green: 0.176, blue: 0.145, alpha: 1)
+    // FLAT. No gradient, and that is the rule rather than a preference.
+    //
+    // Apple's current icon guidance for the Liquid Glass era is explicit: do not
+    // bake shadows, highlights or gradients into the artwork, because the system
+    // now lights the icon itself in real time and a pre-rendered gloss collides
+    // with that lighting and reads as muddy. The previous version drew a vertical
+    // gradient from #322D25 to #1A1712 — exactly the thing that is now wrong.
+    //
+    // A near-black tile rather than a colour: his Mac runs the Graphite accent
+    // and the whole app is monochrome, so a vivid tile would be the one loud
+    // object on the screen.
+    let tileColour = NSColor(srgbRed: 0.086, green: 0.086, blue: 0.094, alpha: 1)
     let clip = squircle(tile, radius: radius)
     clip.addClip()
-    NSGradient(starting: lift, ending: base)?.draw(in: tile, angle: -90)
+    tileColour.setFill()
+    clip.fill()
 
-    // The nib, in the app's cream. Same control points as DashboardMark, scaled.
+    // The nib, redrawn for legibility rather than for detail.
+    //
+    // The old mark carried a hairline slit and a vent hole sized at 1.2% and 7.5%
+    // of the canvas. At 16pt — the Finder list, the ⌘-Tab switcher, the menu bar —
+    // that slit is a single pixel and the vent is barely two, so both alias into
+    // grey mush and the nib reads as a leaf. Apple's own marks survive 16pt
+    // because they are a handful of bold shapes and nothing else.
+    //
+    // So: a wider nib, a slit that scales with the shape instead of with the
+    // canvas, and the vent dropped entirely below the size where it can be seen.
     let w = tile.width, h = tile.height, ox = tile.minX, oy = tile.minY
     func p(_ fx: CGFloat, _ fy: CGFloat) -> NSPoint { NSPoint(x: ox + w * fx, y: oy + h * fy) }
 
+    // A nib is not a leaf, and the difference is asymmetry.
+    //
+    // The previous silhouette was pointed at BOTH ends and widest in the middle,
+    // which is the shape of a leaf — and read as one at every size. A real nib
+    // has a broad shoulder where it meets the barrel and tapers to a single point
+    // at the writing end. Getting that one relationship right does more for
+    // recognition than any amount of detail inside it.
+    //
+    // It is also much bigger than it was. The glyph filled about 55% of the tile,
+    // which is why 16pt came out as a smudge; Apple's marks sit closer to 70% and
+    // that headroom is most of what makes them survive the Finder list.
     let nib = NSBezierPath()
-    let top = p(0.5, 0.16), bottom = p(0.5, 0.86)
-    nib.move(to: top)
-    nib.curve(to: bottom, controlPoint1: p(0.82, 0.37), controlPoint2: p(0.67, 0.71))
-    nib.curve(to: top, controlPoint1: p(0.33, 0.71), controlPoint2: p(0.18, 0.37))
-    NSColor(srgbRed: 0.992, green: 0.988, blue: 0.976, alpha: 1).setFill()
+    let tip = p(0.5, 0.10)          // the writing point
+    let shoulder = p(0.5, 0.92)     // the broad end
+    nib.move(to: tip)
+    // Right side: out to the widest point just above centre, then in to the
+    // shoulder. Control points chosen so the widest part sits at ~0.62, which is
+    // where a nib actually swells.
+    nib.curve(to: shoulder,
+              controlPoint1: p(0.30, 0.30), controlPoint2: p(0.14, 0.78))
+    nib.curve(to: tip,
+              controlPoint1: p(0.86, 0.78), controlPoint2: p(0.70, 0.30))
+    NSColor.white.setFill()
     nib.fill()
 
-    // Slit and vent, cut back to the tile so the nib reads as a nib and not a leaf.
-    base.setFill()
-    let slitWidth = max(size * 0.012, 1)
-    NSBezierPath(rect: NSRect(x: ox + w * 0.5 - slitWidth / 2, y: oy + h * 0.29,
-                              width: slitWidth, height: h * 0.42)).fill()
-    let vent = size * 0.075
-    NSBezierPath(ovalIn: NSRect(x: ox + w * 0.5 - vent / 2, y: oy + h * 0.485,
-                                width: vent, height: vent)).fill()
+    // The slit runs from the tip toward the vent, as it does on a real nib —
+    // it is what stops the shape reading as a solid petal. Proportional to the
+    // nib's width with a one-pixel floor, so it never disappears and never
+    // becomes a gash.
+    //
+    // Below 48pt it is not drawn at all. A slit two pixels wide does not read as
+    // a slit, it reads as the shape having gone slightly grey in the middle —
+    // which is worse than a clean silhouette. Same rule as the vent below: detail
+    // appears only at the sizes that can resolve it, and every size below that
+    // gets the boldest honest version of the mark.
+    if size >= 48 {
+        tileColour.setFill()
+        let slitWidth = max(w * 0.045, 1)
+        NSBezierPath(rect: NSRect(x: ox + w * 0.5 - slitWidth / 2, y: oy + h * 0.16,
+                                  width: slitWidth, height: h * 0.44)).fill()
+    }
+
+    // The vent only exists where it can be resolved. Below ~128pt it is fewer
+    // than four pixels across and contributes nothing but a smudge.
+    if size >= 128 {
+        let vent = w * 0.11
+        NSBezierPath(ovalIn: NSRect(x: ox + w * 0.5 - vent / 2, y: oy + h * 0.555,
+                                    width: vent, height: vent)).fill()
+    }
 
     NSGraphicsContext.restoreGraphicsState()
     return rep
