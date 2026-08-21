@@ -527,19 +527,40 @@ public final class InsightsHeatmap: NSView {
             .foregroundColor: style.inkTertiary,
             .kern: 0.6,
         ]
+        // Collect the columns that START a month, then decide which to draw.
+        //
+        // Doing both in one pass loses a month. The minimum-spacing check used to
+        // `continue` before updating `lastLabelX`, but `lastMonth` had already
+        // been advanced — so a month suppressed for being too close to its
+        // neighbour took the NEXT month's label down with it, and the axis read
+        // OCT · DEC · JAN as though November had not happened. The month that gets
+        // dropped should be the crowded one, not the one after it.
+        var starts: [(x: CGFloat, date: Date)] = []
         var lastMonth = -1
-        var lastLabelX: CGFloat = -100
         for column in 0..<columns {
             let index = column * 7
             guard index < days.count else { break }
             let month = calendar.component(.month, from: days[index].date)
             guard month != lastMonth else { continue }
             lastMonth = month
-            let x = labelColumn + CGFloat(column) * pitch
-            guard x - lastLabelX > 30 else { continue }
-            lastLabelX = x
-            let text = InsightsFormat.monthLabel(days[index].date).uppercased() as NSString
-            text.draw(at: NSPoint(x: x, y: 0), withAttributes: monthAttributes)
+            starts.append((labelColumn + CGFloat(column) * pitch, days[index].date))
+        }
+
+        // The grid is cut to whole weeks, so the first column is usually mid-month
+        // and its label sits over days that mostly belong to the month before it.
+        // With more than one month on screen, drop that partial one rather than
+        // whichever month happens to follow it.
+        if starts.count > 1, let first = starts.first, let second = starts.dropFirst().first,
+           second.x - first.x < 30 {
+            starts.removeFirst()
+        }
+
+        var lastLabelX: CGFloat = -100
+        for start in starts {
+            guard start.x - lastLabelX > 30 else { continue }
+            lastLabelX = start.x
+            let text = InsightsFormat.monthLabel(start.date).uppercased() as NSString
+            text.draw(at: NSPoint(x: start.x, y: 0), withAttributes: monthAttributes)
         }
 
         // Weekday gutter. Three of seven, like every calendar heatmap that has

@@ -272,11 +272,26 @@ import Testing
     let daily = InsightsActivityCard.bucket(days, by: .day)
     #expect(daily.count == 30)
 
+    // Four whole weeks, not five. 30 days is 4 weeks and a 2-day remainder, and
+    // that remainder used to be plotted as a full-width column, counted in
+    // "over 5 weeks", and divided into the average — three wrong answers from one
+    // leftover. It is dropped, which costs two days off the left edge of a
+    // user-chosen window and is invisible.
     let weekly = InsightsActivityCard.bucket(days, by: .week)
-    #expect(weekly.count == 5, "30 days made \(weekly.count) weekly buckets")
-    // Nothing is lost or double-counted on the way in.
-    #expect(weekly.reduce(0) { $0 + $1.words } == days.reduce(0) { $0 + $1.words })
-    #expect(weekly.reduce(0) { $0 + $1.sessions } == days.reduce(0) { $0 + $1.sessions })
+    #expect(weekly.count == 4, "30 days made \(weekly.count) weekly buckets")
+    #expect(weekly.allSatisfy { bucket in
+        guard let start = days.firstIndex(where: { $0.date == bucket.start }) else { return false }
+        return start + 7 <= days.count
+    }, "a bucket covers fewer than seven days")
+    // Nothing inside the kept range is lost or double-counted.
+    let kept = days.suffix(28)
+    #expect(weekly.reduce(0) { $0 + $1.words } == kept.reduce(0) { $0 + $1.words })
+    #expect(weekly.reduce(0) { $0 + $1.sessions } == kept.reduce(0) { $0 + $1.sessions })
+
+    // A short history keeps every bucket, stub or not: on twelve days of
+    // "All time" there is nothing left to drop it in favour of.
+    let short = Array(days.suffix(12))
+    #expect(InsightsActivityCard.bucket(short, by: .month).count == 1)
 
     // Filled from the END backwards, so the newest column is a whole period.
     // Filling forwards leaves the one column a person actually looks at drawn
@@ -285,9 +300,13 @@ import Testing
 }
 
 @Test @MainActor func theWordsChartPicksItsBucketFromTheRange() {
-    #expect(InsightsActivityCard.bucketing(for: .week) == .day)
-    #expect(InsightsActivityCard.bucketing(for: .month) == .week)
-    #expect(InsightsActivityCard.bucketing(for: .all) == .month)
+    #expect(InsightsActivityCard.bucketing(for: .week, observedDays: 120) == .day)
+    #expect(InsightsActivityCard.bucketing(for: .month, observedDays: 120) == .week)
+    #expect(InsightsActivityCard.bucketing(for: .all, observedDays: 120) == .month)
+    // "All time" on a young install follows the history, not the label. Thirteen
+    // days of monthly buckets is a one-column chart captioned "over 1 months".
+    #expect(InsightsActivityCard.bucketing(for: .all, observedDays: 13) == .week)
+    #expect(InsightsActivityCard.bucketing(for: .all, observedDays: 6) == .day)
 }
 
 // MARK: - Lists that hold more than fits

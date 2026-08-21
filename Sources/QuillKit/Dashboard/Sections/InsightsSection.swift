@@ -152,9 +152,13 @@ public final class InsightsView: NSView {
         volumeCard.configure(
             value: [(InsightsFormat.count(m.totalWords), false), ("  words", true)],
             caption: "dictated \(m.range.phrase)",
+            // Short enough to survive the narrow column. At the minimum window a
+            // stat card's footnote has 188 points, and "no earlier window to
+            // compare against" needed ~195 — it truncated to "compare agai…",
+            // which is a sentence that has lost the word carrying its meaning.
             footnote: m.previousWords > 0
                 ? "\(InsightsFormat.count(m.previousWords)) \(m.range.comparisonPhrase)"
-                : "no earlier window to compare against",
+                : "nothing earlier to compare",
             chip: m.wordsDelta.map { delta in
                 (text: "\(delta >= 0 ? "↑" : "↓") \(InsightsFormat.percent(delta))",
                  tone: DashboardChip.Tone.accent)
@@ -254,7 +258,14 @@ public final class InsightsView: NSView {
         // ever taller than the window when the alternative was losing a card.
         let gap = DashboardSpace.lg
         let statHeight: CGFloat = 138
-        let minPanelHeight: CGFloat = 180
+        // 200, not 180. The activity card spends 19 + 20 + 16 + 36 + 14 + 18 on
+        // its header, number, caption and padding before the chart gets anything,
+        // so below about 200 the chart drops under the ~60pt where its bars and
+        // its two date labels are still readable. At the minimum window this means
+        // the page is taller than the viewport and scrolls — which is the honest
+        // outcome: there IS more content than fits, and the scroll view has been
+        // here all along.
+        let minPanelHeight: CGFloat = 200
         // The streak band is the one card here with slack in it — it reads fine
         // compressed and merely has more air at 200 — so it gives its slack up
         // first, which is what lets the whole page fit a 1060x700 window instead
@@ -332,7 +343,7 @@ public final class InsightsStatCard: NSView {
         self.style = style
         caption = DashboardType.label("", font: DashboardType.callout, color: style.inkSecondary)
         footnote = DashboardType.label("", font: .systemFont(ofSize: 11, weight: .regular),
-                                       color: style.inkTertiary, tracking: 0)
+                                       color: style.inkQuaternary, tracking: 0)
         super.init(frame: .zero)
         value.isBezeled = false
         value.drawsBackground = false
@@ -527,7 +538,6 @@ public final class InsightsActivityCard: NSView {
     private let chart: InsightsDailyChart
     private var primary = NSTextField(labelWithString: "")
     private var caption: NSTextField
-    private var footnote: NSTextField
 
     private var averageValue: [(text: String, isUnit: Bool)] = []
     private var averageCaption = ""
@@ -540,8 +550,6 @@ public final class InsightsActivityCard: NSView {
         chart = InsightsDailyChart(style: style)
         caption = DashboardType.label("", font: .systemFont(ofSize: 11.5, weight: .regular),
                                       color: style.inkTertiary, tracking: 0)
-        footnote = DashboardType.label("", font: .systemFont(ofSize: 11, weight: .regular),
-                                       color: style.inkQuaternary, tracking: 0)
         super.init(frame: .zero)
         primary.isBezeled = false
         primary.drawsBackground = false
@@ -549,7 +557,7 @@ public final class InsightsActivityCard: NSView {
         primary.isSelectable = false
         primary.maximumNumberOfLines = 1
         primary.cell?.usesSingleLineMode = true
-        [header, chart, primary, caption, footnote].forEach(addSubview)
+        [header, chart, primary, caption].forEach(addSubview)
 
         chart.onHover = { [weak self] day in self?.show(day) }
     }
@@ -595,7 +603,7 @@ public final class InsightsActivityCard: NSView {
     }
 
     public func configure(metrics m: InsightsMetrics) {
-        let bucketing = InsightsActivityCard.bucketing(for: m.range)
+        let bucketing = InsightsActivityCard.bucketing(for: m.range, observedDays: m.dailyWords.count)
         let buckets = InsightsActivityCard.bucket(m.dailyWords, by: bucketing)
         header.configure(title: "Words \(bucketing.headline)",
                          meta: m.activeDays > 0
@@ -619,13 +627,10 @@ public final class InsightsActivityCard: NSView {
         chart.style = style
         show(nil)
 
-        footnote.removeFromSuperview()
-        footnote = DashboardType.label(
-            buckets.isEmpty ? "" : "One column \(bucketing.headline). The dashed line is your average.",
-            font: .systemFont(ofSize: 11, weight: .regular),
-            color: style.inkQuaternary, tracking: 0)
-        addSubview(footnote)
-
+        // No footnote. "One column a week" is the card's own title, and "the
+        // dashed line is your average" is the 616-words-on-average headline the
+        // line is literally drawn at. It was two restatements in eleven-point
+        // grey, and it cost the chart twenty-four points to say them.
         needsLayout = true
     }
 
@@ -663,10 +668,16 @@ public final class InsightsActivityCard: NSView {
         }
     }
 
-    static func bucketing(for range: InsightsRange) -> Bucketing {
-        switch range.days {
-        case .some(let d) where d <= 10: return .day
-        case .some(let d) where d <= 45: return .week
+    /// - Parameter observedDays: how many days of history there actually are.
+    ///   `.all` has no fixed span, so without this it fell through to monthly
+    ///   buckets regardless — and on a two-week-old install that is a chart with
+    ///   ONE column, one axis label, and a caption reading "a month on average,
+    ///   over 1 months". The window a person picked is not the same thing as the
+    ///   history they have.
+    static func bucketing(for range: InsightsRange, observedDays: Int) -> Bucketing {
+        switch range.days ?? observedDays {
+        case ...10: return .day
+        case ...45: return .week
         default: return .month
         }
     }
@@ -702,6 +713,14 @@ public final class InsightsActivityCard: NSView {
         let size = bucketing.size
         var out: [InsightsBucket] = []
         var end = days.count
+        // Filling backwards leaves a SHORT bucket at the left edge whenever the
+        // window is not a whole number of periods. A 30-day window is 4 weeks and
+        // 2 days, and that 2-day stub was plotted at the same width and the same
+        // height scale as the weeks beside it, counted in "over 5 weeks", and
+        // divided into the average — three wrong answers from one leftover.
+        //
+        // It is dropped below, once the buckets exist, so the guard can see
+        // whether there is anything left to drop it in favour of.
         while end > 0 {
             let start = max(0, end - size)
             let slice = days[start..<end]
@@ -715,7 +734,14 @@ public final class InsightsActivityCard: NSView {
                     : shortLabel.string(from: first.date)))
             end = start
         }
-        return out.reversed()
+        var buckets = Array(out.reversed())
+        // Only when a whole period survives it. On "All time" with twelve days of
+        // history every bucket is a stub, and dropping the first would throw away
+        // a third of the chart to avoid an inaccuracy nobody can see.
+        if buckets.count > 1, days.count % size != 0 {
+            buckets.removeFirst()
+        }
+        return buckets
     }
 
     public override func layout() {
@@ -745,17 +771,11 @@ public final class InsightsActivityCard: NSView {
         // So the footnote is what gives way. It is a legend for a chart that is
         // legible without it, and losing it is much cheaper than losing the chart
         // or printing on the page.
-        let bottomPad: CGFloat = 18
-        let available = max(0, bounds.height - y - bottomPad)
-        let footnoteHeight = footnote.stringValue.isEmpty ? 0 : footnote.fittingSize.height
-        let footnoteFits = footnoteHeight > 0 && available - footnoteHeight - 10 >= 60
-        footnote.isHidden = !footnoteFits
-        let chartHeight = max(0, footnoteFits ? available - footnoteHeight - 10 : available)
+        // Whatever is left inside the card, and never a point more. The whole
+        // reason the footnote is gone is that a floor and a hard container cannot
+        // both win, and the container has to.
+        let chartHeight = max(0, bounds.height - y - 18)
         chart.frame = NSRect(x: pad, y: y, width: inner, height: chartHeight)
-        if footnoteFits {
-            footnote.frame = NSRect(x: pad, y: y + chartHeight + 10,
-                                    width: min(footnote.fittingSize.width, inner), height: footnoteHeight)
-        }
     }
 
     public override func draw(_ dirtyRect: NSRect) {
