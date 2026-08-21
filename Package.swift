@@ -30,6 +30,14 @@ let package = Package(
             path: "Sources/Quill",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // Temporary: measures what live typing costs the main thread over one
+        // long dictation. Not shipped; delete once the finding is settled.
+        .executableTarget(
+            name: "LiveTypeProbe",
+            dependencies: ["QuillKit"],
+            path: "Sources/LiveTypeProbe",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .testTarget(
             name: "QuillKitTests",
             dependencies: ["QuillKit"],

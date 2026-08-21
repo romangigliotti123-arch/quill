@@ -32,6 +32,16 @@ public struct VocabularyCorrector: Sendable {
     /// nothing at all until the app was relaunched — with the screen reporting it
     /// as added the whole time.
     var terms: [String] { fixedTerms ?? book?.terms ?? [] }
+
+    /// Remembers what each span matched, so re-reading the same sentence is not
+    /// re-deciding it. See `MatchMemo` for why this exists.
+    private let memo = MatchMemo()
+
+    /// Spans this corrector has actually had to match, as opposed to recognise.
+    /// The incremental behaviour is asserted by counting this rather than by
+    /// timing, because a clock on a shared machine measures the machine.
+    var spansMatchedForTesting: Int { memo.misses }
+    func resetTestingCountersForTesting() { memo.resetCounters() }
     /// Tuned against real failures rather than picked round: "craigeburn" vs
     /// "craigieburn" scores 0.91 and must pass; "graphifi" vs "graphify" scores
     /// 0.875 and must pass; ordinary English near-misses must not.
@@ -71,6 +81,10 @@ public struct VocabularyCorrector: Sendable {
         var tokens = Self.tokenise(text)
         guard !tokens.isEmpty else { return text }
 
+        // Per-term work done once for the whole sentence rather than once per
+        // candidate span, and dropped if the Dictionary changed under us.
+        let prepared = memo.prepare(terms)
+
         var index = 0
         while index < tokens.count {
             var replaced = false
@@ -89,10 +103,18 @@ public struct VocabularyCorrector: Sendable {
                       !Self.isBoundaryWord(window.last?.word) || span == 1
                 else { continue }
                 let candidate = window.map(\.word).joined(separator: " ")
-                guard let match = bestMatch(for: candidate, spanCount: span,
-                                            phoneticAllowed: allowsPhoneticMatch(window),
-                                            terms: terms)
-                else { continue }
+                let key = MatchMemo.Key(candidate: candidate, spanCount: span,
+                                        phoneticAllowed: allowsPhoneticMatch(window))
+                let resolved: String?
+                if let remembered = memo.cached(key) {
+                    resolved = remembered
+                } else {
+                    resolved = bestMatch(for: candidate, spanCount: span,
+                                         phoneticAllowed: key.phoneticAllowed,
+                                         terms: prepared)
+                    memo.remember(key, resolved)
+                }
+                guard let match = resolved else { continue }
 
                 // Keep the trailing punctuation of the last token in the span.
                 tokens[index] = Token(word: match, trailing: window[span - 1].trailing)
@@ -115,16 +137,33 @@ public struct VocabularyCorrector: Sendable {
     /// `terms` is passed in rather than read from `self` so a sentence is matched
     /// against one list from first window to last, and so the file is stat-ed once
     /// per dictation instead of once per candidate span.
+    ///
+    /// Prepared rather than raw: `normalise` and `wordCount` of a TERM do not
+    /// depend on the candidate, and recomputing them per span was 142 needless
+    /// normalisations for every window in the sentence.
     private func bestMatch(for candidate: String, spanCount: Int,
-                           phoneticAllowed: Bool, terms: [String]) -> String? {
+                           phoneticAllowed: Bool, terms: [MatchMemo.Prepared]) -> String? {
         let normalised = Self.normalise(candidate)
         guard normalised.count >= 3 else { return nil }
 
         let threshold = spanCount == 1 ? singleWordThreshold : multiWordThreshold
 
+        // Depends on the candidate alone, so it is worked out at most once per
+        // span instead of once per term. Still lazy: the guard that needs it is
+        // reached for a minority of terms, and it is the expensive one — a
+        // spell-checker round trip per word.
+        var ordinaryCandidate: Bool?
+        func candidateIsOrdinaryEnglish() -> Bool {
+            if let known = ordinaryCandidate { return known }
+            let answer = everyWordIsOrdinaryEnglish(candidate)
+            ordinaryCandidate = answer
+            return answer
+        }
+
         var best: (term: String, score: Double)?
-        for term in terms {
-            let target = Self.normalise(term)
+        for entry in terms {
+            let term = entry.term
+            let target = entry.normalised
             guard !target.isEmpty else { continue }
             // Cheap length prefilter: nothing this far apart can clear the bar.
             let ratio = Double(min(normalised.count, target.count)) / Double(max(normalised.count, target.count))
@@ -142,7 +181,8 @@ public struct VocabularyCorrector: Sendable {
                 // into "I need to Builda Bed for the spare room" — a sentence of
                 // ordinary English, rewritten into a brand, with every guard the
                 // corrector owns sitting downstream of the return that did it.
-                guard Self.spanCanBe(term, spanCount: spanCount) else { continue }
+                guard Self.spanCanBe(wordCount: entry.wordCount, spanCount: spanCount)
+                else { continue }
                 return candidate == term ? nil : term
             }
             // Letters first, then sound.
@@ -158,7 +198,8 @@ public struct VocabularyCorrector: Sendable {
             // and assembled the wrong letters out of them, so the comparison that
             // matches its failure mode is the one done on sound.
             let score = Self.similarity(normalised, target)
-            guard Self.spanCanBe(term, spanCount: spanCount) else { continue }
+            guard Self.spanCanBe(wordCount: entry.wordCount, spanCount: spanCount)
+            else { continue }
             // A span of entirely ordinary English matched against a multi-word
             // term has to be near-exact, not merely close.
             //
@@ -170,8 +211,8 @@ public struct VocabularyCorrector: Sendable {
             // since the start (below); the multi-word route had no such check at
             // all, which is the harder half, because that is where words get
             // deleted rather than merely respelled.
-            let ordinaryPhrase = spanCount > 1 && Self.wordCount(term) > 1
-                && Self.everyWordIsOrdinaryEnglish(candidate)
+            let ordinaryPhrase = spanCount > 1 && entry.wordCount > 1
+                && candidateIsOrdinaryEnglish()
             let bar = ordinaryPhrase ? Self.ordinaryPhraseThreshold : threshold
             if score >= bar, score > (best?.score ?? 0) {
                 best = (term, score)
@@ -187,17 +228,37 @@ public struct VocabularyCorrector: Sendable {
                       // ("Craigie Bear"). Nothing real lands near zero, so a
                       // floor well below every observed repair costs nothing and
                       // stops sound alone carrying a match it cannot support.
-                      Self.similarity(normalised, target) >= Self.phoneticLettersFloor,
-                      Self.phoneticSimilarity(normalised, target) >= Self.phoneticThreshold,
-                      Self.phoneticSimilarity(normalised, target) > (best?.score ?? 0) {
-                best = (term, Self.phoneticSimilarity(normalised, target))
+                      //
+                      // `score` IS similarity(normalised, target), computed just
+                      // above; it was being recomputed here and the phonetic key
+                      // built three times over for a single term.
+                      score >= Self.phoneticLettersFloor {
+                let sound = Self.phoneticSimilarity(normalised, target)
+                if sound >= Self.phoneticThreshold, sound > (best?.score ?? 0) {
+                    best = (term, sound)
+                }
             }
         }
 
         guard let best else { return nil }
         // A correctly spelled English word is presumed intentional.
-        if spanCount == 1, Self.isRealEnglishWord(candidate) { return nil }
+        if spanCount == 1, isRealEnglishWord(candidate) { return nil }
         return best.term
+    }
+
+    // MARK: - Spell checking, remembered
+
+    /// `NSSpellChecker` is a cross-process call, up to four of them per word, and
+    /// the same words recur on every pass over a growing transcript. The answer
+    /// for a given word cannot change within a run.
+    func isRealEnglishWord(_ word: String) -> Bool {
+        memo.isEnglish(word) { Self.isRealEnglishWord($0) }
+    }
+
+    func everyWordIsOrdinaryEnglish(_ span: String) -> Bool {
+        let words = span.split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)
+        guard !words.isEmpty else { return false }
+        return words.allSatisfy { isRealEnglishWord($0) }
     }
 
     /// A multi-word term can only be spoken as that many words.
@@ -208,7 +269,13 @@ public struct VocabularyCorrector: Sendable {
     /// whole pass exists for: "graphify" comes back as "graph if I", "Firestore"
     /// as "fire store", "blockcraft" as "block craft".
     static func spanCanBe(_ term: String, spanCount: Int) -> Bool {
-        let words = wordCount(term)
+        spanCanBe(wordCount: wordCount(term), spanCount: spanCount)
+    }
+
+    /// The same rule, given the term's word count already worked out. The hot
+    /// loop has it to hand; recounting the words of all 142 terms for every
+    /// candidate span was pure repetition.
+    static func spanCanBe(wordCount words: Int, spanCount: Int) -> Bool {
         // A single-word span is the recogniser having GLUED the name together —
         // "Wispr Flow" heard as "Whisperflow" — which is the same failure as
         // splitting one, and must stay reachable.
@@ -527,5 +594,103 @@ private extension String {
             result.insert(ch, at: result.startIndex)
         }
         return result
+    }
+}
+
+/// What each span matched last time, so a growing transcript is not re-decided
+/// from scratch on every keystroke.
+///
+/// Live typing calls `cleanFast` on the WHOLE transcript so far, once per
+/// partial, on the main thread. That is the right thing for correctness — the
+/// text on screen has to agree with the text that will be inserted — but it
+/// means a dictation of N characters runs the matcher over a growing prefix
+/// N/20-ish times, and the matcher is the expensive part: measured at 0.67ms per
+/// character, so 543ms for one pass over 800 characters and 1.1s over 1600.
+/// Quadratic in the length of what you said, all of it on the thread that draws
+/// the waveform and services the key release.
+///
+/// The matcher is a pure function of (span, span length, whether sound is
+/// allowed to decide) and the term list, so the second pass over a sentence can
+/// only reach the same answers as the first. This remembers them.
+///
+/// The normalised form and word count of each TERM are hoisted here too. They
+/// were being recomputed inside the term loop — 142 terms re-normalised for
+/// every candidate span in the sentence — which is most of the cost of the
+/// misses that are left.
+final class MatchMemo: @unchecked Sendable {
+
+    struct Key: Hashable {
+        let candidate: String
+        let spanCount: Int
+        let phoneticAllowed: Bool
+    }
+
+    /// A term with the two things the matcher asks of it already worked out.
+    struct Prepared {
+        let term: String
+        let normalised: String
+        let wordCount: Int
+    }
+
+    /// Past this the cache is dropped rather than grown. A long session has no
+    /// business holding every span anyone ever said, and rebuilding it costs one
+    /// slow sentence, not a slow app.
+    private static let capacity = 20_000
+
+    private let lock = NSLock()
+    private var termsFingerprint: [String] = []
+    private var prepared: [Prepared] = []
+    private var entries: [Key: String?] = [:]
+    /// Spell-checker answers. Each miss is up to four cross-process calls, and
+    /// the same handful of words recur on every pass over the same sentence.
+    private var englishWords: [String: Bool] = [:]
+    private var _misses = 0
+
+    var misses: Int { lock.lock(); defer { lock.unlock() }; return _misses }
+    func resetCounters() { lock.lock(); _misses = 0; lock.unlock() }
+
+    /// Returns the term list with its per-term work already done, dropping
+    /// everything remembered if the list itself has changed — a word added in the
+    /// Dictionary has to take effect on the next sentence, which is the whole
+    /// reason `terms` is read per call rather than held.
+    func prepare(_ terms: [String]) -> [Prepared] {
+        lock.lock(); defer { lock.unlock() }
+        if terms != termsFingerprint {
+            termsFingerprint = terms
+            prepared = terms.map {
+                Prepared(term: $0,
+                         normalised: VocabularyCorrector.normalise($0),
+                         wordCount: VocabularyCorrector.wordCount($0))
+            }
+            entries.removeAll(keepingCapacity: true)
+        }
+        return prepared
+    }
+
+    /// The remembered answer, or nil if this span has not been decided yet.
+    /// The value is itself optional — "decided, and the answer was no match" is a
+    /// result worth remembering, and it is by far the most common one.
+    func cached(_ key: Key) -> String?? {
+        lock.lock(); defer { lock.unlock() }
+        return entries[key]
+    }
+
+    func remember(_ key: Key, _ value: String?) {
+        lock.lock(); defer { lock.unlock() }
+        _misses += 1
+        if entries.count >= Self.capacity { entries.removeAll(keepingCapacity: true) }
+        entries[key] = value
+    }
+
+    func isEnglish(_ word: String, _ compute: (String) -> Bool) -> Bool {
+        lock.lock()
+        if let known = englishWords[word] { lock.unlock(); return known }
+        lock.unlock()
+        let answer = compute(word)
+        lock.lock()
+        if englishWords.count >= Self.capacity { englishWords.removeAll(keepingCapacity: true) }
+        englishWords[word] = answer
+        lock.unlock()
+        return answer
     }
 }

@@ -99,15 +99,76 @@ Rebuilt from the latest commit and left running:
   to the seed.
 - Just hold Right Option and talk.
 
-## Next — bugs Roman is about to report
+## Bugs Roman reported — 21 Aug
 
-He said on 21 Aug that he has hit "a few bugs" in normal use and was going to
-describe them. That conversation was cut short by a session restart, so ASK HIM
-for them first — they are real-use bugs from someone who dictates with this
-daily, which is worth more than anything that can be found from the corpus.
+He gave them one at a time, wanting each fixed before describing the next.
 
-For each: what he did, what he expected, what happened, and whether it is every
-time or intermittent.
+### 1. A long dictation falls behind, judders, and keeps listening — FIXED
+
+His words: read a paragraph for ~30 seconds, and the text keeps appearing for
+about 30 seconds after you stop; the waveform bar at the bottom goes juddery and
+then freezes; and letting go of the key does not end capture — it keeps hearing
+you until all the text has landed.
+
+Three symptoms, one cause. Everything that draws or decides funnels through the
+main queue: `emit` posts one block per partial, `publish(level:)` one per audio
+buffer, `HotkeyEngine.deliver` one for the key release — deliberately, so press
+and release keep their order. Live typing calls `cleanFast` on the WHOLE
+transcript so far, once per partial, on that queue. And `VocabularyCorrector`,
+99% of `cleanFast`'s cost, was re-deciding every span it had already decided.
+
+Measured, release build: **0.67ms per character**, so 284ms for one pass over 400
+characters, 543ms over 800, 1.1s over 1600 — and a dictation of N characters runs
+it ~N/20 times against a growing prefix. Quadratic in how long you spoke, all of
+it on the thread that draws the waveform and services the key release.
+
+The matcher is a pure function of (span, span length, whether sound may decide)
+and the term list, so the second pass over a sentence can only reach the answers
+the first one did. `MatchMemo` remembers them. Two things came out of the hot
+loop at the same time: `normalise` and `wordCount` of each TERM were recomputed
+for every candidate span — 142 terms re-normalised per window — and the phonetic
+branch was rebuilding both phonetic keys three times over per term.
+
+Result, over one 83-second dictation driven from real audio through the real
+transcriber:
+
+| | before | after |
+|---|---|---|
+| cleanFast on the main thread | 26,894 ms | 2,457 ms |
+| share of the time spent speaking | 33% | 4% |
+| main-queue lateness, p95 | 242 ms | 17 ms |
+| main-queue lateness, worst | 860 ms | 356 ms |
+| heartbeats missing their 50ms slot by >100ms | 70 | 3 |
+
+Cold-pass cost fell the same way: 0.67ms/char to 0.067ms/char.
+
+Verified it still says the same thing: **299 distinct raw transcripts** — every
+one the rig has ever recorded — cleaned by the old build and the new one,
+byte-for-byte identical, and no warm/cold disagreement on any of them. 492 tests
+pass. The 2.81% WER is untouched because the output is untouched.
+
+The instrument is `Sources/LiveTypeProbe`. It feeds a real recording through the
+real transcriber at 1x and pays the real per-partial cost on the main queue,
+with a heartbeat measuring how late that queue runs. `--bench` is the
+per-character table, `--replay` is the corpus comparison. Reach for it before
+theorising about latency again; it took two minutes to answer what an hour of
+reading could not.
+
+**Still measured and NOT fixed:** the keystroke bursts. When the recogniser
+revises a word early in the sentence, backspacing to it means deleting and
+retyping everything after — one update at t=73s deleted 359 characters and
+retyped 371, and the whole 83s dictation posts 735 backspaces and 1,729
+characters for a 994-character result. That is now the largest remaining cost
+(735ms of the 3,192ms, and the CGEvents themselves cost the TARGET app more than
+the sleeps cost us). Left alone deliberately: the fix is either a shorter gap
+between backspaces, which is what stops text views coalescing and dropping them,
+or holding volatile text back from the screen, which changes what live typing
+feels like. Neither should be guessed at — measure whether Roman can still see it
+first.
+
+### The rest
+
+He has more. Ask for the next one.
 
 ## Next — everything else
 
