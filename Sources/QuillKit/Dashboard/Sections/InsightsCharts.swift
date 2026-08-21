@@ -711,7 +711,11 @@ public final class InsightsSegmented: NSView {
     private var hoveredIndex: Int? {
         didSet {
             guard hoveredIndex != oldValue else { return }
+            // Redraw as well as animate. The tween only runs when the fill is
+            // appearing or disappearing, so sliding straight from one segment to
+            // the next left it painted under the segment the pointer had left.
             hover.animate(to: hoveredIndex == nil ? 0 : 1)
+            needsDisplay = true
         }
     }
     /// Segment index as a continuous number: the thumb slides to what was
@@ -747,7 +751,9 @@ public final class InsightsSegmented: NSView {
     }
 
     public var intrinsicWidth: CGFloat {
-        labels.reduce(4) { $0 + ceil($1.fittingSize.width) + 24 }
+        // 6, not 4: the segments start at x=3, so the trailing inset only matches
+        // the leading one when the seed covers both.
+        labels.reduce(6) { $0 + ceil($1.fittingSize.width) + 24 }
     }
 
     private func segmentRects() -> [NSRect] {

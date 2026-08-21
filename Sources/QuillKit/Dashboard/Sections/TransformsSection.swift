@@ -98,8 +98,12 @@ public final class TransformsSectionView: NSView {
                 edited.isEnabled = isOn
                 _ = self.store.upsert(edited)
                 self.transforms = self.store.ordered
+                // No rebuild. The hero does not render the enabled state, so
+                // flipping a switch cross-faded the whole card to redraw exactly
+                // what was already there — a 0.32s animation announcing nothing.
+                // Keeping `selected` fresh means the next real selection change
+                // builds from current data.
                 if self.selected?.id == edited.id { self.selected = edited }
-                self.rebuildDetail()
             }
             listDocument.addSubview(row)
             return row

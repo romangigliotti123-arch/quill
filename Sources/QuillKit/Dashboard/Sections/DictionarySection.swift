@@ -714,7 +714,11 @@ final class DictionaryTermRow: NSView {
         }
 
         let heardSize = heard.fittingSize
-        let heardWidth = min(heardSize.width, columns.heardW - 26)
+        // Only reserve the "+N" gutter on rows that have one. Every row paid 26
+        // points for a badge nine of ten of them never show, and it is taken off
+        // the column that was already the tightest.
+        let extraReserve: CGFloat = extra == nil ? 0 : 26
+        let heardWidth = min(heardSize.width, columns.heardW - extraReserve)
         heard.frame = NSRect(x: columns.heardX, y: ((bounds.height - heardSize.height) / 2).rounded(),
                              width: heardWidth, height: heardSize.height)
         if let extra {
@@ -855,8 +859,20 @@ final class DictionarySegmented: NSView {
 
     private func segment(_ index: Int) -> NSRect { pillRect(index) }
 
+    /// Maps the WHOLE control, not just the drawn segments.
+    ///
+    /// Segments start at x=3 and stop 3pt short of the trailing edge, so a click
+    /// on the outer three points of a control that plainly looks like one strip
+    /// hit nothing at all — the failure mode this control was just rescued from,
+    /// in miniature.
     private func index(at point: NSPoint) -> Int? {
-        labels.indices.first { segment($0).insetBy(dx: 0, dy: -3).contains(point) }
+        guard bounds.contains(point) else { return nil }
+        var x: CGFloat = 3
+        for (index, width) in widths.enumerated() {
+            x += width
+            if point.x < x || index == widths.count - 1 { return index }
+        }
+        return nil
     }
 
     override func layout() {
