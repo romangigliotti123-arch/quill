@@ -328,3 +328,67 @@ private func cleaner(_ ai: FakeAI) -> NIMCleaner {
     #expect(CleanupPrompt.current.version == CleanupPrompt.v1.version)
     #expect(!CleanupPrompt.current.system.isEmpty)
 }
+
+// MARK: - The homophone pass
+
+// It is off by default, it must not cost a request when off, and when on it may
+// only ever change a listed word. The last of those is enforced by
+// HomophoneProjection and tested there; these are about the wiring.
+
+private func homophoneCleaner(_ ai: FakeAI) -> NIMCleaner {
+    NIMCleaner(client: ai, vocabulary: vocabulary, homophones: true)
+}
+
+@Test func theHomophonePassIsOffUnlessAskedFor() async {
+    let ai = FakeAI.returning("every time Cloudflare cached something stale")
+    let text = await cleaner(ai).cleanThorough(
+        "every time Cloudflare cashed something stale", deadline: deadline)
+    #expect(ai.log.calls == 0, "spent a request with the pass switched off")
+    // nil is this method's way of saying "nothing to add beyond cleanFast".
+    #expect(text == nil, "changed the text with the pass switched off: \(text ?? "nil")")
+}
+
+@Test func theHomophonePassCostsNothingWhenNoListedWordIsPresent() async {
+    let ai = FakeAI.returning("anything at all")
+    let sentence = "push the build and tell the client it is done"
+    let text = await homophoneCleaner(ai).cleanThorough(sentence, deadline: deadline)
+    #expect(ai.log.calls == 0, "spent a request on a sentence with no candidate in it")
+    #expect(text == nil, "got: \(text ?? "nil")")
+}
+
+@Test func theHomophonePassFixesAListedWordFromTheSentence() async {
+    let ai = FakeAI.returning("Every time Cloudflare cached something stale.")
+    let text = await homophoneCleaner(ai).cleanThorough(
+        "every time Cloudflare cashed something stale", deadline: deadline)
+    #expect(ai.log.calls == 1)
+    #expect(text?.contains("cached") == true, "got: \(text ?? "nil")")
+}
+
+@Test func theHomophonePassKeepsTheDeterministicAnswerWhenTheModelRewrites() async {
+    // A model that returns a different sentence entirely. The projection refuses
+    // it and the caller keeps what it already had.
+    let ai = FakeAI.returning("I have rewritten this for you, hope that helps!")
+    let sentence = "every time Cloudflare cashed something stale"
+    let text = await homophoneCleaner(ai).cleanThorough(sentence, deadline: deadline)
+    // The projection refused it, so there is nothing to improve on cleanFast.
+    #expect(text == nil, "took a rewritten sentence: \(text ?? "nil")")
+}
+
+@Test func theHomophonePassNeverOutlivesTheDeadline() async {
+    let started = ContinuousClock.now
+    let text = await homophoneCleaner(.hangs).cleanThorough(
+        "every time Cloudflare cashed something stale", deadline: deadline)
+    let elapsed = ContinuousClock.now - started
+    #expect(elapsed < .seconds(6), "took \(elapsed)")
+    #expect(text == nil, "got: \(text ?? "nil")")
+}
+
+@Test func aRetractionStillWinsOverAHomophone() async {
+    // Both are true of this sentence. The retraction is the one that matters, and
+    // only one request is ever spent.
+    let ai = FakeAI.returning("Send it to Carlo")
+    let text = await homophoneCleaner(ai).cleanThorough(
+        "send it to Noah no wait send it to Carlo about the flower", deadline: deadline)
+    #expect(ai.log.calls == 1, "spent more than one request")
+    #expect(text != nil)
+}

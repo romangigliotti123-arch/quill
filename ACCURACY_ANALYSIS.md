@@ -184,6 +184,49 @@ for it. The options, honestly:
 **Option 3 first, then option 2 for what is left.** Option 3 costs nothing and can
 ship immediately; option 2 is the one that needs the bench below.
 
+## Built, measured, and left switched off
+
+The pass exists as of 21 Aug 2026: `HomophonePairs` (the closed list and the
+gate), `HomophonePrompt` (built per dictation, naming only the live choices),
+`HomophoneProjection` (the enforcer), wired into `NIMCleaner.cleanThorough`
+behind `QUILL_HOMOPHONES=1`.
+
+**The projection is the safety property, and it is stronger than the cleanup
+one.** `CleanupProjection` returns the model's own text once it has proved the
+text is the input with words removed. This never returns the model's text at
+all. It reads the answer only to learn which listed word was chosen at each
+position, then rebuilds the sentence from the input. Punctuation,
+capitalisation, spacing and every unlisted word come from the input verbatim.
+The blast radius is the pair list by construction, not by inspection.
+
+**Benched against the real endpoint, half the corpus deliberately correct:**
+
+    version                              fixed   damaged
+    ────────────────────────────────────────────────────
+    v1, options listed bare               2/6      1/6
+    v2, + meanings for each option        3/6      1/6
+    v3, + complement/compliment removed   3/6      0/6
+
+The damage column is the one that decides. v1 and v2 both turned a correct
+"A compliment from a client is rare" into "A complement from a client is rare"
+— with and without a gloss saying compliment means praise. That pair is one the
+8B model cannot decide, so it is off the list. Removing it is not gaming the
+bench: it is declining to hand the model a decision it gets wrong, and those
+sentences stay exactly as wrong as they already were. "complementary colours" is
+still fixed for free by `FastCleaner.corrections`, where a fixed phrase settles
+it without asking anyone.
+
+**Why it is still off by default.** 3 of 6 is a real improvement on a class
+nothing else can touch, and 0 damage is the bar it had to clear. But it is a
+network round trip on the critical path, and the three it still misses —
+"cashed for an hour", "dues on the grass", "a discrete word" — are the ones
+where a single adjacent word carries the meaning. That is what a larger model
+would buy, and whether that is worth the latency is a decision to make with the
+numbers in front of you rather than by default. Turn it on with
+`QUILL_HOMOPHONES=1`; the numbers are pinned in `theHomophonePassOnTheRealModel`
+so a change that trades damage for hits fails the suite rather than reaching a
+document.
+
 **How to prove it works before shipping it:** the bench harness already exists in the
 shape of `rig/selfcorrect_bench.py`. The same method applies — a corpus that is
 *deliberately* only half homophone cases, so the measurement captures the damage done

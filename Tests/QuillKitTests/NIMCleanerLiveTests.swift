@@ -249,3 +249,65 @@ struct NIMCleanerLiveTests {
         }
     }
 }
+
+// MARK: - Homophone pass, against the real endpoint
+
+// Half of these are sentences where the spelling is ALREADY RIGHT. That is the
+// point: a pass that fixes every error and also rewrites one correct sentence in
+// five is not shippable, and a corpus of only errors cannot tell you which you
+// have. Same method as the cleanup bench in CleanupPrompt.swift.
+//
+// Deliberately excludes anything FastCleaner.corrections already settles for
+// free — "principle developer", "no affect on", "loosing the", "stationary
+// shop". Benching the model on cases it never sees measures nothing.
+@Test func theHomophonePassOnTheRealModel() async throws {
+    let cleaner = NIMCleaner(vocabulary: Vocabulary.seed.contextualStrings, homophones: true)
+    guard NIMClient().isConfigured else { return }
+
+    // (sentence, the word that must come out) — nil means "must not change".
+    let corpus: [(String, String?)] = [
+        // Wrong, and only the sentence decides it.
+        ("every time Cloudflare cashed something stale", "cached"),
+        ("the response is cashed for an hour", "cached"),
+        ("the dues were still on the grass", "dews"),
+        ("she is the principle architect", "principal"),
+        ("a discrete word with the client first", "discreet"),
+        ("the flower in the bread recipe", "flour"),
+        // Already right. Must survive untouched.
+        ("I cashed the cheque on Friday", nil),
+        ("the principle of least surprise", nil),
+        ("keep the modules discrete and separate", nil),
+        ("a compliment from a client is rare", nil),
+        ("the flower shop on the corner", nil),
+        ("the invoice is past due", nil),
+    ]
+
+    var fixed = 0, broke = 0, missed = 0
+    for (sentence, expected) in corpus {
+        // nil means "nothing better than the fast text", so that is the baseline
+        // to compare against — not the raw sentence.
+        let baseline = cleaner.cleanFast(sentence)
+        let out = await cleaner.cleanThorough(sentence, deadline: .milliseconds(2500)) ?? baseline
+        if let expected {
+            if out.lowercased().contains(expected) { fixed += 1 }
+            else { missed += 1; print("[homophone] MISS  \(sentence) -> \(out)") }
+        } else {
+            if out.lowercased() == baseline.lowercased() { /* untouched, good */ }
+            else { broke += 1; print("[homophone] BROKE \(baseline) -> \(out)") }
+        }
+    }
+    print("[homophone] fixed \(fixed)/6, missed \(missed), damaged \(broke)/6")
+    // Measured 21 Aug 2026, meta/llama-3.1-8b-instruct: fixed 3/6, damaged 0/6.
+    //
+    // The damage bound is the one that has to hold, and it is why the pass is
+    // still off by default. A miss costs a correction; a break costs a sentence
+    // he meant, silently. Both numbers are pinned so a prompt or list change
+    // that trades damage for hits shows up here rather than in his documents.
+    //
+    // The three it still misses — "cashed for an hour", "dues on the grass",
+    // "a discrete word" — are the ones where the deciding context is a single
+    // adjacent word. That is what a larger model would buy, if it is ever worth
+    // the latency.
+    #expect(broke == 0, "rewrote \(broke) sentences that were already correct")
+    #expect(fixed >= 3, "fixed \(fixed)/6, was 3/6 when this was written")
+}

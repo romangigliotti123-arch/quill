@@ -63,6 +63,7 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
     private let vocabulary: [String]
     private let safetyMargin: Duration
     private let minimumBudget: Duration
+    private let homophones: Bool
 
     /// - Parameters:
     ///   - safetyMargin: taken off the caller's deadline before the request is
@@ -74,13 +75,20 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
     ///     completion on this endpoint is a measured 195–223ms of pure network on
     ///     a warm connection, so anything under 120ms is guaranteed to be a wasted
     ///     wait, and the deterministic answer should just ship.
+    ///   - homophones: whether to spend a request choosing between listed
+    ///     homophones when a dictation contains one and needs nothing else. Off
+    ///     by default. It is a real request on the critical path for a class of
+    ///     error that is invisible when it goes wrong, so it ships opt-in and
+    ///     has to earn the default with a bench, the way the cleanup prompt did.
+    ///     `QUILL_HOMOPHONES=1` turns it on without a rebuild.
     public init(
         client: AICompleting = NIMClient(),
         fast: FastCleaner = FastCleaner(),
         prompt: CleanupPrompt = .current,
         vocabulary: [String] = Vocabulary.load().contextualStrings,
         safetyMargin: Duration = .milliseconds(30),
-        minimumBudget: Duration = .milliseconds(120)
+        minimumBudget: Duration = .milliseconds(120),
+        homophones: Bool = ProcessInfo.processInfo.environment["QUILL_HOMOPHONES"] == "1"
     ) {
         self.client = client
         self.fast = fast
@@ -88,9 +96,27 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         self.vocabulary = vocabulary
         self.safetyMargin = safetyMargin
         self.minimumBudget = minimumBudget
+        self.homophones = homophones
     }
 
     public func cleanFast(_ raw: String) -> String { fast.cleanFast(raw) }
+
+    /// One request, then the projection. Returns nil for every failure — no key,
+    /// no network, a rewritten sentence, a refused swap — because the caller
+    /// already holds the deterministic answer and this may only improve it.
+    private func correctHomophones(in text: String, budget: Duration) async -> String? {
+        guard let homophonePrompt = HomophonePrompt.make(for: text) else { return nil }
+        do {
+            let completion = try await Self.withDeadline(budget) {
+                try await client.complete(
+                    system: homophonePrompt.system, user: text, model: nil, deadline: budget
+                )
+            }
+            return HomophoneProjection.project(completion, onto: text)
+        } catch {
+            return nil
+        }
+    }
 
     public func cleanThorough(_ raw: String, deadline: Duration) async -> String? {
         let tidy = fast.cleanFast(raw)
@@ -101,11 +127,28 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         // 200ms and there is no budget left to think about it.
         let offline = SelfCorrection.resolve(tidy, protecting: vocabulary)
 
-        guard SelfCorrection.needsModelPass(tidy) else { return offline }
+        let needsSelfCorrection = SelfCorrection.needsModelPass(tidy)
+        // The homophone pass is the second reason to spend a request, and until
+        // it existed `needsModelPass` was the only gate — which meant ordinary
+        // dictation never reached the model at all, and homophones are not in
+        // the sentences that contain a retraction cue. See HomophonePairs.
+        // `offline` is the deterministic answer and may be nil when there was
+        // nothing to resolve; the text to correct is then the tidied input.
+        let base = offline ?? tidy
+        let needsHomophones = !needsSelfCorrection && homophones && HomophonePairs.hasCandidate(in: base)
+        guard needsSelfCorrection || needsHomophones else { return offline }
         guard client.isConfigured, client.isReadyToTry else { return offline }
 
         let budget = deadline - safetyMargin
         guard budget >= minimumBudget else { return offline }
+
+        // Deliberately one request or the other, never both. They are both on the
+        // critical path and the budget is one round trip wide; a sentence that
+        // needs a retraction resolved is not also the sentence where flour and
+        // flower are in play, and if it ever is, the retraction matters more.
+        if needsHomophones {
+            return await correctHomophones(in: base, budget: budget) ?? offline
+        }
 
         do {
             let completion = try await Self.withDeadline(budget) {
