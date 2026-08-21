@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -184,4 +185,64 @@ func pasteOnlySettings() -> QuillSettings {
     // The real file is untouched: a fresh store on the default path does not see
     // anything this test did.
     #expect(QuillSettings.defaultURL.path != scratch.path)
+}
+
+// MARK: - The key recorder cannot leave the hotkey deaf
+
+/// `isCapturingHotkey` makes the event tap deaf on purpose — the keypress that
+/// assigns a binding must not also start a dictation. The bug was that
+/// "listening" outlived the control that was listening.
+///
+/// Clicking the chip and then leaving with the MOUSE — closing the window, or
+/// clicking straight into the app you were about to dictate into — left the flag
+/// set with no way back. Hold, hands-free, Escape-cancel and ⌥⌫ were all dead for
+/// the rest of the session, and the menu still said "Ready". The dashboard is
+/// held by AppDelegate for the app's lifetime, so deallocation never rescued it.
+@Test @MainActor func abandoningTheKeyRecorderDoesNotLeaveTheHotkeyDeaf() {
+    let settings = QuillSettings.shared
+    defer { settings.isCapturingHotkey = false }
+
+    func armed(_ recorder: KeyRecorderControl) -> Bool {
+        settings.isCapturingHotkey
+    }
+
+    // Pulled out of the view tree with a capture armed — a section swap, or the
+    // dashboard rebuilding itself after a setting changed.
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    // Or `close()` releases it under the local reference and the test process
+    // dies on the next line rather than reporting anything.
+    window.isReleasedWhenClosed = false
+    let removed = KeyRecorderControl(binding: .rightOption, style: .dark)
+    window.contentView?.addSubview(removed)
+    removed.startRecordingForTesting()
+    #expect(armed(removed), "the recorder did not arm at all — this test proves nothing")
+    removed.removeFromSuperview()
+    #expect(!armed(removed), "leaving the view tree left the hotkey deaf")
+
+    // And the window closing under it.
+    let closed = KeyRecorderControl(binding: .rightOption, style: .dark)
+    window.contentView?.addSubview(closed)
+    closed.startRecordingForTesting()
+    #expect(armed(closed))
+    window.close()
+    #expect(!armed(closed), "closing the window left the hotkey deaf")
+}
+
+/// Two recorders live on the Settings screen and the section is rebuilt whenever
+/// a setting changes. Tearing down the idle one must not clear a capture the
+/// other one has live.
+@Test @MainActor func tearingDownAnIdleRecorderDoesNotCancelALiveCapture() {
+    let settings = QuillSettings.shared
+    defer { settings.isCapturingHotkey = false }
+
+    let live = KeyRecorderControl(binding: .rightOption, style: .dark)
+    live.startRecordingForTesting()
+    #expect(settings.isCapturingHotkey)
+
+    do {
+        let idle = KeyRecorderControl(binding: .rightOption, style: .dark)
+        _ = idle
+    }
+    #expect(settings.isCapturingHotkey, "an idle recorder's deinit cancelled a live capture")
 }

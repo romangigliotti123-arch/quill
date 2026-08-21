@@ -288,6 +288,11 @@ public final class KeyRecorderControl: NSView {
 
     private let cap = NSTextField(labelWithString: "")
     private var monitor: Any?
+    /// Block-based observers are keyed by the token `addObserver` returns, NOT by
+    /// the object that registered them, so `removeObserver(self)` does nothing to
+    /// these and they would outlive every capture.
+    private var observers: [NSObjectProtocol] = []
+    private var expiry: DispatchWorkItem?
     private var isRecording = false { didSet { rebuild() } }
     private var isHovered = false { didSet { reflect() } }
     private var isPressed = false { didSet { reflect() } }
@@ -322,7 +327,12 @@ public final class KeyRecorderControl: NSView {
         // Not merely tidy: a live local monitor after this view is gone keeps
         // swallowing modifier presses for the whole app.
         if let monitor { NSEvent.removeMonitor(monitor) }
-        QuillSettings.shared.isCapturingHotkey = false
+        observers.forEach(NotificationCenter.default.removeObserver)
+        // Only if THIS recorder was the one listening. There are two on the
+        // Settings screen, and `.quillDashboardNeedsReload` tears the section
+        // down and rebuilds it — so an unguarded reset here let the idle
+        // recorder's deallocation clear a capture the other one had live.
+        if isRecording { QuillSettings.shared.isCapturingHotkey = false }
     }
 
     public override var intrinsicContentSize: NSSize {
@@ -398,6 +408,47 @@ public final class KeyRecorderControl: NSView {
 
     // MARK: - Recording
 
+    /// Capture cannot outlive the user looking at it.
+    ///
+    /// `isCapturingHotkey` makes the event tap deaf on purpose — otherwise the
+    /// keypress that assigns a binding would also start a dictation. The bug was
+    /// that "listening" outlived the control: the only exits were a second click
+    /// on the chip, a keyDown while Quill was frontmost, or deallocation, and the
+    /// dashboard is never deallocated. So clicking the chip and then leaving with
+    /// the MOUSE — closing the window, or just clicking into the terminal you
+    /// were about to dictate into — left the flag set, and hold, hands-free,
+    /// Escape-cancel and ⌥⌫ were all dead for the rest of the session, with the
+    /// menu still reporting "Ready".
+    ///
+    /// The three ways out below all end the capture rather than merely clearing
+    /// the flag, so the lit chip and the engine can never disagree. Resigning
+    /// active is sound precisely because a capture can only ever COMPLETE while
+    /// Quill is frontmost — the monitor is local.
+    private func watchForAbandonment() {
+        let centre = NotificationCenter.default
+        observers.append(centre.addObserver(forName: NSApplication.didResignActiveNotification,
+                                            object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stopRecording() }
+        })
+        if let window {
+            observers.append(centre.addObserver(forName: NSWindow.willCloseNotification,
+                                                object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.stopRecording() }
+            })
+        }
+    }
+
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Pulled out of the tree — a section swap, a rebuild — with a capture
+        // still armed.
+        if window == nil { stopRecording() }
+    }
+
+    /// The click path, reachable from a test. Arming is the precondition for
+    /// every abandonment case, and a test that cannot arm proves nothing.
+    func startRecordingForTesting() { startRecording() }
+
     private func startRecording() {
         guard monitor == nil else { return }
         QuillSettings.shared.isCapturingHotkey = true
@@ -407,11 +458,28 @@ public final class KeyRecorderControl: NSView {
             guard let self else { return event }
             return self.consume(event)
         }
+        watchForAbandonment()
+        // A last resort, on the CONTROL rather than on the flag. A deadline that
+        // expired the shared flag while this monitor was still installed would be
+        // worse than the bug: the tap sits upstream of app delivery, so one press
+        // of ⌥ would both bind the key here and start a dictation there. Flag and
+        // monitor have to end together, which is what calling `stopRecording()`
+        // guarantees. Sixty seconds, because choosing a modifier is a decision.
+        let timeout = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.stopRecording() }
+        }
+        expiry = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: timeout)
     }
 
     private func stopRecording() {
+        guard monitor != nil || isRecording else { return }
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        expiry?.cancel()
+        expiry = nil
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers = []
         QuillSettings.shared.isCapturingHotkey = false
         isRecording = false
     }

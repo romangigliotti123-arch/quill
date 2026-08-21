@@ -162,9 +162,33 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         if !finished { report(TranscriptionError.finalizeTimedOut(seconds: prepareTimeout)) }
     }
 
+    /// Bumped by anything that abandons a start. `start()` is a long chain of
+    /// awaits — `prepare()`, `AnalyzerFeed.make`, `analyzer.start` — and it used
+    /// to check for cancellation at none of them.
+    ///
+    /// The hole that opened: a single tap of the trigger key, or Right-Option
+    /// pressed as part of ⌥⌫ or ⌥←, begins a preroll. `cancel()` arrives 30-80ms
+    /// later, while `start()` is still inside `audio.prepare()` — the ~155ms HAL
+    /// open this file measures as micOpenMs — so `self.session` is not installed
+    /// yet, `teardown` early-returns without touching audio, and `audio.stop()`
+    /// would have been a no-op anyway because `running` is still false. Then
+    /// `start()` carries on to `audio.start()` and opens the microphone for a
+    /// gesture that was abandoned before it began.
+    ///
+    /// Nothing closed it. No dictation, no overlay, no state — just a live tap
+    /// and a SpeechAnalyzer transcribing the room, with the orange indicator lit,
+    /// until the next hotkey press happened to tear it down. Seconds, or hours.
+    private var startGeneration = 0
+
     public func start() async throws {
+        let generation = withLock { startGeneration }
+        func abandoned() -> Bool { withLock { startGeneration != generation } }
+
         await teardown(current: nil)
         await prepare()
+        // Before the HAL open, so an already-abandoned preroll does not pay for a
+        // microphone it will never use.
+        guard !abandoned() else { return }
 
         let engine: WarmEngine? = withLock {
             let e = warm
@@ -218,6 +242,18 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
 
         do {
             try await engine.analyzer.start(inputSequence: inputs)
+            // The last gate, and the one that matters: everything above is
+            // reversible, `audio.start()` is what actually opens the microphone.
+            //
+            // Returns rather than throws. The coordinator's catch calls `fail()`,
+            // which would put "Could not start listening" on screen for a gesture
+            // the user deliberately abandoned. `teardown`'s `audio.stop()` here is
+            // a harmless no-op precisely because the tap was never installed.
+            guard !abandoned() else {
+                await teardown(current: session)
+                withLock { if self.session === session { self.session = nil } }
+                return
+            }
             audio.onBuffer = { [weak self] buffer, time in self?.ingest(buffer, at: time, session: id) }
             audio.onLevel = { [weak self] level in self?.publish(level: level) }
             try audio.start()
@@ -360,6 +396,10 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             _timeline.finalTranscript = Date()
             lastFinalText = settled
+            // Same mark as `cancel()`. A stop also ends whatever start may be in
+            // flight behind it — otherwise a start that was still awaiting when
+            // this ran would go on to open the microphone afterwards.
+            startGeneration += 1
             if self.session === session { self.session = nil }
             return settled
         }
@@ -378,6 +418,10 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
 
     public func cancel() async {
         let session: Session? = withLock {
+            // Anything still inside `start()` is now stale. This is the whole
+            // mechanism: `cancel()` cannot reach into a start that has not
+            // installed its session yet, so it leaves a mark that start looks for.
+            startGeneration += 1
             let live = self.session
             self.session = nil
             lastFinalText = ""
