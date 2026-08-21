@@ -142,7 +142,9 @@ public final class SettingsSectionView: NSView {
         let context = DashboardSwitch(isOn: settings.contextRecovery, style: style)
         context.onToggle = { [weak self] on in self?.settings.setContextRecovery(on) }
         let contextNote = DashboardType.label(
-            "Lets the model fix a word that sounds right but means the wrong thing. Measured worse than the built-in list — it fixes fewer and adds a wait to one dictation in three.",
+            // One line, because the row truncates rather than wraps and a
+            // sentence cut off mid-word is worse than a shorter one.
+            "Fixes “flour” heard as “flower”. Measured worse than the built-in list.",
             font: DashboardType.caption, color: style.inkTertiary)
 
         return SettingsGroup(title: "Dictation", style: style, rows: [
