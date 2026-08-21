@@ -87,3 +87,20 @@ private func clean(_ s: String) -> String { FastCleaner.applyCorrections(to: s) 
         #expect(clean(sentence) == sentence, "rewrote: \(sentence)")
     }
 }
+
+// Second real-voice run, 21 Aug 2026. Same paragraph, different manglings.
+@Test func repairsTheManglingsFromTheSecondRealVoiceRun() {
+    #expect(clean("Sing thinking is finally keeping my notes")
+            == "Syncthing is finally keeping my notes")
+    #expect(clean("I rewrote the whole thing in Types Group over the weekend")
+            == "I rewrote the whole thing in TypeScript over the weekend")
+    #expect(clean("the old note js version") == "the old Node.js version")
+}
+
+@Test func leavesTheNetlifyManglingAloneBecauseItIsOrdinaryEnglish() {
+    // "not a fly" is a real phrase. An entry mapping it to Netlify would rewrite
+    // this sentence, which is worse than leaving "The sites are not a fly" wrong.
+    let sentence = "there is a fly in the kitchen and it will not leave"
+    #expect(clean(sentence) == sentence)
+    #expect(clean("that is not a fly it is a wasp") == "that is not a fly it is a wasp")
+}

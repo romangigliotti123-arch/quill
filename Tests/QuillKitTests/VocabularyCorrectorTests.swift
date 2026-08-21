@@ -404,3 +404,66 @@ private let referenceURL = URL(fileURLWithPath: #filePath)
     }
     #expect(tooShort.isEmpty, "unreachable, shorter than the matcher's floor: \(tooShort)")
 }
+
+// The other half of the same question: how often would a detector at that
+// threshold fire on ordinary speech? A rescue pass that flags every third
+// sentence is a request on the critical path for nothing, and the answer
+// decides the threshold rather than being decided by it.
+@Test func howOftenWouldALooseDetectorFireOnOrdinaryEnglish() {
+    let terms = Vocabulary.seed.contextualStrings
+    // Ordinary dictation. Nothing here is a mangled product name.
+    let sentences = [
+        "I need to send the invoice by Friday and then go home",
+        "the client wants the booking form on its own page",
+        "can you check whether the deposit came through this morning",
+        "we should meet at four and go over the quote together",
+        "the frames are ready but the fabric has not arrived yet",
+        "tell him the job will take about three weeks from now",
+        "I had to get hub caps for the car on the way back",
+        "she said the colour looked too dark on the phone screen",
+        "put the address on the second line of the letter",
+        "there is a fly in the kitchen and it will not leave",
+        "the tail wind helped us get there before the rain",
+        "he was born in the same year as my father was",
+    ]
+    var flagged = 0, spans = 0
+    for sentence in sentences {
+        let words = sentence.split(separator: " ").map(String.init)
+        var hit: (String, String, Double)? = nil
+        for width in 1...3 where words.count >= width {
+            for start in 0...(words.count - width) {
+                let span = words[start ..< start + width].joined(separator: " ")
+                spans += 1
+                let a = VocabularyCorrector.normalise(span)
+                guard a.count >= 3 else { continue }
+                for term in terms {
+                    let b = VocabularyCorrector.normalise(term)
+                    guard b.count >= 3 else { continue }
+                    let sound = VocabularyCorrector.phoneticSimilarity(a, b)
+                    if sound >= 0.70, hit == nil || sound > hit!.2 { hit = (span, term, sound) }
+                }
+            }
+        }
+        if let hit {
+            flagged += 1
+            print(String(format: "[fp] \"%@\" -> %@ (%.2f)  in: %@",
+                         hit.0 as NSString, hit.1 as NSString, hit.2, sentence as NSString))
+        }
+    }
+    print("[fp] \(flagged) of \(sentences.count) ordinary sentences would be flagged, over \(spans) spans")
+
+    // Pinned as a REFUSAL, not an aspiration.
+    //
+    // The tempting design is to use the phonetic scorer as a cheap detector —
+    // flag anything that sounds like a term, let a model decide — so that
+    // "The site's on Netlify" coming back as "not a fly" could be rescued. This
+    // measures why that fails: ordinary English reaches 1.00 against the seed
+    // vocabulary ("not leave" -> Netlify), while the real manglings sit at
+    // 0.75-0.86. There is no threshold between them.
+    //
+    // If someone tightens the scorer and this drops, the design becomes worth
+    // revisiting — and this test failing is how they will find out. Until then
+    // it stands as the reason `allowsPhoneticMatch` demands a non-word.
+    #expect(flagged > sentences.count / 2,
+            "only \(flagged) of \(sentences.count) flagged — the scorer may have tightened enough that a detector-plus-model pass is worth rebuilding")
+}

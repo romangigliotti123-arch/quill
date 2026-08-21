@@ -45,6 +45,23 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         // moves depending on how fast he says it, and neither "fire stall" nor
         // "fire store" is a phrase with an ordinary meaning to protect.
         "fire stall": "Firestore",
+        // Second real-voice run, same paragraph, different manglings — which is
+        // itself the finding: the recogniser does not fail the same way twice.
+        //   "Syncthing is finally"  -> "Sing thinking is finally"
+        //   "in TypeScript over"    -> "in Types Group over"
+        // Neither split form is a phrase anyone says, so neither needs an anchor.
+        //
+        // Netlify is NOT here, and that is the interesting omission. It came back
+        // as "not a fly" and then as "going to fly", and "not a fly" is ordinary
+        // English — measured firing inside "there is a fly in the kitchen and it
+        // will not leave". An entry for it would rewrite that sentence. It is the
+        // one mangling in this paragraph that no table can safely fix; see the
+        // note in VocabularyCorrector about why the model-detector idea does not
+        // rescue it either.
+        "sing thinking": "Syncthing",
+        "types group": "TypeScript",
+        "note js version": "Node.js version",
+        "note. js version": "Node.js version",
         // Same dictation: "the old Node.js version" -> "the old no.JS version".
         // The recogniser writes the spoken "node" as the abbreviation "no.".
         // Anchored on "version" and "server" because a bare "no js" could be

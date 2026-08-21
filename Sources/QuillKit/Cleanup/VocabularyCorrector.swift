@@ -281,6 +281,34 @@ public struct VocabularyCorrector: Sendable {
         "my", "your", "his", "our", "their",
     ]
 
+    /// # Why there is no "ask a model about the near-misses" pass
+    ///
+    /// The tempting design, after watching "The site's on Netlify" come back as
+    /// "The sites are not a fly": use this scorer as a cheap DETECTOR — flag any
+    /// span that sounds like a term even when the guard refuses to act — and let
+    /// a model decide. The guard stays strict; the model does the judging.
+    ///
+    /// Measured before building it, 21 Aug 2026, and it does not work. The
+    /// phonetic skeleton at a 0.70 floor flags **11 of 12 ordinary sentences**
+    /// against the shipped seed vocabulary:
+    ///
+    ///     "not leave"      -> Netlify          1.00
+    ///     "Friday and"     -> Builda Bed       0.80
+    ///     "colour looked"  -> Carlo Gigliotti  0.80
+    ///     "caps for"       -> Vesper           0.80
+    ///     "second"         -> subagent         0.80
+    ///
+    /// The real manglings score 0.75 ("not a fly" -> Netlify), 0.75 ("sing
+    /// thinking" -> Syncthing) and 0.86 ("types group" -> TypeScript). Ordinary
+    /// English reaches 1.00. There is no threshold between them, so the detector
+    /// would fire on nearly every dictation — a request on the critical path,
+    /// every time, asking a model whether ordinary words are product names.
+    /// That is the setup that produces damage, not the one that avoids it.
+    ///
+    /// This is why `allowsPhoneticMatch` requires a non-word in the span. The
+    /// restriction is not conservatism, it is the only thing separating signal
+    /// from noise, and the numbers above are what that looks like without it.
+    ///
     /// Whether the sound-based route may fire for this span at all.
     ///
     /// It may not, unless at least one word in the span is not English. This is
