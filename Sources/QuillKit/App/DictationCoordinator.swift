@@ -38,6 +38,10 @@ public final class DictationCoordinator {
     /// otherwise the release-and-paste path below runs exactly as it always did.
     private let liveTyper: LiveTyper
     private var isLive = false
+    /// The token `liveTyper.begin()` handed this dictation. Every later call
+    /// presents it, so a session that was superseded mid-finalise cannot type
+    /// through the one that replaced it.
+    private var liveGeneration = 0
     /// Remembers the last insertion so ⌥⌫ can take it back. Optional because
     /// every path in this file works without one, and a test that does not care
     /// about the chord should not have to build one.
@@ -267,7 +271,9 @@ public final class DictationCoordinator {
         // caret — live typing starts writing into that same field, and a paste
         // lands after it. Either way the record is stale from here on.
         undo?.discard()
-        isLive = settings.liveText && liveTyper.begin()
+        let live = liveTyper.begin()
+        liveGeneration = live.generation
+        isLive = settings.liveText && live.ok
         overlay.show(.listening(level: 0))
     }
 
@@ -302,7 +308,7 @@ public final class DictationCoordinator {
         if Self.isChangeOfMind(heldFor: held, sawLevels: sawLevels, peak: peakLevel) {
             isSpeculating = false
             sessionID += 1
-            if isLive { liveTyper.retract() }
+            if isLive { liveTyper.retract(generation: liveGeneration) }
             isLive = false
             overlay.hide()
             Task { [transcriber] in await transcriber.cancel() }
@@ -362,7 +368,7 @@ public final class DictationCoordinator {
                 // Nothing was said, but something may already be on screen: a
                 // volatile hypothesis the recogniser later withdrew. Take it back,
                 // or the user is left with words they never spoke.
-                if self.isLive { self.liveTyper.retract() }
+                if self.isLive { self.liveTyper.retract(generation: self.liveGeneration) }
                 self.isLive = false
 
                 // Say so. This used to hide the overlay and return, which means
@@ -412,6 +418,12 @@ public final class DictationCoordinator {
             // from Melbourne on a warm connection, share of calls landing inside a
             // deadline: 250ms -> 11%, 350ms -> 78%, 450ms -> 97%. The limit is the
             // network, not the GPU, so no model choice fixes it.
+            // What live typing has actually put on screen so far, captured while
+            // it is still ours. After the await below, a newer dictation's
+            // `begin()` may have reset `typed` to "" — so this is the only moment
+            // a superseded session can still find out what it left behind.
+            let liveOnScreen = self.isLive ? self.liveTyper.typed : ""
+
             let budget = SelfCorrection.needsModelPass(fast)
                 ? AIConfig.recommendedCleanupDeadline
                 : cleanupDeadline
@@ -437,6 +449,52 @@ public final class DictationCoordinator {
             final = AppContextFormatter.apply(final, context: self.capturedContext,
                                               numbers: self.settings.numberStyle)
 
+            // The fence, re-checked. The cleanup await above suspends for the
+            // whole budget in the overwhelming majority of cases, and the main
+            // actor is free throughout it — so by here the user may well have
+            // pressed the key again, armed a new dictation and started typing
+            // into it. Everything below writes into the CURRENT dictation's
+            // world: the insertion, `isLive`, the timeline, the undo record and
+            // the history row. None of it may be written by a session that has
+            // been superseded.
+            guard session == self.sessionID else {
+                // The sentence is not thrown away — losing words is the one thing
+                // this app may never do — but it is NOT re-inserted either, and
+                // this is where that differs from the earlier rescue above.
+                //
+                // There, nothing had been typed. Here live typing may already have
+                // put a prefix into the document, and the record of how long it
+                // was has been destroyed by the newer dictation's `begin()`. So
+                // retracting is impossible (backspaces would eat the new
+                // session's characters) and offering a clipboard copy would invite
+                // the user to paste a third copy of a sentence that is already
+                // half on screen.
+                //
+                // History gets the truth: what was said, and what actually landed.
+                let rescued = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !rescued.isEmpty {
+                    history.append(DictationRecord(
+                        id: UUID(), date: Date(), rawText: rescued, insertedText: liveOnScreen,
+                        wordCount: final.split(whereSeparator: \.isWhitespace).count,
+                        inputDevice: self.capturedInputDevice,
+                        timings: .init(timeToFirstWordMs: self.timeline.timeToFirstWordMs,
+                                       finalToInsertedMs: nil,
+                                       endToEndMs: self.timeline.endToEndMs,
+                                       audioDurationMs: self.timeline.audioDurationMs,
+                                       usedThoroughCleanup: usedThorough,
+                                       releaseToInsertedMs: nil)))
+                    if liveOnScreen.isEmpty {
+                        // Nothing reached the document, so the clipboard is a
+                        // genuine offer rather than a duplicate.
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(final, forType: .string)
+                        overlay.show(.error("You started again before that finished — it is on your clipboard."))
+                        try? await Task.sleep(for: .milliseconds(1_800))
+                    }
+                }
+                return
+            }
+
             // Two ways in, and the difference is whether the text is already
             // there. Live typing has been writing this sentence since the first
             // partial, so finishing it means reconciling the last edit — usually
@@ -444,7 +502,7 @@ public final class DictationCoordinator {
             // thing here instead would insert it twice.
             let result: InsertionResult
             if self.isLive, !self.liveTyper.isAbandoned {
-                let live = self.liveTyper.finish(final)
+                let live = self.liveTyper.finish(final, generation: self.liveGeneration)
                 // The one failure mode: focus moved mid-sentence. The partial text
                 // stays where it was typed and the finished text goes wherever the
                 // user is now — a duplicate, which they can see and delete, rather
@@ -521,7 +579,7 @@ public final class DictationCoordinator {
         // The cancelling keystroke, if it reached the app, is sitting at the end
         // of the text we are about to take back. Deleting our own character count
         // would eat it and leave one of ours in its place.
-        if isLive { liveTyper.retract(restoring: userTyped) }
+        if isLive { liveTyper.retract(restoring: userTyped, generation: liveGeneration) }
         isLive = false
         Task { [transcriber, overlay] in
             await transcriber.cancel()
@@ -556,7 +614,7 @@ public final class DictationCoordinator {
         NSLog("[quill] dictation FAILED to start: %@", message)
         isDictating = false
         isSpeculating = false
-        if isLive { liveTyper.retract() }
+        if isLive { liveTyper.retract(generation: liveGeneration) }
         isLive = false
         overlay.show(.error(message))
     }
@@ -659,7 +717,8 @@ extension DictationCoordinator: TranscriberDelegate {
         // visible flicker as "four" is taken back and retyped.
         liveTyper.update(to: AppContextFormatter.apply(cleaner.cleanFast(transcript.text),
                                                        context: capturedContext,
-                                                       numbers: settings.numberStyle))
+                                                       numbers: settings.numberStyle),
+                         generation: liveGeneration)
     }
 
     public func transcriber(didFail error: Error) {

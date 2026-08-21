@@ -139,7 +139,7 @@ private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
     let keyboard = ScriptedKeystrokes()
     let typer = LiveTyper(keyboard: keyboard)
     typer.begin()
-    typer.update(to: "send it over")
+    typer.update(to: "send it over", generation: typer.generation)
     #expect(keyboard.screen == "send it over")
 
     // The user presses "x" mid-hold. It is passed through, so it lands after our
@@ -147,7 +147,7 @@ private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
     keyboard.type("x")
     #expect(keyboard.screen == "send it overx")
 
-    typer.retract(restoring: "x")
+    typer.retract(restoring: "x", generation: typer.generation)
     #expect(keyboard.screen == "x", "left \(keyboard.screen.debugDescription) on screen")
 }
 
@@ -158,8 +158,8 @@ private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
     let keyboard = ScriptedKeystrokes()
     let typer = LiveTyper(keyboard: keyboard)
     typer.begin()
-    typer.update(to: "send it over")
-    typer.retract()
+    typer.update(to: "send it over", generation: typer.generation)
+    typer.retract(generation: typer.generation)
     #expect(keyboard.screen == "")
 }
 
@@ -171,8 +171,62 @@ private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
     let keyboard = ScriptedKeystrokes(existing: "already here ")
     let typer = LiveTyper(keyboard: keyboard)
     typer.begin()
-    typer.update(to: "send it over")
+    typer.update(to: "send it over", generation: typer.generation)
     #expect(keyboard.screen == "already here send it over")
-    typer.retract(restoring: "")
+    typer.retract(restoring: "", generation: typer.generation)
     #expect(keyboard.screen == "already here ", "ate the user's existing text")
+}
+
+// MARK: - A superseded dictation cannot type through a live one
+
+/// The worst outcome this app can produce short of losing text: inserting the
+/// PREVIOUS sentence into the middle of the one being spoken.
+///
+/// The sequence, and it is an ordinary one — release the key, see "Transcribing",
+/// press again while waiting. Session N passes its fence, then suspends on the
+/// cleanup deadline for the full budget (measured: the deadline expires rather
+/// than the call returning in ~89% of cases at 250ms). The main actor is free
+/// throughout. Session N+1 runs `begin()`, which reset `typed`, cleared
+/// `isAbandoned` and captured a fresh target — all of it state that N's pending
+/// `finish()` still depended on. N resumed, its guards passed (same app, same
+/// field, freshly captured by N+1), and it computed its edit against N+1's
+/// `typed`: with nothing typed yet, a clean insertion of N's whole sentence into
+/// the document mid-speech; with partials on screen, backspaces over them first.
+@Test @MainActor func aSupersededDictationCannotTypeThroughTheOneThatReplacedIt() {
+    let keys = ScriptedKeystrokes()
+    let typer = LiveTyper(keyboard: keys)
+
+    let first = typer.begin()
+    #expect(first.ok)
+    typer.update(to: "the first sentence", generation: first.generation)
+    // The next dictation takes over while the first is still finalising.
+    let second = typer.begin()
+    #expect(second.generation != first.generation)
+    let screenBefore = keys.screen
+
+    // The stale session resumes and tries to finish.
+    let result = typer.finish("the first sentence, cleaned up", generation: first.generation)
+
+    guard case .failed = result else {
+        Issue.record("a superseded session was allowed to insert: \(result)")
+        return
+    }
+    #expect(keys.screen == screenBefore,
+            "a superseded session changed the document: \(screenBefore) -> \(keys.screen)")
+
+    // And the live session is untouched and still works.
+    typer.update(to: "the second", generation: second.generation)
+    #expect(typer.typed == "the second")
+}
+
+/// The guard must not fire on the ordinary path.
+@Test @MainActor func theCurrentDictationStillFinishesNormally() {
+    let keys = ScriptedKeystrokes()
+    let typer = LiveTyper(keyboard: keys)
+
+    let session = typer.begin()
+    typer.update(to: "hello", generation: session.generation)
+    let result = typer.finish("Hello there.", generation: session.generation)
+    #expect(result == .inserted)
+    #expect(typer.typed == "Hello there.")
 }

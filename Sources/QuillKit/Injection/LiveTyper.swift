@@ -61,6 +61,20 @@ public final class LiveTyper {
     /// What we believe is on screen in the target app.
     public private(set) var typed = ""
 
+    /// Which dictation owns the belief in `typed`.
+    ///
+    /// `begin()` used to reset `typed`, `isAbandoned` and the target with no
+    /// identity attached, so a second dictation started while the first was still
+    /// finalising silently overwrote the state that first one's pending `finish()`
+    /// still depended on. When it resumed, its guards all passed — same app, same
+    /// field, freshly captured by the NEW session — and it computed its edit from
+    /// the new session's `typed`. With nothing typed yet that is a clean insertion
+    /// of the previous sentence into the middle of the one being spoken; with
+    /// partials on screen it backspaces over them first.
+    ///
+    /// A token makes that physically impossible rather than merely unlikely.
+    public private(set) var generation = 0
+
     /// Set when focus moved away mid-dictation. From then on this types nothing
     /// and deletes nothing — see `focusHeld` for why that is the only safe move.
     public private(set) var isAbandoned = false
@@ -88,9 +102,12 @@ public final class LiveTyper {
     /// should use the ordinary paste-on-release path. Checked up front because
     /// both blockers are silent: keystrokes are simply discarded and there is
     /// nothing to detect afterwards.
+    /// - Returns: false when live typing cannot work, and the token identifying
+    ///   this dictation. Every later call has to present it.
     @discardableResult
-    public func begin() -> Bool {
+    public func begin() -> (ok: Bool, generation: Int) {
         cancelPending()
+        generation += 1
         typed = ""
         isAbandoned = false
         lastUpdate = 0
@@ -98,15 +115,16 @@ public final class LiveTyper {
               Permissions.state(of: .accessibility) == .granted
         else {
             targetPID = nil
-            return false
+            return (false, generation)
         }
         targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         targetElement = focusedElement()
-        return targetPID != nil
+        return (targetPID != nil, generation)
     }
 
     /// Throttled. Safe to call on every partial.
-    public func update(to text: String) {
+    public func update(to text: String, generation token: Int) {
+        guard token == generation else { return }
         guard !isAbandoned else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastUpdate >= minimumInterval {
@@ -136,7 +154,12 @@ public final class LiveTyper {
     }
 
     /// Unthrottled, for the final text. Returns what the caller should report.
-    public func finish(_ text: String) -> InsertionResult {
+    public func finish(_ text: String, generation token: Int) -> InsertionResult {
+        // The fence. A dictation that was superseded while it was finalising must
+        // not type its sentence into the one that replaced it.
+        guard token == generation else {
+            return .failed(reason: "A newer dictation took over before this one finished.")
+        }
         cancelPending()
         if isAbandoned {
             return .failed(reason: "Focus moved while Quill was still typing.")
@@ -173,7 +196,8 @@ public final class LiveTyper {
     /// character is the last thing on screen, so deleting one fewer than we typed
     /// removes THEIR character first and leaves one of OURS behind — the precise
     /// opposite of what the old parameter was named for, and it shipped that way.
-    public func retract(restoring: String = "") {
+    public func retract(restoring: String = "", generation token: Int) {
+        guard token == generation else { return }
         cancelPending()
         guard !isAbandoned, !typed.isEmpty, focusHeld() else {
             typed = ""
