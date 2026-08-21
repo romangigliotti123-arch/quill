@@ -99,7 +99,17 @@ Rebuilt from the latest commit and left running:
   to the seed.
 - Just hold Right Option and talk.
 
-## Next
+## Next — bugs Roman is about to report
+
+He said on 21 Aug that he has hit "a few bugs" in normal use and was going to
+describe them. That conversation was cut short by a session restart, so ASK HIM
+for them first — they are real-use bugs from someone who dictates with this
+daily, which is worth more than anything that can be found from the corpus.
+
+For each: what he did, what he expected, what happened, and whether it is every
+time or intermittent.
+
+## Next — everything else
 
 1. **The model-backed half of the homophone work.** The free half shipped: fixed
    phrases in `FastCleaner.corrections`, and `hay fever` is verified fixed on real
