@@ -76,11 +76,22 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
     ///     a warm connection, so anything under 120ms is guaranteed to be a wasted
     ///     wait, and the deterministic answer should just ship.
     ///   - homophones: whether to spend a request choosing between listed
-    ///     homophones when a dictation contains one and needs nothing else. Off
-    ///     by default. It is a real request on the critical path for a class of
-    ///     error that is invisible when it goes wrong, so it ships opt-in and
-    ///     has to earn the default with a bench, the way the cleanup prompt did.
-    ///     `QUILL_HOMOPHONES=1` turns it on without a rebuild.
+    ///     homophones. On by default, which it had to earn twice.
+    ///
+    ///     Benched against the real endpoint with half the corpus deliberately
+    ///     correct: 3 of 6 fixed, 0 of 6 damaged. Zero damage was the bar —
+    ///     a miss costs a correction, a wrong swap costs a sentence he meant and
+    ///     he will not notice.
+    ///
+    ///     Then measured for cost against 263 of his real dictations. The first
+    ///     list woke the model on 12% of them, almost entirely on past, through,
+    ///     whether, course and week — words that were already right every time.
+    ///     Trimming those left 21 groups that fire on **1%**, and the words still
+    ///     triggering it are the ones that were actually wrong: cashed, principle,
+    ///     effect, discreet, losing.
+    ///
+    ///     One request on one dictation in a hundred, for a class of error
+    ///     nothing else in the app can reach. `QUILL_HOMOPHONES=0` turns it off.
     public init(
         client: AICompleting = NIMClient(),
         fast: FastCleaner = FastCleaner(),
@@ -88,7 +99,7 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         vocabulary: [String] = Vocabulary.load().contextualStrings,
         safetyMargin: Duration = .milliseconds(30),
         minimumBudget: Duration = .milliseconds(120),
-        homophones: Bool = ProcessInfo.processInfo.environment["QUILL_HOMOPHONES"] == "1"
+        homophones: Bool = ProcessInfo.processInfo.environment["QUILL_HOMOPHONES"] != "0"
     ) {
         self.client = client
         self.fast = fast

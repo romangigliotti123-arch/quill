@@ -339,9 +339,10 @@ private func homophoneCleaner(_ ai: FakeAI) -> NIMCleaner {
     NIMCleaner(client: ai, vocabulary: vocabulary, homophones: true)
 }
 
-@Test func theHomophonePassIsOffUnlessAskedFor() async {
+@Test func theHomophonePassCanBeSwitchedOff() async {
     let ai = FakeAI.returning("every time Cloudflare cached something stale")
-    let text = await cleaner(ai).cleanThorough(
+    let off = NIMCleaner(client: ai, vocabulary: vocabulary, homophones: false)
+    let text = await off.cleanThorough(
         "every time Cloudflare cashed something stale", deadline: deadline)
     #expect(ai.log.calls == 0, "spent a request with the pass switched off")
     // nil is this method's way of saying "nothing to add beyond cleanFast".
