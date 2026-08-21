@@ -238,7 +238,15 @@ public struct VocabularyCorrector: Sendable {
     /// Short, and only the ones that actually turn up glued to a proper noun by
     /// the recogniser. A longer list would start rejecting real multi-word terms.
     static func isBoundaryWord(_ word: String?) -> Bool {
-        guard let word = word?.lowercased(), !word.isEmpty else { return false }
+        guard var word = word?.lowercased(), !word.isEmpty else { return false }
+        // A contraction is its pronoun for this purpose: "he's" ends a span just
+        // as surely as "he" does, and listing every contracted form would go
+        // stale the first time the recogniser picked a different apostrophe.
+        if let cut = word.firstIndex(where: { $0 == "'" || $0 == "\u{2019}" }) {
+            word = String(word[word.startIndex ..< cut])
+        }
+        word = word.trimmingCharacters(in: .punctuationCharacters)
+        guard !word.isEmpty else { return false }
         return boundaryWords.contains(word)
     }
 
@@ -247,6 +255,30 @@ public struct VocabularyCorrector: Sendable {
         "and", "or", "but", "if", "in", "on", "at", "it", "its", "this", "that",
         "for", "from", "with", "by", "as", "so", "then", "than", "do", "does",
         "did", "has", "have", "had", "will", "would", "can", "could", "not",
+        // Pronouns, added 21 Aug 2026 after a real dictation lost one.
+        //
+        //     recogniser:  "The client found me on Air Tasker. He's been discreet"
+        //     inserted:    "The client found me on Airtasker been discreet"
+        //
+        // "Air Tasker He's" is a three-word span, it did not end in any of the
+        // closed-class words above, so the guard let it through and the match
+        // collapsed all three into "Airtasker" — taking the pronoun with it.
+        // Same shape as the "Until Craigieburn done" case this guard exists for;
+        // the list simply did not go far enough. Measured on the shipping
+        // corrector, "she", "we" and "you" were being eaten the same way.
+        //
+        // "I" is deliberately NOT here, and that is not an oversight. The
+        // canonical repair this whole pass exists for is
+        //
+        //     "Push the graph if I build"  ->  "Push the graphify build"
+        //
+        // which is a three-word span ending in "I". Listing "i" blocks it, as
+        // the test suite says immediately. A pronoun that turns up INSIDE a
+        // misheard name has to stay matchable, and "I" is the only one that
+        // does — every other pronoun in this list was observed being deleted
+        // from a sentence, never spelling part of a word.
+        "he", "she", "we", "they", "you", "him", "her", "them", "us",
+        "my", "your", "his", "our", "their",
     ]
 
     /// Whether the sound-based route may fire for this span at all.

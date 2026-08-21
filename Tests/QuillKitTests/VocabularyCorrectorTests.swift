@@ -235,3 +235,35 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
     #expect(corrector.correct("check the shad cn components").contains("shadcn"))
     #expect(corrector.correct("the space grotesk heading").contains("Space Grotesk"))
 }
+
+// Heard in a real dictation, 21 Aug 2026. The recogniser produced
+//
+//     "The client found me on Air Tasker. He's been discreet about budget"
+//
+// and what was typed into the document was
+//
+//     "The client found me on Airtasker been discreet about budget"
+//
+// "He's" is gone. This is the failure the comment above `isBoundaryWord` calls
+// out — "the replacement swallowed the verb: 'Until Craigieburn done'" —
+// recurring on a word class the guard does not cover. `boundaryWords` protects
+// is/was/the/a and the rest of the closed-class words, but no pronouns, so a
+// three-word span ending in "he's" is allowed to collapse into a one-word name.
+@Test func doesNotSwallowAPronounAfterAName() {
+    let c = VocabularyCorrector(vocabulary: Vocabulary(terms: ["Airtasker"]))
+    #expect(c.correct("found me on Air Tasker. He's been discreet")
+            == "found me on Airtasker. He's been discreet")
+}
+
+@Test func doesNotSwallowOtherPronounsEither() {
+    let c = VocabularyCorrector(vocabulary: Vocabulary(terms: ["Airtasker"]))
+    let cases = [
+        ("I put it on Air Tasker they replied fast", "I put it on Airtasker they replied fast"),
+        ("posted to Air Tasker she got back to me", "posted to Airtasker she got back to me"),
+        ("listed on Air Tasker we waited a week", "listed on Airtasker we waited a week"),
+        ("up on Air Tasker you can see it", "up on Airtasker you can see it"),
+    ]
+    for (input, expected) in cases {
+        #expect(c.correct(input) == expected, "got: \(c.correct(input))")
+    }
+}
