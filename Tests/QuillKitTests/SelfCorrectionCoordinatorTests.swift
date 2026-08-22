@@ -92,7 +92,7 @@ private func makeCoordinator(transcript: String) -> (DictationCoordinator, Recor
         transcriber: FakeTranscriber(transcript),
         inserter: inserter,
         overlay: SilentOverlay(),
-        cleaner: NIMCleaner(client: ai, vocabulary: Vocabulary.seed.contextualStrings),
+        cleaner: NIMCleaner(client: ai, vocabulary: VocabularyFixture.terms),
         history: HistoryStore(url: scratch.appendingPathComponent("history.json")),
         snippets: SnippetStore(inMemory: []),
         settings: pasteOnlySettings(),

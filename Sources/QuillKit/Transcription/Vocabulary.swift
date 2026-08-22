@@ -34,28 +34,26 @@ public struct Vocabulary: Codable, Sendable, Equatable {
     /// Seeded from the names that actually appear in Roman's dictation. Editable
     /// on disk; the file is the source of truth once it exists.
     public static let seed = Vocabulary(terms: [
-        // Projects and tools he says out loud
-        "Quill", "graphify", "Nebula", "Vesper", "blockcraft", "murmur",
-        "mediadeck", "originkit", "shadcn", "yt-dlp", "tmux", "xterm", "node-pty",
-        "Hammerspoon", "pytest", "venv", "CPython", "codesign", "subagent", "MCP",
-        // Services and platforms
-        "Firebase", "Firestore", "Netlify", "Supabase", "SQLite", "Wispr Flow",
-        "Airtasker", "JB Hi-Fi", "Baymard",
-        // Apple, languages, type
-        "SwiftUI", "SwiftPM", "Xcode", "TypeScript", "Playwright", "Obsidian",
-        "Ghostty", "Sulkan", "Fraunces", "Space Grotesk",
-        // Business
-        "nxt", "Next Fulfilment", "Roman Design Co", "Roman Design Studio",
-        "Builda Bed", "ABN", "3PL", "glassmorphism", "colourway", "colourways",
-        // Upholstery — the Builda Bed quoting vocabulary
-        "Warwick", "Kvadrat", "Maharam", "Martindale", "Halgate",
-        // Places
-        "Craigieburn", "Melbourne", "Rosehill", "Rosehill Secondary College",
-        "Flinders Street",
-        // People
-        "Gigliotti", "Carlo", "Carlo Gigliotti", "Noah Kass", "Kass", "Morello",
-        "Ashwin Gupta", "Ben McMullin", "McMullin", "Sara Chamberlain",
-        "Rob Pisano", "Lofree Hyzen",
+        // General technical vocabulary only.
+        //
+        // This list used to be the author's life: his suburb, his school, his
+        // family, and eleven clients by full name. It shipped in the binary, so
+        // every stranger who installed Quill got a Dictionary of people they have
+        // never met — and those people never agreed to be in it. A seed is a
+        // guess at what ANY user says; anything narrower belongs in the file on
+        // their own machine, which is what the Dictionary tab is for.
+        //
+        // What survives is what a general speech model reliably mishears and any
+        // developer is likely to say out loud.
+        "Firebase", "Firestore", "Netlify", "Supabase", "SQLite", "Postgres",
+        "Redis", "Docker", "Kubernetes", "nginx", "GraphQL", "OAuth", "JWT",
+        "SwiftUI", "SwiftPM", "Xcode", "TypeScript", "JavaScript", "Playwright",
+        "PyTorch", "NumPy", "pandas", "pytest", "venv", "CPython", "codesign",
+        "npm", "pnpm", "webpack", "Vite", "ESLint", "Prettier", "Tailwind",
+        "React", "Next.js", "Node.js", "Deno", "Rust", "Kotlin", "Golang",
+        "tmux", "xterm", "ssh", "sudo", "cron", "regex", "stdout", "stderr",
+        "API", "CLI", "SDK", "UUID", "JSON", "YAML", "CSV", "HTTP", "HTTPS",
+        "CI", "CD", "repo", "monorepo", "changelog", "hotfix", "linting",
     ])
 
     public init(terms: [String]) {

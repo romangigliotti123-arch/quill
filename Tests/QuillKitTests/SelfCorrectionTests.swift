@@ -175,7 +175,7 @@ import Testing
     // AIOutputGuard rejects an AI response for exactly this, so the offline path
     // must not commit the same sin.
     let raw = "graphify is broken no wait graphify is fine."
-    #expect(SelfCorrection.resolve(raw, protecting: Vocabulary.seed.contextualStrings)
+    #expect(SelfCorrection.resolve(raw, protecting: VocabularyFixture.terms)
             == "graphify is fine.")
     // Without the vocabulary it sentence-cases, which is the ordinary behaviour
     // and exactly what the term list is protecting against.

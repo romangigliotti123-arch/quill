@@ -322,12 +322,25 @@ private func temporaryStoreURL() -> URL {
 
     store.resetLearning()
     #expect(store.profile.correctionCount == 0)
-    #expect(store.profile.preset == .casual)        // the choice survives the reset
+    #expect(store.profile.preset == StylePreset.casual)  // the choice survives the reset
 }
 
 @Test func theSummaryNeverImpliesLearningThatHasNotHappened() {
     #expect(StyleProfile(preset: .neutral).summaryLine == "Neutral · nothing learned yet")
-    #expect(StyleProfile.romanDefault.summaryLine.contains("British spelling"))
+    // A profile that HAS learned something says so. Seeded here rather than
+    // taken from a shipped default, because the shipped default now seeds
+    // nothing — a fresh install must not claim to have learned two facts about
+    // someone on the day they installed it.
+    var learned = StyleProfile(preset: .casual)
+    learned.spelling = StyleTrait(seeding: .british, votes: StyleProfile.minimumSupport)
+    #expect(learned.summaryLine.contains("British spelling"))
+}
+
+@Test func aFreshProfileHasLearnedNothing() {
+    // The other half, and the reason the default changed: the Style screen's
+    // only job is to report what it has observed.
+    #expect(StyleProfile.freshDefault.summaryLine == "Neutral · nothing learned yet")
+    #expect(StyleProfile.freshDefault.correctionCount == 0)
 }
 
 // MARK: - The style profile actually reaches the model

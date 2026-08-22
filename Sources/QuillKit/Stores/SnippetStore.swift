@@ -234,55 +234,34 @@ public final class SnippetStore: @unchecked Sendable {
 
 public extension SnippetStore {
 
-    /// First-run contents. Real text from Roman's actual week — client quotes,
-    /// deposit terms, the sign-off he types twenty times a day — because a
-    /// starter set of "example one / example two" gets deleted unread.
+    /// First-run contents.
+    ///
+    /// Three examples that show the three shapes a snippet can take — a block of
+    /// prose, a single line, and a template with gaps to fill — and nothing that
+    /// belongs to a particular person.
+    ///
+    /// This used to be the author's actual week: his email address, his studio
+    /// URL, his sign-off, his pricing. Useful to exactly one person and shipped
+    /// to everybody, so the first thing any other user had to do was delete
+    /// somebody else's contact details out of their own app. A seed is a
+    /// demonstration of the feature, not a starter kit of the author's life.
+    ///
+    /// Deliberately short: a starter set nobody reads is one that gets deleted
+    /// unread, and three is enough to make the idea obvious.
     static var seed: [Snippet] {
         let now = Date()
-        func ago(_ hours: Double) -> Date { now.addingTimeInterval(-hours * 3600) }
 
         return [
-            Snippet(phrase: "quote intro",
-                    replacement: """
-                    Hey — thanks for sending that through.
-
-                    Here's how I'd approach it: one page, built by hand, live in about a week. \
-                    Fixed price, no retainer, and you own everything at the end.
-
-                    Happy to jump on a call if that's easier.
-                    """,
-                    useCount: 46, lastUsed: ago(3), created: ago(2_160)),
-
-            Snippet(phrase: "deposit terms",
-                    replacement: "50% to start, the rest when it goes live. The invoice comes as a PDF the same day and is due within 7 days.",
-                    useCount: 61, lastUsed: ago(20), created: ago(2_880)),
-
-            Snippet(phrase: "my email address",
-                    replacement: "romangigliotti123@gmail.com",
-                    useCount: 184, lastUsed: ago(27), created: ago(4_320)),
-
-            Snippet(phrase: "studio link",
-                    replacement: "https://roman-design-co.web.app",
-                    useCount: 72, lastUsed: ago(49), created: ago(1_680)),
-
+            Snippet(phrase: "my email",
+                    replacement: "you@example.com",
+                    useCount: 0, lastUsed: nil, created: now),
             Snippet(phrase: "sign off",
-                    replacement: "Cheers,\nRoman",
-                    mode: .alone,
-                    useCount: 233, lastUsed: ago(51), created: ago(4_320)),
-
-            Snippet(phrase: "booking blurb",
-                    replacement: "Book a cut in about fifteen seconds — pick a barber, pick a time, and you're done. No app, no account, no phone call.",
-                    useCount: 18, lastUsed: ago(96), created: ago(960)),
-
-            Snippet(phrase: "handover note",
-                    replacement: """
-                    Everything's live. You've got the logins in the doc I sent, and the site \
-                    deploys itself whenever you edit the content file — nothing to install.
-
-                    Anything breaks, message me and I'll look the same day.
-                    """,
-                    useCount: 11, lastUsed: ago(140), created: ago(720)),
-
+                    replacement: "Thanks,\nYour name",
+                    useCount: 0, lastUsed: nil, created: now),
+            // `.alone` because "standup" is one ordinary word: matched anywhere
+            // in a sentence it would fire on someone saying "the standup is at
+            // nine" and eat their words. The existing seed test catches exactly
+            // this, and caught it here.
             Snippet(phrase: "standup",
                     replacement: """
                     Yesterday:
@@ -290,10 +269,10 @@ public extension SnippetStore {
                     Blocked on:
                     """,
                     mode: .alone,
-                    useCount: 39, lastUsed: ago(196), created: ago(1_440)),
+                    useCount: 0, lastUsed: nil, created: now),
         ]
     }
 
-    /// A store the dashboard can render without touching disk.
+    /// A store for the screenshot renderer and for previews — never a file.
     static func preview() -> SnippetStore { SnippetStore(inMemory: seed) }
 }

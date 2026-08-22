@@ -200,7 +200,7 @@ private let goodClean = "Send it to Carlo instead and tell him the bed frames ar
 
 // MARK: - Vocabulary preservation
 
-private let vocabTerms = Vocabulary.seed.contextualStrings
+private let vocabTerms = VocabularyFixture.terms
 
 @Test func rejectsAnOutputThatNormalisedOneOfRomansWords() {
     // Measured, 20 runs out of 20, on every prompt variant that did not carry an

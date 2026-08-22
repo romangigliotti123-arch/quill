@@ -51,7 +51,7 @@ private struct FakeAI: AICompleting {
 }
 
 private let deadline = Duration.milliseconds(450)
-private let vocabulary = Vocabulary.seed.contextualStrings
+private let vocabulary = VocabularyFixture.terms
 
 private func cleaner(_ ai: FakeAI) -> NIMCleaner {
     NIMCleaner(client: ai, vocabulary: vocabulary)

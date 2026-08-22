@@ -116,12 +116,18 @@ public struct StyleProfile: Codable, Sendable, Equatable {
     /// spelling is seeded rather than learned because it is the one thing here
     /// that is a fact about him rather than a guess — but it is seeded as a
     /// *vote*, so two corrections the other way would still overturn it.
-    public static let romanDefault: StyleProfile = {
-        var p = StyleProfile(preset: .casual)
-        p.spelling = StyleTrait(seeding: .british, votes: StyleProfile.minimumSupport)
-        p.contractions = StyleTrait(seeding: true, votes: StyleProfile.minimumSupport)
-        return p
-    }()
+    /// What a profile looks like before anything has been learned.
+    ///
+    /// Nothing is seeded. It used to arrive pre-loaded with British spelling and
+    /// contractions at full vote weight — the two things known about the author —
+    /// which meant the Style screen told every other user that Quill had
+    /// "learned" two facts about them on the day they installed it. A screen
+    /// whose only job is to report what it has observed must not open by
+    /// reporting somebody else's habits as theirs.
+    ///
+    /// Both are learned within a few dictations anyway, from the user's own
+    /// words, which is the entire point of the feature.
+    public static let freshDefault = StyleProfile(preset: .neutral)
 
     public init(
         preset: StylePreset = .casual,
@@ -596,7 +602,7 @@ public struct StyleTrait<Value: StyleTraitValue>: Codable, Sendable, Equatable {
     }
 
     /// A starting belief that is still only a belief. Used by
-    /// `StyleProfile.romanDefault` for the two things known about him up front.
+    /// Used where a trait needs a starting weight rather than a blank slate.
     public init(seeding value: Value, votes count: Int) {
         self.votes = [value.traitKey: min(count, Self.voteCeiling)]
         self.lastObserved = nil
@@ -845,11 +851,11 @@ public final class StyleStore: @unchecked Sendable {
             // First run seeds Roman's defaults rather than an empty profile, for
             // the same reason SnippetStore seeds: a feature that does nothing
             // until it is configured is a feature nobody configures.
-            current = .romanDefault
+            current = .freshDefault
         case .decoded(let stored):
             current = stored
         case .unreadable:
-            current = .romanDefault
+            current = .freshDefault
             loadFailed = true
         }
     }
@@ -911,7 +917,7 @@ public final class StyleStore: @unchecked Sendable {
     /// to undo his own preset.
     public func resetLearning() {
         update {
-            var fresh = StyleProfile.romanDefault
+            var fresh = StyleProfile.freshDefault
             fresh.preset = $0.preset
             fresh.appTones = $0.appTones
             fresh.isLearningEnabled = $0.isLearningEnabled

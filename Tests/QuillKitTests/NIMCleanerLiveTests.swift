@@ -46,7 +46,7 @@ struct NIMCleanerLiveTests {
     init() async throws {
         let client = NIMClient()
         self.client = client
-        self.cleaner = NIMCleaner(client: client, vocabulary: Vocabulary.seed.contextualStrings)
+        self.cleaner = NIMCleaner(client: client, vocabulary: VocabularyFixture.terms)
         try await Task.sleep(for: .seconds(1))
     }
 
@@ -271,7 +271,7 @@ func theHomophonePassOnTheRealModel() async throws {
     // contextRecovery off: this test measures the closed-list pass, and the
     // context pass is benched separately below. Without pinning it, whichever one
     // is currently the default would silently take over this test's numbers.
-    let cleaner = NIMCleaner(vocabulary: Vocabulary.seed.contextualStrings,
+    let cleaner = NIMCleaner(vocabulary: VocabularyFixture.terms,
                              homophones: true, contextRecovery: { false })
     guard NIMClient().isConfigured else { return }
 
@@ -332,7 +332,7 @@ func theHomophonePassOnTheRealModel() async throws {
 /// sentences out of six.
 @Test(.enabled(if: LiveTests.areEnabled, "no NVIDIA NIM key, or QUILL_SKIP_LIVE_TESTS is set"))
 func theContextPassOnTheRealModel() async throws {
-    let cleaner = NIMCleaner(vocabulary: Vocabulary.seed.contextualStrings,
+    let cleaner = NIMCleaner(vocabulary: VocabularyFixture.terms,
                              homophones: true, contextRecovery: { true })
     guard NIMClient().isConfigured else { return }
 

@@ -104,7 +104,12 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
     // "Whisperflow stores every transcript in a local SQ light database". The
     // first is one edit from the term once spaces are dropped and is repaired now
     // that the term exists.
-    #expect(FastCleaner().cleanFast("Whisperflow stores every transcript in a local database")
+    // Vocabulary handed in, like every other test here: a bare FastCleaner()
+    // reads whatever Dictionary happens to be on the machine running this, which
+    // makes the answer depend on the tester rather than on the code.
+    let cleaner = FastCleaner(vocabulary: VocabularyCorrector(
+        vocabulary: VocabularyFixture.vocabulary))
+    #expect(cleaner.cleanFast("Whisperflow stores every transcript in a local database")
               .contains("Wispr Flow"))
 }
 
@@ -120,7 +125,7 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
     // and DELETED the verb — the single-word route has refused real English
     // since the start, and the multi-word route had no such check at all, which
     // is the half where words go missing rather than merely changing spelling.
-    let corrector = VocabularyCorrector(vocabulary: .seed)
+    let corrector = VocabularyCorrector(vocabulary: VocabularyFixture.vocabulary)
     for sentence in [
         "I need to build a bed for the spare room",
         "he asked me to build a bed and I did",
@@ -137,7 +142,7 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
     // The guards above are worth nothing if they close the door on the repairs
     // the pass exists for. Each of these is a measured failure from Roman's own
     // corpus, and each must survive.
-    let corrector = VocabularyCorrector(vocabulary: .seed)
+    let corrector = VocabularyCorrector(vocabulary: VocabularyFixture.vocabulary)
     #expect(corrector.correct("push it to Netterfly tonight").contains("Netlify"))
     #expect(corrector.correct("the grapify workspace is fine").contains("graphify"))
     #expect(corrector.correct("run graph if I over the folder").contains("graphify"))
@@ -215,7 +220,7 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
     // its target: 0.57 for "net a fly", 0.67 for "Netterfly", 0.73 for
     // "Craigie Bear". A floor at 0.45 sits below all of them and far above the
     // collision.
-    let corrector = VocabularyCorrector(vocabulary: .seed)
+    let corrector = VocabularyCorrector(vocabulary: VocabularyFixture.vocabulary)
     #expect(corrector.correct("run y t dlp on that playlist") == "run y t dlp on that playlist")
 
     // and every phonetic repair still fires
@@ -230,7 +235,7 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
     // "graphify" as "graph if I". These terms were harvested from his machine
     // and have never appeared in the scored corpus, so this is the only evidence
     // available that they will do anything when they finally turn up in speech.
-    let corrector = VocabularyCorrector(vocabulary: .seed)
+    let corrector = VocabularyCorrector(vocabulary: VocabularyFixture.vocabulary)
     #expect(corrector.correct("open the media deck sidebar").contains("mediadeck"))
     #expect(corrector.correct("the t mux panes persist").contains("tmux"))
     #expect(corrector.correct("check the shad cn components").contains("shadcn"))
@@ -410,7 +415,7 @@ private let referenceURL = URL(fileURLWithPath: #filePath)
 // sentence is a request on the critical path for nothing, and the answer
 // decides the threshold rather than being decided by it.
 @Test func howOftenWouldALooseDetectorFireOnOrdinaryEnglish() {
-    let terms = Vocabulary.seed.contextualStrings
+    let terms = VocabularyFixture.terms
     // Ordinary dictation. Nothing here is a mangled product name.
     let sentences = [
         "I need to send the invoice by Friday and then go home",
