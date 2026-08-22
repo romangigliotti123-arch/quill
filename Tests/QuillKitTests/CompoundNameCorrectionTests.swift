@@ -46,6 +46,20 @@ private func clean(_ s: String) -> String { FastCleaner.applyCorrections(to: s) 
 }
 
 @Test func leavesOrdinaryEnglishContainingThoseWordsAlone() {
+    // Through the WHOLE pipeline, not just the anchored table.
+    //
+    // This used `FastCleaner.applyCorrections` — one stage of two — and passed
+    // for its whole life while the shipping path rewrote four of these sentences
+    // a step later. The vocabulary corrector's exact-letters branch fires on the
+    // bare pair (`normalise("type script") == "typescript"`), so the anchors this
+    // test was written to prove were being overruled immediately after it stopped
+    // looking.
+    //
+    // Testing one stage of a two-stage pipeline is how that shipped green, and it
+    // is how the next one would too.
+    let cleaner = FastCleaner()
+    func whole(_ said: String) -> String { cleaner.cleanFast(said) }
+
     // Each of these fired before the anchors existed.
     let untouched = [
         "I need to get hub caps for the car",
@@ -60,9 +74,15 @@ private func clean(_ s: String) -> String { FastCleaner.applyCorrections(to: s) 
         "a tail wind helped the flight",
         "type script tags by hand",
         "sync thing up later",
+        "the black hole in the data",
+        "a home brew kit",
     ]
     for sentence in untouched {
-        #expect(clean(sentence) == sentence, "rewrote: \(sentence)")
+        #expect(clean(sentence) == sentence, "the anchored table rewrote: \(sentence)")
+        // The pipeline sentence-cases the first word, which is not a rewrite.
+        let out = whole(sentence)
+        let expected = sentence.prefix(1).uppercased() + sentence.dropFirst()
+        #expect(out == expected || out == sentence, "the pipeline rewrote: \(sentence) → \(out)")
     }
 }
 

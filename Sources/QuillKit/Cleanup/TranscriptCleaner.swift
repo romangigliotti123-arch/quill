@@ -33,6 +33,34 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
     /// Roman's vocabulary. Apple's recogniser is given these as contextual
     /// strings too, but biasing is a hint and not a guarantee, so the common
     /// mishearings get corrected here as well. Keys are compared lowercased.
+    /// Two-word spans whose split form is ordinary English, and whose letters
+    /// happen to spell a tool name.
+    ///
+    /// The anchored entries in `corrections` exist because the bare pair rewrites
+    /// sentences the user meant — "type script tags by hand", "a tail wind helped
+    /// the flight". But anchoring here only stops THIS pass. The vocabulary
+    /// corrector runs a step later, and its exact-letters branch fires on the
+    /// bare pair regardless: `normalise("type script") == "typescript"`, which is
+    /// the strongest evidence it has, so it returned before any of its own guards
+    /// could look at the sentence.
+    ///
+    /// So the two layers now share one list. A pair in here can only become a
+    /// tool name through an anchor above — never on its own — which is what the
+    /// comment inside `corrections` has always claimed the design was.
+    ///
+    /// Adding an anchor above and adding the pair here is one edit, deliberately.
+    static let ambiguousSplits: Set<String> = [
+        "typescript",   // "type script tags by hand"
+        "tailwind",     // "a tail wind helped the flight"
+        "airtable",     // "the air table was covered in dust"
+        "syncthing",    // "sync thing up later"
+        "github",       // "get hub caps for the car"
+        "youtube",      // "you tube of toothpaste"
+        "linkedin",     // "linked in the email"
+        "blackhole",    // "the black hole in the data"
+        "homebrew",     // "a home brew kit"
+    ]
+
     private static let corrections: [String: String] = [
         "next fulfilment": "nxt fulfilment",
         "graphite": "graphify",
@@ -128,7 +156,9 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         "three js": "Three.js",
 
         // NEEDS AN ANCHOR — the split form IS ordinary English, so the bare pair
-        // would rewrite sentences he meant. Each of these was caught firing on
+        // would rewrite sentences he meant. See `FastCleaner.ambiguousSplits`
+        // below: the same list also has to stop the VOCABULARY pass from firing
+        // on the bare pair a step later, or the anchor here is decoration. Each of these was caught firing on
         // real prose before the anchor was added:
         //
         //     "I need to get hub caps for the car" -> "I need to GitHub caps…"

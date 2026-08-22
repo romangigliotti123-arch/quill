@@ -188,6 +188,16 @@ public struct VocabularyCorrector: Sendable {
                 // corrector owns sitting downstream of the return that did it.
                 guard Self.spanCanBe(wordCount: entry.wordCount, spanCount: spanCount)
                 else { continue }
+                // And the split form must not be a pair that FastCleaner already
+                // decided needs an anchor.
+                //
+                // Those pairs are ordinary English whose letters spell a tool
+                // name, so the exact-letters branch — the strongest evidence this
+                // corrector has — is exactly wrong for them. "type script tags by
+                // hand" became "TypeScript tags by hand" one step after the
+                // anchored table had deliberately declined to touch it. The two
+                // layers were contradicting each other; they share the list now.
+                if spanCount > 1, FastCleaner.ambiguousSplits.contains(normalised) { continue }
                 return candidate == term ? nil : term
             }
             // Letters first, then sound.
