@@ -198,7 +198,7 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         // seven of twenty-seven word errors — and nothing downstream can fix
         // them: VocabularyCorrector presumes a correctly spelled English word is
         // intentional, and the model pass may only delete, never swap. See
-        // ACCURACY_ANALYSIS.md.
+        // docs/ACCURACY_ANALYSIS.md.
         //
         // Two rules for what may go in here, both learned the hard way.
         //
@@ -206,7 +206,7 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         // sentence about flowers. Each key below is a fixed phrase where one
         // spelling is simply wrong: nobody writes "hey fever" or "principle
         // developer". Where the phrase does not decide it, it does not belong
-        // here — that is what the gated model pass in ACCURACY_ANALYSIS.md is
+        // here — that is what the gated model pass in docs/ACCURACY_ANALYSIS.md is
         // for.
         //
         // Second, PHRASES HE SAYS. The corpus's own failures are not eligible:
