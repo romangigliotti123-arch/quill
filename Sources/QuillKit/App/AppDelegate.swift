@@ -42,6 +42,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         undo.beginWatching()
         self.undo = undo
 
+        // Transforms, connected at last.
+        //
+        // The engine, the router and the selection reader are 1,300 lines of
+        // tested code that nothing ever constructed — so the Transforms screen
+        // listed eight of them, each captioned with the phrase that runs it, and
+        // saying any of those phrases typed it into the document as content.
+        //
+        // Built here rather than inside the coordinator because the engine needs
+        // the same NIM client the cleaner uses and the coordinator needs to hand
+        // it the last thing it inserted. The closure is what keeps that current:
+        // a value passed in would be whatever existed at launch, forever.
+        let transformEngine = TransformEngine(
+            completer: NIMClient(),
+            selection: SelectionReader(),
+            inserter: TextInserter(),
+            lastDictation: { [weak self] in
+                MainActor.assumeIsolated { self?.coordinator?.lastInsertion }
+            }
+        )
+
         let coordinator = DictationCoordinator(
             hotkey: EventTapHotkeyEngine(undo: undo),
             transcriber: SpeechAnalyzerTranscriber(),
@@ -53,7 +73,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // deterministic repair, so this needs no setting behind it — there is
             // no configuration in which it is worse.
             cleaner: NIMCleaner(),
-            undo: undo
+            undo: undo,
+            transforms: (CommandRouter(), transformEngine)
         )
         self.coordinator = coordinator
         coordinator.start()

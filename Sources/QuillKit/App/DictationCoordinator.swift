@@ -55,6 +55,13 @@ public final class DictationCoordinator {
     /// at all — it falls back to paste-on-release, which lands in one piece after
     /// the older one is done. Roman's call, asked directly.
     private var isFinalising = false
+    private let transforms: (router: CommandRouter, engine: TransformEngine)?
+    /// What Quill last inserted, so "make that shorter" has something to act on.
+    ///
+    /// Read by the transform engine through a closure rather than passed in, so
+    /// the engine sees the latest value rather than whatever existed when the app
+    /// launched.
+    public private(set) var lastInsertion: TransformEngine.LastDictation?
     /// Remembers the last insertion so ⌥⌫ can take it back. Optional because
     /// every path in this file works without one, and a test that does not care
     /// about the chord should not have to build one.
@@ -106,10 +113,15 @@ public final class DictationCoordinator {
         settings: QuillSettings = .shared,
         liveTyper: LiveTyper = LiveTyper(),
         undo: InsertionUndo? = nil,
+        /// Turns a finished utterance into a transform, or leaves it as content.
+        /// Nil means the feature is off and every utterance is content — which is
+        /// what shipped for the whole life of the Transforms screen.
+        transforms: (router: CommandRouter, engine: TransformEngine)? = nil,
         context: @escaping @MainActor () -> AppContext = { AppContext.current() }
     ) {
         self.context = context
         self.undo = undo
+        self.transforms = transforms
         self.settings = settings
         self.liveTyper = liveTyper
         self.hotkey = hotkey
@@ -515,6 +527,43 @@ public final class DictationCoordinator {
                 return
             }
 
+            // Is this something to type, or something to DO?
+            //
+            // Asked here, after cleanup and before insertion, because the router
+            // reads a finished sentence and the transform has to happen instead of
+            // the insertion rather than after it.
+            //
+            // `CommandRouter` is the most conservative file in the app on purpose:
+            // treating a command as content types five words the user deletes,
+            // while treating content as a command deletes what they said. It fires
+            // only when the ENTIRE utterance is an instruction.
+            if let transforms = self.transforms {
+                let routing = transforms.router.route(final, transforms: TransformStore.shared.ordered)
+                if case .content = routing.decision {} else {
+                    // Take the command itself back off the screen first. Live
+                    // typing has been writing "make that shorter" since the first
+                    // partial, and it must not be left behind next to the result.
+                    if self.isLive { self.liveTyper.retract(generation: self.liveGeneration) }
+                    self.isLive = false
+                    self.undo?.discard()
+
+                    overlay.show(.transcribing)
+                    let outcome = await transforms.engine.run(routing)
+                    switch outcome {
+                    case .done(let success):
+                        overlay.show(.inserted(words: success.text.split(whereSeparator: \.isWhitespace).count))
+                    case .failed(let reason):
+                        // The words are never thrown away: `TransformEngine` does
+                        // not touch the target until it has a result, so a refusal
+                        // leaves the document as it was — but the user asked for
+                        // something and has to be told it did not happen.
+                        overlay.show(.error(reason))
+                    }
+                    self.timeline.textInserted = Date()
+                    return
+                }
+            }
+
             // Two ways in, and the difference is whether the text is already
             // there. Live typing has been writing this sentence since the first
             // partial, so finishing it means reconciling the last edit — usually
@@ -541,7 +590,11 @@ public final class DictationCoordinator {
                 // is believed to be on screen, and the undo chord may not fire
                 // against a sentence that never landed.
                 self.undo?.record(final)
-                overlay.show(.inserted(words: final.split(separator: " ").count))
+                // So "make that shorter" has something to act on.
+                self.lastInsertion = .init(text: final, insertedAt: Date())
+                // Split on whitespace, not on the space character: a transform
+                // that returns a bullet list is one word by the old count.
+                overlay.show(.inserted(words: final.split(whereSeparator: \.isWhitespace).count))
             case .fellBackToClipboard(let reason):
                 self.undo?.discard()
                 overlay.show(.error("Copied to clipboard — \(reason)"))
