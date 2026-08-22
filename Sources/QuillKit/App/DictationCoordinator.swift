@@ -67,12 +67,6 @@ public final class DictationCoordinator {
     /// about the chord should not have to build one.
     private let undo: InsertionUndo?
 
-    /// How long the thorough cleanup is allowed to take before we give up on it
-    /// and insert the fast version. Past roughly a quarter second the pause
-    /// between releasing the key and seeing text becomes the thing you notice,
-    /// which is exactly the piece we are trying to win.
-    private let cleanupDeadline: Duration = .milliseconds(250)
-
     private var timeline = DictationTimeline()
     private var isDictating = false
     /// Capturing, but not yet committed: the key is down and the gesture has not
@@ -280,14 +274,30 @@ public final class DictationCoordinator {
     /// key-down, so there is nothing to start here — only something to show.
     private func beginDictation() {
         guard !isDictating else { return }
-        isDictating = true
-        inputLost = false
 
         if !isSpeculating {
             // Defensive: a confirmation with no speculation behind it. Start now
             // and accept the lost milliseconds rather than record nothing at all.
+            //
+            // BEFORE `isDictating = true`, which is the whole of it. This ran
+            // after, and `speculativelyBegin()`'s first guard is `!isDictating` —
+            // so the recovery this comment describes could never once have run.
+            // It logged "key-down IGNORED: already dictating" and returned.
+            //
+            // The path is real: the speculation's `transcriber.start()` throws
+            // (the chosen microphone was unplugged, AirPods changed profile,
+            // another app holds the device), `fail()` clears `isSpeculating`, and
+            // 120 ms later the arm timer confirms the gesture. Roman then speaks a
+            // paragraph into a coordinator that believes it is dictating and has
+            // no capture session at all. On release: "Transcribing", then an empty
+            // transcript, then "MacBook Air Microphone sent no sound at all. Pick
+            // a different microphone in Settings" — about a microphone that was
+            // fine. No insertion, no clipboard, no history row. The paragraph is
+            // simply gone.
             speculativelyBegin()
         }
+        isDictating = true
+        inputLost = false
         isSpeculating = false
         // Decided here, once, rather than per partial: the focused app is
         // whatever the user was in when they pressed the key, and it is the only
@@ -370,7 +380,7 @@ public final class DictationCoordinator {
         overlay.show(.transcribing)
 
         isFinalising = true
-        Task { [transcriber, cleaner, inserter, overlay, history, snippets, cleanupDeadline] in
+        Task { [transcriber, cleaner, inserter, overlay, history, snippets] in
             // Cleared on every exit from this Task, including the two early
             // returns below. A flag that leaks true would silently disable live
             // typing for the rest of the session.
@@ -496,9 +506,26 @@ public final class DictationCoordinator {
             // a superseded session can still find out what it left behind.
             let liveOnScreen = self.isLive ? self.liveTyper.typed : ""
 
-            let budget = SelfCorrection.needsModelPass(fast)
-                ? AIConfig.recommendedCleanupDeadline
-                : cleanupDeadline
+            // One budget, not two.
+            //
+            // It used to be 250ms unless `SelfCorrection.needsModelPass(fast)`
+            // said otherwise — but self-correction is not the only pass behind
+            // this deadline. Context recovery and homophone repair are gated
+            // inside the cleaner on their own conditions, and on those dictations
+            // the request went out, was waited on, and was thrown away unread at
+            // 250ms: the table above says only 11% of calls land inside it. Paying
+            // the latency and discarding the answer is the worst of both.
+            //
+            // Making the coordinator re-derive the gates is the wrong direction —
+            // it would need to know about contextRecovery, homophones, and whether
+            // the offline resolver already absorbed the retraction, and that copy
+            // would drift from the cleaner within a release. The deadline is an
+            // upper bound, and `cleanThorough` already returns in microseconds
+            // when no gate fires, so a smaller bound buys nothing on the fast
+            // path. It is the cleaner's job to not make a call it does not need,
+            // which NIMCleaner does — noted because `TranscriptCleaning` does not
+            // enforce it.
+            let budget = AIConfig.recommendedCleanupDeadline
 
             if let better = await Self.withDeadline(budget, operation: {
                 await cleaner.cleanThorough(raw, deadline: budget)

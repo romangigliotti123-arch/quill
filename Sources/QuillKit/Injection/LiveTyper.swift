@@ -299,11 +299,25 @@ public final class LiveTyper {
     private func focusedElement() -> AXUIElement? {
         guard let targetPID else { return nil }
         let app = AXUIElementCreateApplication(targetPID)
+        // Bounded, like every other AX call in this app.
+        //
+        // This one runs on the main actor for EVERY live-typing partial, several
+        // times a second, and an unbounded AXUIElementCopyAttributeValue blocks
+        // for the system default of six seconds when the target app is busy —
+        // beachballing Quill's own UI along with the typing it was doing. The
+        // element is recreated on each call, so the timeout has to be set on each
+        // call; it is not a property of the process.
+        AXUIElementSetMessagingTimeout(app, 0.25)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value) == .success
         else { return nil }
         guard let element = value, CFGetTypeID(element) == AXUIElementGetTypeID() else { return nil }
-        return (element as! AXUIElement)
+        let focused = element as! AXUIElement
+        // The returned element is a fresh reference and does not inherit the
+        // application element's timeout, so whatever the caller asks of it next
+        // would be unbounded again.
+        AXUIElementSetMessagingTimeout(focused, 0.25)
+        return focused
     }
 
     private func cancelPending() {

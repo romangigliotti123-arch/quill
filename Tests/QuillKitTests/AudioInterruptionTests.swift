@@ -163,3 +163,65 @@ private func settle(_ inserter: Inserted) async {
     #expect(inserter.text == nil)
     #expect(!overlay.states.contains { if case .error = $0 { return true }; return false })
 }
+
+// MARK: - Recovering from a speculation that could not open the microphone
+
+private final class FailsFirstStart: Transcriber, @unchecked Sendable {
+    weak var delegate: TranscriberDelegate?
+    var onLevel: ((Float) -> Void)?
+    private let lock = NSLock()
+    private var _starts = 0
+    var starts: Int { lock.lock(); defer { lock.unlock() }; return _starts }
+
+    func prepare() async {}
+    func start() async throws {
+        lock.lock(); _starts += 1; let n = _starts; lock.unlock()
+        if n == 1 { throw AudioSourceError.noInputDevice }
+    }
+    func stop() async -> String { "recovered" }
+    func cancel() async {}
+}
+
+@MainActor
+@Test func aConfirmedGestureRecoversWhenItsSpeculationCouldNotOpenTheMicrophone() async {
+    // The recovery beginDictation() documents, which could never once have run.
+    //
+    // It set `isDictating = true` and *then* called speculativelyBegin(), whose
+    // first guard is `!isDictating` — so the call logged "key-down IGNORED:
+    // already dictating" and returned. Roman then spoke a paragraph into a
+    // coordinator that believed it was dictating and had no capture session at
+    // all, and was told his microphone sent no sound, about a microphone that was
+    // fine. No insertion, no clipboard, no history row.
+    let transcriber = FailsFirstStart()
+    let inserter = Inserted()
+    let scratch = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-recover-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+    let quill = DictationCoordinator(
+        hotkey: SilentHotkey(),
+        transcriber: transcriber,
+        inserter: inserter,
+        overlay: Watching(),
+        cleaner: FastCleaner(),
+        history: HistoryStore(url: scratch.appendingPathComponent("history.json")),
+        snippets: SnippetStore(inMemory: []),
+        settings: pasteOnlySettings(),
+        liveTyper: LiveTyper(keyboard: SilentKeystrokes()),
+        context: { .prose }
+    )
+
+    // The speculation opens on key-down and its start() throws.
+    quill.hotkeyMayBegin()
+    for _ in 0 ..< 100 where transcriber.starts < 1 {
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(transcriber.starts == 1)
+
+    // The arm timer then confirms the gesture. Nothing is capturing, so this is
+    // the moment the recovery has to fire.
+    quill.hotkeyPressed()
+    for _ in 0 ..< 100 where transcriber.starts < 2 {
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(transcriber.starts == 2)
+}

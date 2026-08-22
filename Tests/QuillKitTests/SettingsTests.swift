@@ -47,6 +47,49 @@ private typealias SM = HotkeyStateMachine
     #expect(machine.state == .idle)
 }
 
+@Test func aStrayModifierCannotStrandAHandsFreeRecordingOnTheTriggerPathEither() {
+    // The path the test above does NOT cover, and the one the app actually
+    // ships. Hold and toggle default to the same key, so HotkeyEngine's
+    // `keyCode == hold.keyCode` branch claims the event and `.toggleDown` is
+    // never produced — the forgiving clause it pins is dead code on the default
+    // binding, and every real stop with a stray ⇧ held used to be swallowed:
+    // microphone open, HUD up, nothing to close it with.
+    var machine = SM()
+    _ = machine.handle(.triggerDown(isolated: true), at: 1)
+    _ = machine.handle(.triggerUp, at: 1.05)
+    _ = machine.handle(.triggerDown(isolated: true), at: 1.2)
+    _ = machine.handle(.triggerUp, at: 1.25)
+    #expect(machine.state == .handsFree)
+
+    // ⇧ is down, so the tap is not isolated. It cannot stop on the press —
+    // the trigger is itself a chord modifier, and in ⇧⌥→ the ⇧ lands first, so
+    // stopping here would end a dictation on the ⌥ of a chord the user is
+    // typing and paste the transcript over their own selection.
+    #expect(machine.handle(.triggerDown(isolated: false), at: 3) == [])
+    #expect(machine.state == .handsFree)
+
+    // The release with no keystroke in between is what proves it was a tap.
+    #expect(machine.handle(.triggerUp, at: 3.1) == [.notifyReleased])
+    #expect(machine.state == .idle)
+}
+
+@Test func aChordDuringHandsFreeIsNotAStop() {
+    // ⇧⌥→ — the other half of the same decision. The arrow's key-down is what
+    // says the trigger was part of a chord, and hands-free is the mode that
+    // deliberately tolerates typing, so the dictation carries on.
+    var machine = SM()
+    _ = machine.handle(.toggleDown(isolated: true), at: 1)
+    #expect(machine.state == .handsFree)
+
+    #expect(machine.handle(.triggerDown(isolated: false), at: 3) == [])
+    #expect(machine.handle(.keyDown(keyCode: 124, isBare: false), at: 3.05) == [])
+    #expect(machine.state == .handsFree)
+
+    // And the release that follows must not fire the stop the chord cancelled.
+    #expect(machine.handle(.triggerUp, at: 3.2) == [])
+    #expect(machine.state == .handsFree)
+}
+
 @Test func thePushKeyAsPartOfAChordDoesNotStartAnything() {
     var machine = SM()
     #expect(machine.handle(.toggleDown(isolated: false), at: 1) == [])
