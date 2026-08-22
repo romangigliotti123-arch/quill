@@ -7,13 +7,35 @@ import Foundation
 public enum CaretReading: Equatable, Sendable {
     /// Accessibility answered, and this is the text.
     case text(String)
-    /// Accessibility answered, and the answer rules out a safe delete: there is
-    /// a live selection, which the first backspace would eat instead of our
-    /// text, or the field does not hold enough characters to contain what we are
-    /// looking for.
-    case unsafe
+    /// There is a live selection. The first backspace eats it instead of our
+    /// text, so every count after that is wrong. Always refuse — this is a real
+    /// hazard rather than a gap in what the app will tell us.
+    case selection
+    /// The field says there is text behind the caret, but less of it than our
+    /// sentence. So our sentence is not there. Always refuse.
+    case shorterThanOurs
+    /// The field tracks no caret, but it does expose its visible text.
+    ///
+    /// This is what a terminal looks like from the outside, and it is not the
+    /// same as declining. Measured on Ghostty: `AXTextArea`, `AXNumberOfCharacters`
+    /// in the thousands and rising as the screen fills, `AXValue` carrying the
+    /// live screen — and `AXSelectedTextRange` returning (0, 0) every time, on an
+    /// attribute that is not even settable. A caret at index 0 of a live
+    /// two-thousand-character buffer is not a caret; it is a stub.
+    ///
+    /// Worth its own case because the text it carries is better evidence than the
+    /// disturbance guards: if Quill's sentence is on the screen, it is on the
+    /// screen, whatever the caret says.
+    case screenOnly(String)
     /// Accessibility declined to say. Ordinary rather than exceptional —
-    /// Electron apps, web views, and anything that does not expose its text.
+    /// Electron apps, web views, terminals, and anything else that does not
+    /// expose its text. Also the answer when a field reports its caret at
+    /// position zero forever, which is what terminals do: measured on this Mac,
+    /// Ghostty reports `AXTextArea` and a caret that never leaves 0, Chrome
+    /// reports an `AXGroup` with no caret at all, and VS Code reports no focused
+    /// element. TextEdit, by contrast, answers exactly. Three of the four apps
+    /// open on the machine cannot verify anything, and they are the three the
+    /// user actually dictates into.
     case unknown
 }
 
@@ -33,7 +55,7 @@ public struct AccessibilityCaretReader: CaretTextReading {
     public init() {}
 
     public func textBeforeCaret(pid: pid_t, length: Int) -> CaretReading {
-        guard length > 0 else { return .unsafe }
+        guard length > 0 else { return .shorterThanOurs }
 
         let app = AXUIElementCreateApplication(pid)
         // Without this, one unresponsive app hangs the caller for the AX default
@@ -57,16 +79,28 @@ public struct AccessibilityCaretReader: CaretTextReading {
         guard AXUIElementCopyAttributeValue(
                 element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
               let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID()
-        else { return .unknown }
+        else { return Self.visibleText(of: element).map(CaretReading.screenOnly) ?? .unknown }
 
         var caret = CFRange()
         // swiftlint:disable:next force_cast — guarded by the type-id check above.
-        guard AXValueGetValue(rangeRef as! AXValue, .cfRange, &caret) else { return .unknown }
+        guard AXValueGetValue(rangeRef as! AXValue, .cfRange, &caret) else {
+            return Self.visibleText(of: element).map(CaretReading.screenOnly) ?? .unknown
+        }
         // A live selection is deleted whole by the first backspace, so every
         // count after it would be wrong.
-        guard caret.length == 0 else { return .unsafe }
-        // Not enough text behind the caret to be ours, so it is not ours.
-        guard caret.location >= length else { return .unsafe }
+        guard caret.length == 0 else { return .selection }
+        // A caret at zero is not "the field is empty". It is what a terminal
+        // reports whether or not there is anything on the line — Ghostty answers
+        // AXTextArea and location 0 forever, on an attribute that is not settable
+        // — so it says nothing about the text and must not be read as a refusal
+        // on its own. What that app WILL give us is the screen.
+        guard caret.location > 0 else {
+            return Self.visibleText(of: element).map(CaretReading.screenOnly) ?? .unknown
+        }
+        // Past zero the number means something: the field is telling us it holds
+        // less than our sentence, so our sentence is not what is behind the
+        // caret.
+        guard caret.location >= length else { return .shorterThanOurs }
 
         var wanted = CFRange(location: caret.location - length, length: length)
         guard let parameter = AXValueCreate(.cfRange, &wanted) else { return .unknown }
@@ -78,6 +112,65 @@ public struct AccessibilityCaretReader: CaretTextReading {
         else { return .unknown }
         return .text(text)
     }
+
+    /// The whole visible text of an element, when it has any.
+    ///
+    /// Only asked for once the caret has turned out to be useless, so the cost
+    /// falls on the apps that were going to refuse anyway.
+    private static func visibleText(of element: AXUIElement) -> String? {
+        var valueRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+                element, kAXValueAttribute as CFString, &valueRef) == .success,
+              let text = valueRef as? String, !text.isEmpty
+        else { return nil }
+        return text
+    }
+}
+
+/// Every decision on the ⌥⌫ path, printed, when `QUILL_LOG_UNDO=1`.
+///
+/// This path has more ways of silently declining than any other in the app —
+/// four guards in `claims`, five in `undoLastInsertion`, and a record that eight
+/// different callers can throw away — and every one of them looks identical from
+/// the outside: you press the chord and a word disappears, exactly as it would
+/// have without Quill. "It doesn't work" is the only report the user can make,
+/// and it does not distinguish between them.
+public enum UndoTrace {
+    public static let on = ProcessInfo.processInfo.environment["QUILL_LOG_UNDO"] == "1"
+
+    /// Written to a file as well as the log, because the log is the harder of the
+    /// two to read: this path runs on the tap thread and on main, in a GUI app
+    /// launched by `open`, and `log show` needs the right predicate and the right
+    /// window to show anything at all. A file is `tail -f`.
+    public static let path = NSString(string: "~/Library/Application Support/Quill/undo-trace.log")
+        .expandingTildeInPath
+
+    private static let queue = DispatchQueue(label: "com.romangigliotti.quill.undotrace")
+
+    public static func say(_ message: @autoclosure () -> String) {
+        guard on else { return }
+        let line = message()
+        NSLog("[quill/undo] %@", line)
+        let stamped = "\(Self.stamp()) \(line)\n"
+        queue.async {
+            guard let data = stamped.data(using: .utf8) else { return }
+            if let handle = FileHandle(forWritingAtPath: path) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                try? handle.close()
+            } else {
+                try? data.write(to: URL(fileURLWithPath: path))
+            }
+        }
+    }
+
+    private static let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    private static func stamp() -> String { formatter.string(from: Date()) }
 }
 
 /// The half of the undo that the event tap can see.
@@ -91,6 +184,10 @@ public protocol InsertionUndoing: AnyObject, Sendable {
     var isArmed: Bool { get }
     /// Something happened that could have moved the caret or changed the text.
     func discard()
+    /// Same, but naming what happened. Only `QUILL_LOG_UNDO=1` reads the reason;
+    /// it exists because "the record was gone by the time the chord arrived" is
+    /// the single most common way this feature fails and the hardest to see.
+    func discard(because reason: String)
     /// Take the last insertion back. Hops to main itself.
     func requestUndo()
 }
@@ -122,7 +219,19 @@ public final class InsertionUndo: InsertionUndoing, @unchecked Sendable {
     private struct Pending {
         let text: String
         let pid: pid_t
+        let at: Date
     }
+
+    /// How long an insertion stays deletable when nothing can confirm it is
+    /// still there.
+    ///
+    /// Only the unverified path uses it. A field that answers is checked against
+    /// the actual characters and needs no clock; a field that will not answer is
+    /// being taken on trust, and trust should not outlive the moment. A minute is
+    /// far longer than the gesture takes — you say a sentence, you see it is
+    /// wrong, you take it back — and far shorter than the time in which a
+    /// document can quietly become something else.
+    static let unverifiedWindow: TimeInterval = 60
 
     private let lock = NSLock()
     private var pending: Pending?
@@ -172,10 +281,12 @@ public final class InsertionUndo: InsertionUndoing, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !text.isEmpty, let pid else {
+            UndoTrace.say("record REFUSED (empty=\(text.isEmpty), pid=\(String(describing: pid)))")
             pending = nil
             return
         }
-        pending = Pending(text: text, pid: pid)
+        UndoTrace.say("record ARMED \(text.count) chars, pid \(pid)")
+        pending = Pending(text: text, pid: pid, at: Date())
     }
 
     /// Deliberately blunt. This is called from the event tap on every real
@@ -183,9 +294,12 @@ public final class InsertionUndo: InsertionUndoing, @unchecked Sendable {
     /// the start of every dictation, and in each case the cheapest correct answer
     /// is to stop believing the record rather than to reason about whether that
     /// particular key could have moved the caret.
-    public func discard() {
+    public func discard() { discard(because: "unspecified") }
+
+    public func discard(because reason: String) {
         lock.lock()
         defer { lock.unlock() }
+        if pending != nil { UndoTrace.say("record DISCARDED — \(reason)") }
         pending = nil
     }
 
@@ -225,45 +339,93 @@ public final class InsertionUndo: InsertionUndoing, @unchecked Sendable {
         pending = nil
         lock.unlock()
 
-        guard let record else { return putBack() }
+        guard let record else {
+            UndoTrace.say("undo REFUSED — no record by the time it reached main")
+            return putBack()
+        }
         // The record is dropped on app switches, but a switch in the gap between
         // the tap's check and this line has not been seen yet.
-        guard frontmost() == record.pid else { return putBack() }
+        guard frontmost() == record.pid else {
+            UndoTrace.say("undo REFUSED — frontmost is \(String(describing: frontmost())), record was for \(record.pid)")
+            return putBack()
+        }
 
         switch caret.textBeforeCaret(pid: record.pid, length: record.text.utf16.count) {
         case .text(let before):
-            guard before == record.text else { return putBack() }
-        case .unsafe:
+            guard before == record.text else {
+                UndoTrace.say("undo REFUSED — the field holds something else behind the caret")
+                return putBack()
+            }
+        case .selection:
+            UndoTrace.say("undo REFUSED — there is a live selection; the first backspace would eat that")
             return putBack()
+        case .shorterThanOurs:
+            UndoTrace.say("undo REFUSED — the field holds less than our sentence, so ours is not there")
+            return putBack()
+        case .screenOnly(let visible):
+            // Better evidence than the guards, and available in exactly the app
+            // this feature was reported broken in. The caret is a stub, but the
+            // screen is real, so ask the screen.
+            guard Self.screen(visible, shows: record.text) else {
+                UndoTrace.say("undo REFUSED — our sentence is not on the screen any more")
+                return putBack()
+            }
+            UndoTrace.say("undo VERIFIED against the visible screen")
+
         case .unknown:
-            // Accessibility would not say, so Quill does not delete. Roman's call,
-            // asked and answered directly.
+            // Accessibility would not say. Fall back to the disturbance guards.
             //
-            // The cost is real and worth stating: this is the ordinary answer in
-            // Electron apps, web views and most terminals, which is a large share
-            // of where he actually dictates — so in those apps ⌥⌫ now always
-            // passes through and deletes a word, exactly as it did before Quill
-            // existed. The chord only fires where the field will confirm our
-            // sentence is still sitting behind the caret.
+            // This was a refusal, and the refusal was measured: a probe asked
+            // every app running on this Mac what it exposes about its caret.
+            // Ghostty reports an AXTextArea whose caret never leaves 0; Chrome
+            // reports an AXGroup with no caret; VS Code reports no focused
+            // element at all; TextEdit answers exactly. Three of the four, and
+            // the three anyone actually dictates into. So the strict version did
+            // not make the feature careful — it made it not exist, while looking
+            // identical to a bug, because a refusal passes the chord back and the
+            // app deletes a word exactly as it always did.
             //
-            // The alternative was to trust the disturbance guards — no keystroke,
-            // no click, no app switch since the insertion — and backspace anyway.
-            // Those guards are good but they cannot see an app that rewrote the
-            // text by itself: an autocorrect, an editor reformatting a paste, a
-            // composer normalising what was typed. In that case we would delete N
-            // characters of whatever is now at the caret, in a document Quill
-            // cannot read back, and the user would find out later with nothing to
-            // blame.
-            //
-            // The asymmetry decides it. Not firing costs one extra gesture.
-            // Firing wrongly costs a sentence somebody wrote themselves.
-            return putBack()
+            // What is left to go on is the record still being armed, which is not
+            // nothing: every keystroke, every click, every app switch, every
+            // moment the event tap was blind, and the start of every dictation
+            // all throw it away. The gap those cannot see is an app that rewrites
+            // its own text with no input — an autocorrect, an editor formatting
+            // on save. Hence the clock: taken on trust, and only for as long as
+            // the gesture actually takes.
+            guard Date().timeIntervalSince(record.at) <= Self.unverifiedWindow else {
+                UndoTrace.say("undo REFUSED — unverifiable and older than \(Int(Self.unverifiedWindow))s")
+                return putBack()
+            }
+            UndoTrace.say("undo UNVERIFIED — nothing has disturbed it, deleting on the guards alone")
         }
 
         // Graphemes, not UTF-16 units: one backspace removes one visible
         // character, so counting anything smaller takes half an emoji off and
         // leaves the fragment behind.
+        UndoTrace.say("undo FIRED — \(record.text.count) backspaces")
         return keyboard.backspace(times: record.text.count)
+    }
+
+    /// Whether the visible text still contains what Quill inserted.
+    ///
+    /// Whitespace-insensitive, because a terminal wraps: the sentence goes in as
+    /// one line and comes back off the screen broken across the width of the
+    /// window, sometimes with a box-drawing frame down the side of it. Comparing
+    /// the characters that carry meaning and ignoring the ones that carry layout
+    /// is the only comparison that survives that.
+    static func screen(_ visible: String, shows inserted: String) -> Bool {
+        func squeeze(_ s: String) -> String {
+            String(s.unicodeScalars.filter { scalar in
+                // Box drawing (U+2500–257F) and block elements (U+2580–259F) are
+                // the frame a TUI paints around its input, not content.
+                !(0x2500...0x259F).contains(scalar.value)
+            })
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        }
+        let needle = squeeze(inserted)
+        guard !needle.isEmpty else { return false }
+        return squeeze(visible).contains(needle)
     }
 
     @discardableResult

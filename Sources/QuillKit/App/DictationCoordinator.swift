@@ -156,6 +156,13 @@ public final class DictationCoordinator {
                     // empty transcript can tell the user which of the two very
                     // different things went wrong.
                     self.sawLevels = true
+                    // Told to the tap, not just kept here. It is what lets ⌥⌫ tell
+                    // a chord from a dictation: the gesture machine says .holding
+                    // 130 ms after the trigger goes down whether the user is
+                    // speaking or reaching for Delete, and only the audio knows
+                    // which. Above the floor only, so a quiet room does not read
+                    // as speech.
+                    if level >= DictationCoordinator.silenceFloor { self.hotkey.noteSpeechHeard() }
                     self.peakLevel = max(self.peakLevel, level)
                     // The moment speech actually starts, as distinct from the
                     // moment the microphone opened. Uses the same floor that

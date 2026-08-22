@@ -47,6 +47,11 @@ public protocol HotkeyEngineDelegate: AnyObject {
     func hotkeyEngineUnavailable(reason: String)
 }
 
+public extension HotkeyEngine {
+    /// Default for the fakes. Only the tap has a chord to decide.
+    func noteSpeechHeard() {}
+}
+
 public extension HotkeyEngineDelegate {
     /// Default for the delegates that are not the running app. Only the
     /// coordinator has a document to reshape.
@@ -55,6 +60,16 @@ public extension HotkeyEngineDelegate {
 
 public protocol HotkeyEngine: AnyObject {
     var delegate: HotkeyEngineDelegate? { get set }
+    /// The microphone has heard something above the noise floor during the
+    /// gesture currently in flight.
+    ///
+    /// This is what tells a chord from a dictation. The gesture machine cannot
+    /// answer it — 130 ms after the trigger goes down it reports `.holding`
+    /// whether the user is speaking or reaching for another key — and a clock
+    /// cannot answer it either: measured on this Mac, a two-key reach from right
+    /// Option to Delete takes over a second, which is well inside the time a
+    /// short dictation takes. Only the audio knows.
+    func noteSpeechHeard()
     /// Returns false if the tap could not be installed; the delegate gets the reason.
     @discardableResult func start() -> Bool
     func stop()

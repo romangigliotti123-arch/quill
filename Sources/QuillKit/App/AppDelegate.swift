@@ -13,6 +13,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// that the caret has moved.
     private var undo: InsertionUndo?
 
+    /// The live record, reachable by the rehearsal hook in main.swift. Nothing in
+    /// the app reads it; it exists so the undo path can be driven against a real
+    /// window without speaking into a microphone.
+    public private(set) static var sharedUndo: InsertionUndo?
+
     public override init() { super.init() }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
@@ -41,6 +46,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let undo = InsertionUndo()
         undo.beginWatching()
         self.undo = undo
+        AppDelegate.sharedUndo = undo
 
         // Transforms, connected at last.
         //

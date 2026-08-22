@@ -27,17 +27,28 @@ public enum UndoChord {
     /// How long after the trigger went down a ⌫ can still be the other half of a
     /// chord rather than a key pressed during a dictation.
     ///
-    /// The arm delay is 120 ms, and a deliberate two-key reach — thumb on right
-    /// Option, finger up to Delete — takes longer than that more often than not.
-    /// Without this the feature fires or does not fire depending on how fast the
-    /// user chords, which reads as "it works sometimes". Above it, nothing: 400 ms
-    /// of held trigger with a ⌫ at the end is not a sentence anyone was speaking.
-    public static let chordWindow: TimeInterval = 0.4
+    /// A backstop, not the test.
+    ///
+    /// The question in `.holding` is "is the user speaking, or reaching for the
+    /// other half of a chord", and the honest answer to it is `heardSpeech` —
+    /// whether the microphone has picked anything up. A clock was tried first and
+    /// the measurement killed it: driving the real chord through the real tap,
+    /// with a 500 ms sleep between the two keys, the ⌫ arrived 1.075 s after the
+    /// trigger went down. A human reaching from right Option at the bottom right
+    /// to Delete at the top right does not beat a shell script. Any window a
+    /// careful press falls outside of turns the feature back into "sometimes",
+    /// which is the report.
+    ///
+    /// So this only catches the case where the audio never reports at all — a
+    /// dead microphone, a device that went away — and it is set well beyond any
+    /// reach and well inside a real dictation.
+    public static let chordWindow: TimeInterval = 5
 
     public static func claims(keyCode: UInt16,
                               flags: CGEventFlags,
                               gesture: HotkeyStateMachine.State,
                               triggerHeldFor: TimeInterval?,
+                              heardSpeech: Bool,
                               hasInsertion: Bool) -> Bool {
         guard hasInsertion else { return false }
         guard keyCode == Self.keyCode else { return false }
@@ -64,9 +75,11 @@ public enum UndoChord {
             // few hundred milliseconds it means "the trigger is down", which is
             // exactly what the first half of ⌥⌫ looks like.
             //
-            // Past the window the original reading holds: the user is speaking, a
-            // ⌫ means "cancel this dictation", and claiming it would delete the
-            // previous sentence as well as binning the current one.
+            // Once anything has been heard the original reading holds: the user
+            // is speaking, a ⌫ means "cancel this dictation", and claiming it
+            // would delete the previous sentence as well as binning the current
+            // one.
+            guard !heardSpeech else { return false }
             guard let triggerHeldFor, triggerHeldFor <= chordWindow else { return false }
             return true
         case .handsFree:

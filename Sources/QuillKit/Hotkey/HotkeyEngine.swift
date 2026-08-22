@@ -83,6 +83,10 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     /// store's change notification.
     private var transformChords: [Transform] = []
     private let chordLock = NSLock()
+    /// Set by the coordinator the moment the microphone hears anything above the
+    /// noise floor, cleared on every fresh trigger press. Read on the tap thread,
+    /// so it is one lock and one Bool.
+    private var heardSpeech = false
     private var transformsObserver: NSObjectProtocol?
 
     /// When the bound trigger physically went down, or nil if it is up.
@@ -137,6 +141,12 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
         let chords = TransformStore.shared.enabled.filter { $0.hotkey != nil }
         chordLock.lock()
         transformChords = chords
+        chordLock.unlock()
+    }
+
+    public func noteSpeechHeard() {
+        chordLock.lock()
+        heardSpeech = true
         chordLock.unlock()
     }
 
@@ -417,6 +427,11 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
                 // how long ago the user's thumb landed, and the machine has
                 // already moved to .holding by then.
                 triggerDownAt = isDown ? Self.now() : nil
+                if isDown {
+                    chordLock.lock()
+                    heardSpeech = false
+                    chordLock.unlock()
+                }
                 apply(machine.handle(isDown ? .triggerDown(isolated: isolated) : .triggerUp,
                                      at: Self.now()))
             } else if keyCode == toggle.keyCode {
@@ -468,9 +483,20 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             }
 
             let heldFor = triggerDownAt.map { Self.now() - $0 }
+            chordLock.lock()
+            let spoken = heardSpeech
+            chordLock.unlock()
+            if UndoTrace.on, keyCode == UndoChord.keyCode {
+                let masked = String(flags.intersection(HotkeyBinding.chordMask).rawValue, radix: 16)
+                let held = heldFor.map { String(format: "%.3f", $0) } ?? "nil"
+                UndoTrace.say("⌫ seen: flags=\(String(flags.rawValue, radix: 16)) masked=\(masked) "
+                    + "wanted=\(String(UndoChord.flags.rawValue, radix: 16)) gesture=\(machine.state) "
+                    + "heldFor=\(held) heardSpeech=\(spoken) armed=\(undo?.isArmed ?? false)")
+            }
             if let undo, UndoChord.claims(keyCode: keyCode, flags: flags,
                                           gesture: machine.state,
                                           triggerHeldFor: heldFor,
+                                          heardSpeech: spoken,
                                           hasInsertion: undo.isArmed) {
                 // The machine still sees it. In `.armed` there is a speculative
                 // capture open — the Option of the chord opened it — and it has to
@@ -478,6 +504,7 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
                 // gesture.
                 apply(machine.handle(.keyDown(keyCode: keyCode, isBare: isBare),
                                      at: Self.now()))
+                UndoTrace.say("chord CLAIMED — swallowed, asking for the undo")
                 undo.requestUndo()
                 return true
             }
@@ -486,7 +513,7 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             // back. Blunt on purpose: working out which keys are harmless is a
             // list that would be wrong the first time an app did something
             // clever, and being wrong here deletes the user's own words.
-            undo?.discard()
+            undo?.discard(because: "a keystroke reached the app (keyCode \(keyCode))")
             return apply(machine.handle(.keyDown(keyCode: keyCode, isBare: isBare),
                                         at: Self.now()))
 

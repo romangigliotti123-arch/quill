@@ -136,11 +136,15 @@ backspaced over your words. `undo?.discard()` now runs on every blind path;
 - **No note editor.** Scratchpad lists notes and opens one for reading. Clicking
   copies, because that is the only honest thing a click can do until there is
   somewhere to type.
-- **The ⌥⌫ hole that could not be closed:** when Accessibility declines to say
-  what is behind the caret — Electron, web views, most terminals, i.e. much of
-  where Roman actually dictates — the chord falls back to the disturbance guards
-  and deletes anyway. Pinned by `accessibilityDecliningFallsBackToTheDisturbanceGuards`.
-  One line makes it strict instead: `case .unknown` returns `putBack()`.
+- ~~**The ⌥⌫ hole that could not be closed**~~ — closed 22 Aug, and the strict
+  version turned out to be the bug. A probe (`QUILL_CARET_PROBE=1`) asked every
+  running app what it exposes: Ghostty answers `AXTextArea` with a caret pinned
+  at 0 on an attribute that is not even settable, Chrome an `AXGroup` with no
+  caret, VS Code no focused element — TextEdit alone answers exactly. Three of
+  four, and the three he dictates into. Now: a caret at 0 is read as "no caret"
+  rather than "the field is too short", and such a field is verified against its
+  visible text instead (`AXValue`, whitespace- and frame-insensitive), which
+  works in a terminal. `QUILL_LOG_UNDO=1` traces every decision on the path.
 - **Live model benches** still want a rested endpoint.
 
 ## How to see it

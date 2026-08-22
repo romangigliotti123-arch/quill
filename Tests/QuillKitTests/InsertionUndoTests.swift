@@ -166,7 +166,7 @@ private let putBack = "chord(\(UndoChord.keyCode),\(UndoChord.flags.rawValue))"
     // The first backspace would delete the selection whole, so every count after
     // it is wrong. Accessibility can see this; the disturbance guards cannot.
     let keys = Recorder()
-    let undo = store(keys, caret: FixedCaret(reading: .unsafe))
+    let undo = store(keys, caret: FixedCaret(reading: .selection))
     undo.record("Hello there", pid: ourApp)
 
     #expect(!undo.undoLastInsertion())
@@ -197,23 +197,52 @@ private let putBack = "chord(\(UndoChord.keyCode),\(UndoChord.flags.rawValue))"
 }
 
 @MainActor
-@Test func accessibilityDecliningRefusesRatherThanTrustingTheGuards() {
-    // Roman's call, asked directly and answered: when the field will not confirm
-    // our sentence is still behind the caret, Quill does not delete.
+@Test func accessibilityDecliningFallsBackToTheDisturbanceGuards() {
+    // Asked directly, answered twice, and the second answer is the one that
+    // stands — because the first one was measured.
     //
-    // This is the ordinary answer in Electron apps, web views and most terminals,
-    // so the visible consequence is that ⌥⌫ in those apps now always deletes a
-    // word, exactly as it did before Quill existed. That is the price of never
-    // backspacing over text somebody wrote themselves in a document Quill cannot
-    // read back — the disturbance guards cannot see an app that rewrote the text
-    // on its own, and not firing costs one gesture where firing wrongly costs a
-    // sentence.
+    // Strict was the first call: if the field will not confirm our sentence is
+    // behind the caret, do not delete. Then a probe asked every app running on
+    // this Mac what it exposes. Ghostty: AXTextArea, caret pinned at 0 forever.
+    // Chrome: AXGroup, no caret. VS Code: no focused element at all. TextEdit:
+    // exact. Three of four, and the three he actually dictates into — so strict
+    // did not make ⌥⌫ careful, it made it not exist, while looking identical to
+    // a bug. His report, in full: "the option delete doesnt work".
+    //
+    // What is left to stand on is the record still being armed, which is more
+    // than it sounds: every keystroke, click, app switch, blind spell of the tap
+    // and start of a dictation throws it away.
     let keys = Recorder()
     let undo = store(keys, caret: FixedCaret(reading: .unknown))
     undo.record("Hello there", pid: ourApp)
 
+    #expect(undo.undoLastInsertion())
+    #expect(keys.actions == ["backspace(11)"])
+}
+
+@MainActor
+@Test func aCaretPinnedAtZeroIsNotEvidenceOfAnything() {
+    // A terminal reports its caret at 0 whether or not there is anything on the
+    // line, so reading that as "the field holds less than our sentence" turns
+    // every terminal into a permanent refusal. Past zero the number does mean
+    // something, which is the test below this one.
+    let reader = FixedCaret(reading: .unknown)
+    _ = reader
+    let keys = Recorder()
+    let undo = store(keys, caret: FixedCaret(reading: .unknown))
+    undo.record("Hello there", pid: ourApp)
+    #expect(undo.undoLastInsertion())
+}
+
+@MainActor
+@Test func aFieldHoldingLessThanOurSentenceIsStillRefused() {
+    // The other side: this is an app that DOES answer, telling us our sentence
+    // is not what is behind the caret. Nothing about the fallback may weaken it.
+    let keys = Recorder()
+    let undo = store(keys, caret: FixedCaret(reading: .shorterThanOurs))
+    undo.record("Hello there", pid: ourApp)
+
     #expect(!undo.undoLastInsertion())
-    // The keystroke is handed back, so the app still deletes a word.
     #expect(keys.actions == [putBack])
 }
 
@@ -233,9 +262,11 @@ private func claims(_ keyCode: UInt16,
                     _ flags: CGEventFlags,
                     _ gesture: HotkeyStateMachine.State = .idle,
                     heldFor: TimeInterval? = nil,
+                    heardSpeech: Bool = false,
                     insertion: Bool = true) -> Bool {
     UndoChord.claims(keyCode: keyCode, flags: flags, gesture: gesture,
-                     triggerHeldFor: heldFor, hasInsertion: insertion)
+                     triggerHeldFor: heldFor, heardSpeech: heardSpeech,
+                     hasInsertion: insertion)
 }
 
 @Test func optionDeleteIsClaimedWhenThereIsSomethingToTakeBack() {
@@ -277,7 +308,7 @@ private func claims(_ keyCode: UInt16,
     // Mid-dictation a ⌫ means "bin this", which the state machine already
     // handles. Claiming it would bin the current sentence AND delete the
     // previous one.
-    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 1.5))
+    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 1.5, heardSpeech: true))
     #expect(!claims(UndoChord.keyCode, .maskAlternate, .handsFree, heldFor: 0.05))
 }
 
@@ -291,10 +322,19 @@ private func claims(_ keyCode: UInt16,
     // another. Working or not working depending on how fast you chord reads as
     // "it just doesn't work sometimes", which is the report.
     #expect(claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 0.30))
-    #expect(claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: UndoChord.chordWindow))
+    // The number that killed the clock. Driving the real chord through the real
+    // tap with a 500 ms sleep between the two keys, the ⌫ arrived 1.075 s after
+    // the trigger went down — right Option is at the bottom right and Delete at
+    // the top right, and a human hand does not beat a shell script. Every window
+    // narrow enough to protect a dictation is narrow enough to break the chord.
+    #expect(claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 1.075))
+    #expect(claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 3.0))
 
-    // And the far side of the window is a dictation, not a chord.
-    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 0.41))
+    // What actually separates the two: whether the microphone heard anything.
+    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 0.30, heardSpeech: true))
+
+    // The backstop, for a microphone that never reports at all.
+    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 6.0))
 
     // No trigger held at all: the machine is in .holding but the key is up, which
     // cannot be half of a chord. Refuse rather than guess.
@@ -366,6 +406,7 @@ private final class SpyUndo: InsertionUndoing, @unchecked Sendable {
     func discard() {
         lock.lock(); discards += 1; armed = false; lock.unlock()
     }
+    func discard(because reason: String) { discard() }
     func requestUndo() {}
 }
 
@@ -462,4 +503,50 @@ private final class NoOverlay: OverlayPresenting, @unchecked Sendable {
     #expect(undo.undoLastInsertion())
     #expect(keys.actions.contains("backspace(18)"))
     coordinator.hotkeyCancelled(userKeystroke: "")
+}
+
+// MARK: - Verifying against a screen instead of a caret
+
+@MainActor
+@Test func aTerminalIsVerifiedAgainstItsScreenRatherThanItsCaret() {
+    // What Ghostty actually answers, measured: AXTextArea, AXNumberOfCharacters
+    // in the thousands, AXValue carrying the live screen — and
+    // AXSelectedTextRange returning (0,0) every time on an attribute that is not
+    // settable. A caret at index 0 of a live two-thousand-character buffer is a
+    // stub, not a caret, and reading it as "the field holds less than our
+    // sentence" made ⌥⌫ impossible in the one app Roman dictates into.
+    //
+    // The screen is better evidence than the disturbance guards, not worse: if
+    // the sentence is on it, it is on it.
+    let keys = Recorder()
+    let screen = "❯ claude\n  Hello there Roman.\n"
+    let undo = store(keys, caret: FixedCaret(reading: .screenOnly(screen)))
+    undo.record("Hello there Roman.", pid: ourApp)
+
+    #expect(undo.undoLastInsertion())
+    #expect(keys.actions == ["backspace(18)"])
+}
+
+@MainActor
+@Test func aSentenceNoLongerOnTheScreenIsNotDeleted() {
+    let keys = Recorder()
+    let undo = store(keys, caret: FixedCaret(reading: .screenOnly("❯ something else entirely")))
+    undo.record("Hello there Roman.", pid: ourApp)
+
+    #expect(!undo.undoLastInsertion())
+    #expect(keys.actions == [putBack])
+}
+
+@Test func theScreenComparisonSurvivesWrappingAndAFrame() {
+    // A terminal wraps: the sentence goes in as one line and comes back broken
+    // across the width of the window, often with a box-drawing frame down the
+    // side. Comparing the characters that carry meaning and ignoring the ones
+    // that carry layout is the only comparison that survives that.
+    let wrapped = "╭────────────╮\n│ > Hello there\n│   Roman.     │\n╰────────────╯"
+    #expect(InsertionUndo.screen(wrapped, shows: "Hello there Roman."))
+
+    // And it must still be able to say no.
+    #expect(!InsertionUndo.screen(wrapped, shows: "Hello there Carlo."))
+    #expect(!InsertionUndo.screen("", shows: "Hello there Roman."))
+    #expect(!InsertionUndo.screen("anything", shows: ""))
 }

@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import QuillKit
 
 // Thin executable. Everything real lives in QuillKit so it can be tested
@@ -10,6 +11,110 @@ import QuillKit
 // shell's Accessibility grant and will cheerfully report that everything works.
 if ProcessInfo.processInfo.environment["QUILL_DIAGNOSE"] == "1" {
     Diagnostics.runAndExit()
+}
+
+// Undo rehearsal: QUILL_UNDO_REHEARSE=1 types a known sentence into whatever is
+// frontmost eight seconds after launch and arms the undo record against it,
+// exactly as a finished dictation does.
+//
+// Because the undo path cannot otherwise be exercised without speaking into a
+// microphone, and "does ⌥⌫ actually delete in Ghostty" is not a question the
+// test suite can answer — the suite stubs the caret reader, which is precisely
+// the part that behaves differently in every app. This drives the real
+// SyntheticKeyboard and the real AccessibilityCaretReader against a real window.
+//
+// Runs alongside the app rather than instead of it, so the event tap is live and
+// the chord can be pressed for real.
+if ProcessInfo.processInfo.environment["QUILL_UNDO_REHEARSE"] == "1" {
+    let sentence = ProcessInfo.processInfo.environment["QUILL_UNDO_TEXT"]
+        ?? "Hello there Roman."
+    DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+        let keyboard = SystemKeystrokes()
+        _ = keyboard.type(sentence)
+        // Same order as the real insert path: type first, record after, against
+        // whoever is frontmost now.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            AppDelegate.sharedUndo?.record(sentence)
+            UndoTrace.say("REHEARSAL armed against the frontmost app")
+        }
+    }
+}
+
+// Caret probe: QUILL_CARET_PROBE=1 asks every running app what Accessibility
+// says is behind its caret, and prints the answer.
+//
+// This is the instrument for "⌥⌫ doesn't work". The chord refuses to delete
+// unless the focused field confirms Quill's own sentence is still sitting behind
+// the caret, and `.unknown` — Accessibility declining to answer — is the
+// ordinary reply from Electron apps, web views and most terminals. Which is a
+// large share of where anyone actually dictates. From the outside a refusal is
+// indistinguishable from the feature not existing, so the only way to know which
+// apps it can work in is to ask them, one at a time, and read the answers.
+//
+// Must run inside the app bundle: a binary started from a shell inherits the
+// shell's Accessibility grant and will report success for everybody.
+if ProcessInfo.processInfo.environment["QUILL_CARET_PROBE"] == "1" {
+    // Step by step, because the single three-state answer hides WHICH step
+    // failed — and the steps fail for completely different reasons in different
+    // apps. `.unsafe` from an unfocused app only means its caret is at zero;
+    // `.unknown` can mean no focused element, no selected-text range, or —
+    // the interesting one — a field that reports a range but does not implement
+    // AXStringForRange, which is common and which no amount of waiting fixes.
+    func inspect(_ pid: pid_t) -> String {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+                app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID()
+        else { return "no focused element" }
+        let element = focusedRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.5)
+
+        var roleRef: CFTypeRef?
+        _ = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        let role = (roleRef as? String) ?? "?"
+
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+                element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID()
+        else { return "\(role): no AXSelectedTextRange" }
+        var caret = CFRange()
+        guard AXValueGetValue(rangeRef as! AXValue, .cfRange, &caret) else {
+            return "\(role): AXSelectedTextRange is not a range"
+        }
+
+        // The step the three-state answer never reaches unless the caret happens
+        // to be far enough along. Ask for one character, whatever is there.
+        let want = min(1, caret.location)
+        var wanted = CFRange(location: caret.location - want, length: want)
+        var stringSupport = "n/a (caret at 0)"
+        if want > 0, let parameter = AXValueCreate(.cfRange, &wanted) {
+            var textRef: CFTypeRef?
+            let status = AXUIElementCopyParameterizedAttributeValue(
+                element, kAXStringForRangeParameterizedAttribute as CFString, parameter, &textRef)
+            if status == .success, textRef as? String != nil {
+                stringSupport = "AXStringForRange ✅"
+            } else {
+                stringSupport = "AXStringForRange ❌ (\(status.rawValue))"
+            }
+        }
+        return "\(role): caret at \(caret.location) len \(caret.length), \(stringSupport)"
+    }
+
+    var lines = ["app                          pid     what Accessibility exposes"]
+    for app in NSWorkspace.shared.runningApplications
+        where app.activationPolicy == .regular && app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+        let name = (app.localizedName ?? "?").padding(toLength: 28, withPad: " ", startingAt: 0)
+        lines.append("\(name) \(String(app.processIdentifier).padding(toLength: 7, withPad: " ", startingAt: 0)) \(inspect(app.processIdentifier))")
+    }
+    let out = lines.joined(separator: "\n") + "\n"
+    let path = NSString(string: "~/Library/Application Support/Quill/caret-probe.txt").expandingTildeInPath
+    try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
+                                             withIntermediateDirectories: true)
+    try? out.write(toFile: path, atomically: true, encoding: .utf8)
+    exit(0)
 }
 
 // Cleanup probe: QUILL_CLEAN_TEXT="..." prints the cleaned form and exits, so
