@@ -601,6 +601,7 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
 
         let tokens = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
         var out = tokens
+        var spelledOut: Set<Int> = []
 
         for i in tokens.indices {
             let token = tokens[i]
@@ -631,12 +632,12 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
             case .alwaysDigits:
                 guard let value = numberFromWords(word) else { continue }
                 out[i] = replacingWord(token, with: String(value))
+                spelledOut.insert(i)
             }
         }
 
-        var joined = out.joined(separator: " ")
-        if style == .alwaysDigits { joined = collapseSpokenTens(in: joined) }
-        return joined
+        if style == .alwaysDigits { out = collapseSpokenTens(in: out, writtenBy: spelledOut) }
+        return out.joined(separator: " ")
     }
 
     /// Anything carrying structure — an address, a version, a time, money, a URL,
@@ -736,12 +737,38 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
     /// "20 5 people" back into "25 people", after always-digits turned each word of
     /// "twenty five" into its own numeral. Only joins a round ten to a single unit,
     /// which is the only pair that is one spoken number rather than two.
-    private static func collapseSpokenTens(in text: String) -> String {
-        text.replacingOccurrences(
-            of: "\\b([2-9])0 ([1-9])\\b",
-            with: "$1$2",
-            options: .regularExpression
-        )
+    ///
+    /// Works on the tokens, and only on the two this pass just wrote itself.
+    ///
+    /// It used to run `\b([2-9])0 ([1-9])\b` over the joined sentence, after the
+    /// loop above had carefully skipped every structural token — which put it
+    /// outside the only guard in this function. A word boundary sits after a colon
+    /// and after a dot, so "the 10:30 5 minutes early" became "the 10:35 minutes
+    /// early", and "1.20 5 times" became "1.25 times": his own times and version
+    /// numbers, the exact tokens `isStructural` exists to protect, silently
+    /// rewritten one step after being protected.
+    ///
+    /// Requiring both halves to be ones this pass spelled out is the tighter
+    /// statement of the same intent — the split it repairs is one it caused, so
+    /// digits that were already digits in the transcript are left as dictated.
+    private static func collapseSpokenTens(in tokens: [String], writtenBy spelledOut: Set<Int>) -> [String] {
+        guard !spelledOut.isEmpty else { return tokens }
+        var out: [String] = []
+        out.reserveCapacity(tokens.count)
+        var i = 0
+        while i < tokens.count {
+            let next = i + 1
+            if spelledOut.contains(i), spelledOut.contains(next),
+               let tens = Int(tokens[i]), tens >= 20, tens <= 90, tens % 10 == 0,
+               let unit = Int(bareWord(tokens[next])), (1...9).contains(unit) {
+                out.append(replacingWord(tokens[next], with: "\(tens + unit)"))
+                i += 2
+                continue
+            }
+            out.append(tokens[i])
+            i += 1
+        }
+        return out
     }
 
     // MARK: - Steps, each independently testable

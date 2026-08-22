@@ -97,17 +97,33 @@ public enum ContextProjection {
     /// So the rule is spelled out instead of trusted: same stem, and the only
     /// thing that may differ is an ending English actually uses.
     ///
-    /// The stem floor is three characters and the shorter word must be at least
-    /// four, which is what stops the pairs that would otherwise sail through:
-    /// "the"/"they", "a"/"as", "is"/"it", "he"/"her". Those are function words,
-    /// they are the most common words he says, and a wrong swap in one is both
-    /// invisible and meaning-changing.
+    /// The stem floor is three characters, and the pairs that would otherwise sail
+    /// through on length alone — "the"/"they", "he"/"her", "our"/"ours" — are shut
+    /// out by name instead, in `shortNonStems`. Those are function words, they are
+    /// the most common words he says, and a wrong swap in one is both invisible and
+    /// meaning-changing. A four-character floor would also close them and would
+    /// take "use"/"used" and "fix"/"fixed" with it, which is the repair this pass
+    /// exists to make.
     static func sameStem(_ original: String, _ proposed: String) -> Bool {
         let a = HomophonePairs.normalise(original)
         let b = HomophonePairs.normalise(proposed)
         guard a != b, a.count >= 4 || b.count >= 4 else { return false }
         let (shorter, longer) = a.count <= b.count ? (a, b) : (b, a)
         guard shorter.count >= 3, longer.count - shorter.count <= 3 else { return false }
+        // Closed by name, not by length.
+        //
+        // The floor is three, and the doc above used to claim four and credit it
+        // with blocking "the" → "they". It does not: both clear a three-letter
+        // floor, "they" is "the" plus a listed inflection, and the swap was
+        // allowed. So were "our" → "ours" and "he" → "her".
+        //
+        // Raising the floor to four would close those and take every legitimate
+        // three-letter stem with them — "use"/"used", "ask"/"asked",
+        // "fix"/"fixed", "add"/"added", "bug"/"bugs", "app"/"apps" — which is the
+        // repair class this pass exists for on his own vocabulary. And the tests
+        // would not have noticed, because none of them covers a three-letter stem.
+        guard !shortNonStems.contains(shorter), !shortNonStems.contains(longer)
+        else { return false }
 
         // "moved" from "move", "sites" from "site", "running" from "run".
         if longer.hasPrefix(shorter) {
@@ -122,6 +138,18 @@ public enum ContextProjection {
         }
         return false
     }
+
+    /// Short function words that are prefixes of other real words.
+    ///
+    /// These are the most common words anyone says, so a swap between two of them
+    /// is both the likeliest to fire and the most damaging when it does — "the"
+    /// becoming "they" changes the sentence and reads as though the user said it.
+    /// `functionWords` is close but misses "our", "ours", "his" and "she", which
+    /// leaves the most model-realistic pair of the lot ("our" → "ours") open.
+    static let shortNonStems: Set<String> = [
+        "the", "then", "they", "her", "hers", "his", "she", "our", "ours",
+        "him", "its", "for", "not", "was", "are", "out", "you", "who",
+    ]
 
     /// Endings that make the same word rather than a different one. Deliberately
     /// short: every entry here is a swap the projection will permit without ever

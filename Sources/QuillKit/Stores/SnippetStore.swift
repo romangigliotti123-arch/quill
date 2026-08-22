@@ -150,10 +150,19 @@ public final class SnippetStore: @unchecked Sendable {
     public func upsert(_ snippet: Snippet) -> Snippet {
         queue.sync {
             if let index = items.firstIndex(where: { $0.id == snippet.id }) {
-                items[index] = snippet
-            } else {
-                items.append(snippet)
+                // The editor's copy of the counters is a snapshot from whenever
+                // the row was loaded, and a dictation may have fired the snippet
+                // since. Writing it back whole rolls the count backwards — so the
+                // editor owns the text and the store owns the counters, which is
+                // what `TransformStore.upsert` already does.
+                var merged = snippet
+                merged.useCount = max(items[index].useCount, snippet.useCount)
+                merged.lastUsed = [items[index].lastUsed, snippet.lastUsed].compactMap { $0 }.max()
+                items[index] = merged
+                persist()
+                return merged
             }
+            items.append(snippet)
             persist()
             return snippet
         }

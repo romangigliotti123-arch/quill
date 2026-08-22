@@ -825,18 +825,32 @@ public final class StyleStore: @unchecked Sendable {
     private let url: URL?
     private let queue = DispatchQueue(label: "com.romangigliotti.quill.style")
     private var current: StyleProfile
+    /// Set when style.json exists and will not decode. While it is set the store
+    /// never writes, so a damaged file is never overwritten.
+    private var loadFailed = false
 
     public init(url: URL = StyleStore.defaultURL) {
         self.url = url
-        if let data = try? Data(contentsOf: url) {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            current = (try? decoder.decode(StyleProfile.self, from: data)) ?? .romanDefault
-        } else {
+        let decoder = JSONDecoder()
+        // Without this `lastLearned` fails to decode and every real profile is
+        // misread as damaged — which would make the guard below fire constantly.
+        decoder.dateDecodingStrategy = .iso8601
+        // Three states, not two. The fifth store to make the same mistake: "no
+        // file yet" and "a file I could not read" came back the same, and they
+        // call for opposite behaviour. Here the fallback is not empty but Roman's
+        // defaults, so the damage looked like a factory reset rather than a
+        // deletion — and the next preset change wrote it over the top.
+        switch StoreFile.read(StyleProfile.self, from: url, decoder: decoder) {
+        case .missing:
             // First run seeds Roman's defaults rather than an empty profile, for
             // the same reason SnippetStore seeds: a feature that does nothing
             // until it is configured is a feature nobody configures.
             current = .romanDefault
+        case .decoded(let stored):
+            current = stored
+        case .unreadable:
+            current = .romanDefault
+            loadFailed = true
         }
     }
 
@@ -908,6 +922,9 @@ public final class StyleStore: @unchecked Sendable {
     }
 
     private func persist() {
+        // Never over a file we could not read. `StoreFile` has already kept a
+        // copy of it beside the original.
+        guard !loadFailed else { return }
         guard let url else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

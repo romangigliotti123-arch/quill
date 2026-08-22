@@ -103,6 +103,26 @@ public enum Diagnostics {
         return true
     }
 
+    /// Whether this process was started by `open` rather than run from a shell.
+    ///
+    /// It used to test `QUILL_DIAGNOSE == "1"` — which is the flag that asks for
+    /// this report in the first place, so it was always set, and the line always
+    /// read "open --env (correct)" including on the exact run it exists to catch.
+    /// The report that only ever answers one way is worse than no report: it
+    /// certifies the run whose numbers are the ones that lie.
+    ///
+    /// `open` hands the app to launchd, which is pid 1 and stays the parent. A
+    /// shell stays the parent of what it runs. That is the difference, and it is
+    /// the difference that decides whose Accessibility grant is being measured.
+    static var launchedViaOpen: Bool { getppid() == 1 }
+
+    static var launchDescription: String {
+        if launchedViaOpen { return "open (correct — this report is about Quill)" }
+        let parent = ProcessInfo.processInfo.environment["__CFBundleIdentifier"]
+        let inherited = parent == Bundle.main.bundleIdentifier ? "" : " — inherited from pid \(getppid())"
+        return "run directly (WRONG\(inherited))"
+    }
+
     public static func runAndExit() -> Never {
         var out: [String] = []
         func say(_ s: String) { out.append(s) }
@@ -113,7 +133,18 @@ public enum Diagnostics {
         let bundle = Bundle.main
         say("bundle id      : \(bundle.bundleIdentifier ?? "nil")")
         say("bundle path    : \(bundle.bundlePath)")
-        say("launched via   : \(ProcessInfo.processInfo.environment["QUILL_DIAGNOSE"] == "1" ? "open --env (correct)" : "unknown")")
+        say("launched via   : \(launchDescription)")
+        if !launchedViaOpen {
+            say("")
+            say("⚠️  EVERYTHING BELOW THIS LINE IS UNTRUSTWORTHY.")
+            say("    This process was not started by `open`, so it inherited the")
+            say("    Accessibility grant of whatever started it — usually a terminal,")
+            say("    which has one. The permission and tap results below will say")
+            say("    granted and created whether or not Quill itself can do either.")
+            say("    Re-run it the only way that measures Quill:")
+            say("")
+            say("      open -a \(bundle.bundlePath) --env QUILL_DIAGNOSE=1")
+        }
         say("")
 
         say("PERMISSIONS")

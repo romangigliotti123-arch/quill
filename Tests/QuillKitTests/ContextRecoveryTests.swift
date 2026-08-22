@@ -140,6 +140,24 @@ private func project(_ model: String, onto input: String) -> String? {
     #expect(!ContextProjection.sameStem("he", "her"))
     #expect(!ContextProjection.sameStem("i", "in"))
     #expect(!ContextProjection.sameStem("on", "one"))
+
+    // The ones the pairs above did not actually cover. Every case in the block
+    // above is refused by a rule other than the one the test name claims: "they"
+    // because "y" is not an inflection, and the rest because they are under the
+    // three-character floor. Take out the function-word set and these four still
+    // pass, because "n" and "s" are both listed inflections and every left-hand
+    // side here clears the floor.
+    #expect(!ContextProjection.sameStem("the", "then"))
+    #expect(!ContextProjection.sameStem("our", "ours"))
+    #expect(!ContextProjection.sameStem("her", "hers"))
+    #expect(!ContextProjection.sameStem("was", "wasn"))
+
+    // And the reason the floor stays at three rather than moving to four: these
+    // are his own vocabulary, and they are the repair this pass exists to make.
+    #expect(ContextProjection.sameStem("use", "used"))
+    #expect(ContextProjection.sameStem("fix", "fixed"))
+    #expect(ContextProjection.sameStem("add", "added"))
+    #expect(ContextProjection.sameStem("bug", "bugs"))
 }
 
 @Test func aRewrittenSentenceIsStillRefusedOutright() {

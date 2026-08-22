@@ -196,10 +196,19 @@ private func scratchPasteboard() -> NSPasteboard {
     #expect(try String(contentsOf: transformsURL, encoding: .utf8) == "[{\"name\": ",
             "overwrote a damaged transforms file")
 
+    // Style — the fifth, and the one whose fallback is Roman's own defaults, so
+    // the damage read as a factory reset rather than a deletion.
+    let styleURL = dir.appendingPathComponent("style.json")
+    try Data("{\"preset\":".utf8).write(to: styleURL)
+    let style = StyleStore(url: styleURL)
+    style.setPreset(.technical)
+    #expect(try String(contentsOf: styleURL, encoding: .utf8) == "{\"preset\":",
+            "overwrote a damaged style file")
+
     // And a copy of what could not be read is kept, every time.
     let salvaged = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         .filter { $0.contains("unreadable") }
-    #expect(salvaged.count == 4, "kept \(salvaged.count) salvage copies, expected 4")
+    #expect(salvaged.count == 5, "kept \(salvaged.count) salvage copies, expected 5")
 }
 
 @Test func anAbsentFileIsStillJustAnAbsentFile() throws {

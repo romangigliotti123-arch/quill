@@ -375,7 +375,7 @@ public final class DictationCoordinator {
                     let cleaned = cleaner.cleanFast(rescued)
                     history.append(DictationRecord(
                         id: UUID(), date: Date(), rawText: rescued, insertedText: "",
-                        wordCount: cleaned.split(separator: " ").count,
+                        wordCount: cleaned.split(whereSeparator: \.isWhitespace).count,
                         inputDevice: self.capturedInputDevice,
                         timings: .init(timeToFirstWordMs: self.timeline.timeToFirstWordMs,
                                        finalToInsertedMs: nil,
@@ -383,10 +383,17 @@ public final class DictationCoordinator {
                                        audioDurationMs: self.timeline.audioDurationMs,
                                        usedThoroughCleanup: false,
                                        releaseToInsertedMs: nil)))
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(cleaned, forType: .string)
-                    overlay.show(.error("You started again before that finished — it is on your clipboard."))
-                    try? await Task.sleep(for: .milliseconds(1_800))
+                    // Only when there is something to put there. Cleanup can
+                    // reduce an utterance to nothing — a dictation that was
+                    // entirely filler — and the old code cleared the clipboard,
+                    // wrote "", and told the user their words were on it. They
+                    // lost whatever they had copied AND got nothing back.
+                    if !cleaned.isEmpty {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(cleaned, forType: .string)
+                        overlay.show(.error("You started again before that finished — it is on your clipboard."))
+                        try? await Task.sleep(for: .milliseconds(1_800))
+                    }
                 }
                 // Repaint regardless. An aborted speculation leaves nothing else
                 // to clear the HUD, and it would sit on "Transcribing" forever.
@@ -608,7 +615,7 @@ public final class DictationCoordinator {
                 date: Date(),
                 rawText: raw,
                 insertedText: final,
-                wordCount: final.split(separator: " ").count,
+                wordCount: final.split(whereSeparator: \.isWhitespace).count,
                 inputDevice: self.capturedInputDevice,
                 timings: .init(
                     timeToFirstWordMs: self.timeline.timeToFirstWordMs,

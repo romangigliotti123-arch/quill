@@ -93,6 +93,21 @@ private func words(_ s: String) -> String {
     #expect(digits("speaking of four men") == "speaking of 4 men")
     #expect(digits("twenty five people") == "25 people")
     #expect(digits("give me five minutes") == "give me 5 minutes")
+    #expect(digits("twenty five thirty six") == "25 36")
+}
+
+@Test func joiningATensAndAUnitCannotReachAStructuralToken() {
+    // The join that puts "twenty five" back together used to run as a regex over
+    // the finished sentence, one step after the loop had skipped every structural
+    // token — so it walked straight back into them. A word boundary sits after a
+    // colon and after a dot, which is all it took.
+    #expect(digits("the 10:30 5 minutes early") == "the 10:30 5 minutes early")
+    #expect(digits("version 1.20 5 times") == "version 1.20 5 times")
+    #expect(digits("call 555-20 5 back") == "call 555-20 5 back")
+
+    // And digits he actually dictated as digits are two numbers, not one. The
+    // split this repairs is one this pass caused; nothing else is its business.
+    #expect(digits("I bought 20 5 packs") == "I bought 20 5 packs")
 }
 
 @Test func alwaysWordsTurnsNumeralsIntoWords() {

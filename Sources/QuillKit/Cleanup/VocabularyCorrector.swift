@@ -226,6 +226,17 @@ public struct VocabularyCorrector: Sendable {
                 // anchored table had deliberately declined to touch it. The two
                 // layers were contradicting each other; they share the list now.
                 if spanCount > 1, FastCleaner.ambiguousSplits.contains(normalised) { continue }
+                // One word, spelled correctly, whose letters equal a one-word
+                // term. The only thing this branch can change about it is its
+                // case, and the pass's own rule is that a correctly spelled
+                // English word is presumed intentional — so "codesign" said as a
+                // word, or "sync", is left as the user wrote it.
+                //
+                // Scoped to one-word terms so the glued-name repair stays
+                // reachable: "whisperflow" → "Wispr Flow" has wordCount 2 and is
+                // untouched. `continue`, not `return nil`, so a longer term later
+                // in the list can still match this span.
+                if spanCount == 1, entry.wordCount == 1, Self.isRealEnglishWord(candidate) { continue }
                 return candidate == term ? nil : term
             }
             // Letters first, then sound.
