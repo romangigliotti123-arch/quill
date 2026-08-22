@@ -292,10 +292,21 @@ public final class DictationCoordinator {
         // whatever the user was in when they pressed the key, and it is the only
         // window it is ever safe to type into during this dictation.
         capturedContext = context()
-        // Whatever was inserted last is about to stop being the last thing at the
-        // caret — live typing starts writing into that same field, and a paste
-        // lands after it. Either way the record is stale from here on.
-        undo?.discard()
+        // The undo record is NOT thrown away here.
+        //
+        // It used to be, on the reasoning that live typing is about to write into
+        // the same field — true, but not yet true at this instant, and this
+        // instant is 120 ms after the trigger went down. The shipped trigger is
+        // right Option, so ⌥⌫ *is* a trigger press followed by a ⌫, and any hand
+        // slower than the arm delay arrived here to find the record already gone.
+        // The feature the record exists for was killed by its own gesture.
+        //
+        // It is discarded the moment text actually lands instead — the first
+        // live-typed character below, and the insert path, which either replaces
+        // the record with the new sentence or discards it. Every real keystroke,
+        // click, app switch and blind spell still throws it away, so the argument
+        // for overriding a standard binding is unchanged: what is gone is only the
+        // window where a dictation had started and written nothing.
         // Not while the previous dictation is still landing its text. This one
         // pastes on release instead, which arrives whole rather than interleaved.
         let live = liveTyper.begin()
@@ -813,6 +824,11 @@ extension DictationCoordinator: TranscriberDelegate {
                                                        context: capturedContext,
                                                        numbers: settings.numberStyle),
                          generation: liveGeneration)
+        // Here rather than at beginDictation(): this is the first moment anything
+        // is actually at the caret, and until it happens the previous insertion is
+        // still the last thing there and still safe to take back. See the note in
+        // beginDictation().
+        if liveTyper.hasTypedAnything { undo?.discard() }
     }
 
     public func transcriber(didFail error: Error) {

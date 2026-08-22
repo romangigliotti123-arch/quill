@@ -24,9 +24,20 @@ public enum UndoChord {
     /// Every clause is a way of not firing, which is the point: ⌥⌫ deletes the
     /// previous word in every macOS text field, and an override that fires when
     /// it should not is worse than no override at all.
+    /// How long after the trigger went down a ⌫ can still be the other half of a
+    /// chord rather than a key pressed during a dictation.
+    ///
+    /// The arm delay is 120 ms, and a deliberate two-key reach — thumb on right
+    /// Option, finger up to Delete — takes longer than that more often than not.
+    /// Without this the feature fires or does not fire depending on how fast the
+    /// user chords, which reads as "it works sometimes". Above it, nothing: 400 ms
+    /// of held trigger with a ⌫ at the end is not a sentence anyone was speaking.
+    public static let chordWindow: TimeInterval = 0.4
+
     public static func claims(keyCode: UInt16,
                               flags: CGEventFlags,
                               gesture: HotkeyStateMachine.State,
+                              triggerHeldFor: TimeInterval?,
                               hasInsertion: Bool) -> Bool {
         guard hasInsertion else { return false }
         guard keyCode == Self.keyCode else { return false }
@@ -46,10 +57,22 @@ public enum UndoChord {
             // Nobody starts a dictation and types a backspace inside the 120ms arm
             // delay, so this is the chord and not a gesture.
             return true
-        case .holding, .handsFree:
-            // The user is speaking. A ⌫ here means "cancel this dictation", which
-            // the state machine already handles, and claiming it would delete the
-            // PREVIOUS sentence as well as binning the current one.
+        case .holding:
+            // Same chord, slightly slower hand. The arm timer moved the machine on
+            // at 120 ms whether or not the user was doing anything, so "we are in
+            // .holding" does not yet mean "the user is speaking" — for the first
+            // few hundred milliseconds it means "the trigger is down", which is
+            // exactly what the first half of ⌥⌫ looks like.
+            //
+            // Past the window the original reading holds: the user is speaking, a
+            // ⌫ means "cancel this dictation", and claiming it would delete the
+            // previous sentence as well as binning the current one.
+            guard let triggerHeldFor, triggerHeldFor <= chordWindow else { return false }
+            return true
+        case .handsFree:
+            // Nothing is held here, so there is no chord to be halfway through —
+            // and unlike a hold, hands-free is expected to survive typing. A ⌫ is
+            // the user editing, in a field a live dictation is writing into.
             return false
         }
     }

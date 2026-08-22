@@ -232,8 +232,10 @@ private let putBack = "chord(\(UndoChord.keyCode),\(UndoChord.flags.rawValue))"
 private func claims(_ keyCode: UInt16,
                     _ flags: CGEventFlags,
                     _ gesture: HotkeyStateMachine.State = .idle,
+                    heldFor: TimeInterval? = nil,
                     insertion: Bool = true) -> Bool {
-    UndoChord.claims(keyCode: keyCode, flags: flags, gesture: gesture, hasInsertion: insertion)
+    UndoChord.claims(keyCode: keyCode, flags: flags, gesture: gesture,
+                     triggerHeldFor: heldFor, hasInsertion: insertion)
 }
 
 @Test func optionDeleteIsClaimedWhenThereIsSomethingToTakeBack() {
@@ -275,8 +277,31 @@ private func claims(_ keyCode: UInt16,
     // Mid-dictation a ⌫ means "bin this", which the state machine already
     // handles. Claiming it would bin the current sentence AND delete the
     // previous one.
-    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding))
-    #expect(!claims(UndoChord.keyCode, .maskAlternate, .handsFree))
+    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 1.5))
+    #expect(!claims(UndoChord.keyCode, .maskAlternate, .handsFree, heldFor: 0.05))
+}
+
+@Test func aSlowerHandStillGetsTheChord() {
+    // The bug this pins: right Option is the shipped trigger, so ⌥⌫ arms a
+    // speculation and the arm timer moves the machine to .holding after 120 ms —
+    // whether or not the user has done anything. A deliberate thumb-to-Delete
+    // reach routinely takes longer than that, and every one of those presses used
+    // to fall through as a plain ⌥⌫ word-delete that chewed one word off the end
+    // of Quill's own insertion, then discarded the record so the next press ate
+    // another. Working or not working depending on how fast you chord reads as
+    // "it just doesn't work sometimes", which is the report.
+    #expect(claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 0.30))
+    #expect(claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: UndoChord.chordWindow))
+
+    // And the far side of the window is a dictation, not a chord.
+    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 0.41))
+
+    // No trigger held at all: the machine is in .holding but the key is up, which
+    // cannot be half of a chord. Refuse rather than guess.
+    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: nil))
+
+    // Unchanged in every other state — the window only ever adds to .holding.
+    #expect(!claims(UndoChord.keyCode, .maskAlternate, .holding, heldFor: 0.30, insertion: false))
 }
 
 @Test func theChordSurvivesTheDictationKeyBeingAnOption() {
@@ -366,4 +391,75 @@ private final class SpyUndo: InsertionUndoing, @unchecked Sendable {
     engine.stop()
     #expect(spy.discardCount == 1, "stopping the engine left the chord armed")
     #expect(!spy.isArmed)
+}
+
+// MARK: - The record has to outlive its own gesture
+
+private final class SilentHotkey: HotkeyEngine, @unchecked Sendable {
+    weak var delegate: HotkeyEngineDelegate?
+    func start() -> Bool { true }
+    func stop() {}
+}
+
+private final class SaysNothing: Transcriber, @unchecked Sendable {
+    weak var delegate: TranscriberDelegate?
+    var onLevel: ((Float) -> Void)?
+    func prepare() async {}
+    func start() async throws {}
+    func stop() async -> String { "" }
+    func cancel() async {}
+}
+
+private final class AcceptsAnything: TextInserting, @unchecked Sendable {
+    func insert(_ text: String) -> InsertionResult { .inserted }
+}
+
+private final class NoOverlay: OverlayPresenting, @unchecked Sendable {
+    func show(_ state: OverlayState) {}
+    func hide() {}
+}
+
+@MainActor
+@Test func startingADictationDoesNotByItselfThrowTheRecordAway() async {
+    // The bug this pins, and it is the half that makes the chord work at all.
+    //
+    // The shipped trigger is right Option, so ⌥⌫ *is* a trigger press followed by
+    // a ⌫. beginDictation() used to discard the record — 120 ms after the trigger
+    // went down, before the ⌫ of the user's own chord could arrive. The feature
+    // was destroyed by the gesture that invokes it, and the arm delay decided
+    // whether it happened.
+    //
+    // Nothing has been typed at this point: no partial has arrived, no paste has
+    // landed, and the previous sentence is still the last thing at the caret and
+    // still exactly what "take that back" means.
+    let keys = Recorder()
+    let undo = store(keys, caret: FixedCaret.holding("Hello there Roman."))
+    undo.record("Hello there Roman.", pid: ourApp)
+    #expect(undo.isArmed)
+
+    let scratch = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-undo-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: scratch) }
+
+    let coordinator = DictationCoordinator(
+        hotkey: SilentHotkey(),
+        transcriber: SaysNothing(),
+        inserter: AcceptsAnything(),
+        overlay: NoOverlay(),
+        cleaner: FastCleaner(),
+        history: HistoryStore(url: scratch.appendingPathComponent("history.json")),
+        snippets: SnippetStore(inMemory: []),
+        settings: pasteOnlySettings(),
+        liveTyper: LiveTyper(keyboard: SilentKeystrokes()),
+        undo: undo,
+        context: { .prose }
+    )
+
+    coordinator.hotkeyMayBegin()
+    coordinator.hotkeyPressed()
+    #expect(undo.isArmed)
+    #expect(undo.undoLastInsertion())
+    #expect(keys.actions.contains("backspace(18)"))
+    coordinator.hotkeyCancelled(userKeystroke: "")
 }

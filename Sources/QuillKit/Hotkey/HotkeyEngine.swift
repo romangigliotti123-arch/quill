@@ -74,6 +74,13 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     /// immediately before the state machine runs, read when it says to cancel.
     private var pendingKeystroke: String = ""
 
+    /// When the bound trigger physically went down, or nil if it is up.
+    ///
+    /// Only `UndoChord` reads it. The gesture machine deliberately knows nothing
+    /// about wall-clock time except what it is handed, and this is a fact about
+    /// the user's hand rather than about the gesture.
+    private var triggerDownAt: TimeInterval?
+
     /// The characters a key event inserts, or "" for one that inserts nothing.
     /// An arrow key, a function key and a swallowed Escape all produce no text,
     /// and treating them as one character is how live typing ends up deleting a
@@ -377,6 +384,11 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
                     NSLog("[quill] trigger %@ isolated=%@ flags=%llx",
                           isDown ? "DOWN" : "up", isolated ? "yes" : "NO", flags.rawValue)
                 }
+                // Stamped from the physical key, not from the state the machine
+                // ends up in: what decides whether a ⌫ is the other half of ⌥⌫ is
+                // how long ago the user's thumb landed, and the machine has
+                // already moved to .holding by then.
+                triggerDownAt = isDown ? Self.now() : nil
                 apply(machine.handle(isDown ? .triggerDown(isolated: isolated) : .triggerUp,
                                      at: Self.now()))
             } else if keyCode == toggle.keyCode {
@@ -400,8 +412,10 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             // after the event is passed through it is gone and live typing needs
             // to be able to put it back.
             pendingKeystroke = Self.text(of: event)
+            let heldFor = triggerDownAt.map { Self.now() - $0 }
             if let undo, UndoChord.claims(keyCode: keyCode, flags: flags,
                                           gesture: machine.state,
+                                          triggerHeldFor: heldFor,
                                           hasInsertion: undo.isArmed) {
                 // The machine still sees it. In `.armed` there is a speculative
                 // capture open — the Option of the chord opened it — and it has to
