@@ -88,3 +88,58 @@ private final class SpyAudio: AudioSource, @unchecked Sendable {
         #expect(audio.startCount == 0, "audio started and then the start threw")
     }
 }
+
+// MARK: - A new dictation must not kill the previous one's analyser
+
+/// `start()` opens with `teardown(current: nil)`, which took whatever session was
+/// installed — and a session stays installed until the very END of
+/// `performStop`, through the short-utterance grace and the drain. So pressing
+/// the key again while the last sentence was still finalising cancelled its
+/// drain and finished its done-stream, `waitForDrain` resumed with no value,
+/// and `performStop` concluded the analyser had timed out.
+///
+/// The dictation was transcribed perfectly well. It was killed by the next
+/// keypress, reported as `finalizeTimedOut`, and handed back as "".
+@MainActor
+@Test func startingAgainDoesNotDestroyTheFinalisingDictation() async {
+    let audio = SpyAudio()
+    let spy = ErrorSpy()
+    let transcriber = SpeechAnalyzerTranscriber(audio: audio, finalizeTimeout: 2, prepareTimeout: 5)
+    transcriber.delegate = spy
+
+    // Best effort: without speech assets `start()` refuses before installing a
+    // session, and there is nothing to race. That is an environment, not a
+    // regression — so the assertion only runs when a session really existed.
+    guard (try? await transcriber.start()) != nil, audio.isRunning else { return }
+
+    // Stop and, while it is still finalising, start again — the exact shape of
+    // releasing the key and pressing it straight back.
+    async let stopped = transcriber.stop()
+    try? await Task.sleep(for: .milliseconds(40))
+    async let restarted: Void = { try? await transcriber.start() }()
+
+    let text = await stopped
+    await restarted
+
+    // The claim is not about the text — an empty room transcribes to nothing —
+    // it is that the stop completed on its own terms rather than being reported
+    // as a failure by the start that ran beside it.
+    #expect(spy.errors.isEmpty,
+            "the new dictation reported the old one as failed: \(spy.errors)")
+    _ = text
+    await transcriber.cancel()
+}
+
+
+/// Catches whatever the transcriber reports, so a manufactured failure is
+/// visible to a test rather than only to the coordinator.
+private final class ErrorSpy: TranscriberDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen: [String] = []
+    var errors: [String] { lock.lock(); defer { lock.unlock() }; return seen }
+
+    func transcriber(didProduce transcript: Transcript) {}
+    func transcriber(didFail error: Error) {
+        lock.lock(); seen.append("\(error)"); lock.unlock()
+    }
+}

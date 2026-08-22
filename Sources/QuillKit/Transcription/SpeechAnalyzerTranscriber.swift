@@ -389,6 +389,7 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         // on an already-finished analyzer this is a no-op.
         await withDeadline(1.0) { await session.analyzer.cancelAndFinishNow() }
 
+        var stillLive = false
         let text: String = withLock {
             // On a timeout the volatile hypothesis is the best text that exists;
             // handing back nothing because the analyzer went quiet is the worse bug.
@@ -400,12 +401,24 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
             // flight behind it — otherwise a start that was still awaiting when
             // this ran would go on to open the microphone afterwards.
             startGeneration += 1
+            // Whether this session was still the installed one. If something else
+            // has already removed it, "the analyzer did not finish" is a statement
+            // about a session we killed ourselves rather than about the analyzer,
+            // and reporting it makes the coordinator fail a dictation that was
+            // fine.
+            stillLive = (self.session === session)
             if self.session === session { self.session = nil }
             return settled
         }
 
         session.drain?.cancel()
-        if !settledInTime { report(TranscriptionError.finalizeTimedOut(seconds: finalizeTimeout), session: session.id) }
+        // Only when nobody else pulled the session out from under us. A false
+        // `finalizeTimedOut` reaches the coordinator's `fail()`, which puts
+        // "Quill could not finish that one" on screen for a dictation that was
+        // transcribed correctly.
+        if !settledInTime, stillLive {
+            report(TranscriptionError.finalizeTimedOut(seconds: finalizeTimeout), session: session.id)
+        }
         // Usually a duplicate of the last final the drain already sent — harmless,
         // because finals carry the whole utterance and a consumer replaces rather
         // than appends. It is not redundant when the watchdog fired: then this is
@@ -607,15 +620,38 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
     }
 
     private func teardown(current: Session?) async {
-        let session: Session? = withLock {
+        let (session, ownsIt): (Session?, Bool) = withLock {
             let live = current ?? self.session
             if current == nil { self.session = nil }
-            return live
+            // Whoever is finalising a session owns tearing it down. `performStop`
+            // does all four of the analyser-side steps below at the end of its own
+            // run; doing them from here as well destroys the dictation it is in
+            // the middle of finishing.
+            let mine = live.map { stopInFlight?.sessionID != $0.id } ?? false
+            return (live, mine)
         }
         guard let session else { return }
 
         audio.onBuffer = nil
         audio.stop()
+
+        // A NEW dictation must not kill the previous one's analyser.
+        //
+        // `start()` opens with `teardown(current: nil)`, which used to take
+        // whatever session was installed — and a session stays installed until
+        // the very end of `performStop`, through the short-utterance grace and the
+        // drain. So pressing the key again while the last sentence was still
+        // finalising cancelled its drain and finished its done-stream, which
+        // resumed `waitForDrain` with no value. `performStop` then concluded the
+        // analyser had timed out, reported `finalizeTimedOut`, and handed back "" —
+        // for a dictation that was transcribed perfectly well and was killed by
+        // the next keypress.
+        //
+        // The audio detach above still happens either way: `audioOwner` gates the
+        // part that matters, and the new dictation genuinely does take the
+        // microphone.
+        guard ownsIt else { return }
+
         session.inputs.finish()
         session.drain?.cancel()
         session.doneContinuation.finish()
