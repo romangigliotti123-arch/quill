@@ -1,5 +1,14 @@
 # Verified correctness bugs — deep hunt, 22 Aug 2026
 
+**Status: all 44 are fixed as of `d28592c`.** Kept as the record of what was
+wrong and why, because several of the entries below argue against the fix that
+looks obvious — the ones worth re-reading before touching that code again are
+the homophone stem floor (raising it kills the repair the pass exists for), the
+hands-free isolation guard (dropping it inserts text over the user's selection),
+and the mid-dictation device change (reinstalling the tap at a new format makes
+the recogniser hear garbled speech, which is worse than truncation because the
+output looks plausible).
+
 44 confirmed of 67 raised, every one adversarially verified against the code.
 None are in the dashboard; this is the rest of the app. Ordered by severity.
 
