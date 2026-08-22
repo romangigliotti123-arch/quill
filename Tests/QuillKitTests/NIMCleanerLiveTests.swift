@@ -272,7 +272,7 @@ func theHomophonePassOnTheRealModel() async throws {
     // context pass is benched separately below. Without pinning it, whichever one
     // is currently the default would silently take over this test's numbers.
     let cleaner = NIMCleaner(vocabulary: Vocabulary.seed.contextualStrings,
-                             homophones: true, contextRecovery: false)
+                             homophones: true, contextRecovery: { false })
     guard NIMClient().isConfigured else { return }
 
     // (sentence, the word that must come out) — nil means "must not change".
@@ -333,7 +333,7 @@ func theHomophonePassOnTheRealModel() async throws {
 @Test(.enabled(if: LiveTests.areEnabled, "no NVIDIA NIM key, or QUILL_SKIP_LIVE_TESTS is set"))
 func theContextPassOnTheRealModel() async throws {
     let cleaner = NIMCleaner(vocabulary: Vocabulary.seed.contextualStrings,
-                             homophones: true, contextRecovery: true)
+                             homophones: true, contextRecovery: { true })
     guard NIMClient().isConfigured else { return }
 
     // Sentences of a realistic length, because the pass has a twelve-word floor —

@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import AVFoundation
 // IsSecureEventInputEnabled() is still Carbon-only in the macOS 27 SDK — there
@@ -69,7 +70,20 @@ public enum Permissions {
     /// "Open System Settings" alert; Input Monitoring is only requested when
     /// Accessibility is already granted, because asking for both at once
     /// produces two stacked dialogs and users deny the second one.
+    /// Ask, or — once the answer is already no — take the user to where they can
+    /// change it.
+    ///
+    /// macOS prompts for a permission exactly once. After that
+    /// `requestAccess`/`IOHIDRequestAccess` return the stored answer immediately
+    /// and put nothing on screen, so the "Grant" button on the Help screen and the
+    /// menu's permission item did nothing at all — for precisely the users who
+    /// needed them, since a granted permission does not show a button.
     public static func request(_ permission: Permission) {
+        // Already refused, so there is nothing left to prompt. Open the pane.
+        guard state(of: permission) != .denied else {
+            openSettings(for: permission)
+            return
+        }
         switch permission {
         case .microphone:
             AVCaptureDevice.requestAccess(for: .audio) { _ in }
@@ -77,9 +91,41 @@ public enum Permissions {
             let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue()
             _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         case .inputMonitoring:
-            guard state(of: .accessibility) == .granted else { return }
+            // Accessibility first, deliberately: handing someone two permission
+            // dialogs at once is how both get dismissed. But saying nothing is
+            // what made this button dead, so send them to the pane they can
+            // actually act on.
+            guard state(of: .accessibility) == .granted else {
+                openSettings(for: .accessibility)
+                return
+            }
             _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
         }
+    }
+
+    /// The Privacy pane for a permission.
+    ///
+    /// Three ids, tried in order, because the pane identifier changed with System
+    /// Settings and a URL that does not resolve opens nothing and reports nothing
+    /// — which would leave the button exactly as dead as it was.
+    @discardableResult
+    public static func openSettings(for permission: Permission) -> Bool {
+        let anchor: String
+        switch permission {
+        case .microphone:      anchor = "Privacy_Microphone"
+        case .accessibility:   anchor = "Privacy_Accessibility"
+        case .inputMonitoring: anchor = "Privacy_ListenEvent"
+        }
+        let candidates = [
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(anchor)",
+            "x-apple.systempreferences:com.apple.preference.security?\(anchor)",
+            "x-apple.systempreferences:",
+        ]
+        for string in candidates {
+            guard let url = URL(string: string) else { continue }
+            if NSWorkspace.shared.open(url) { return true }
+        }
+        return false
     }
 
     public static var allGranted: Bool {

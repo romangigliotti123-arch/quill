@@ -89,12 +89,31 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         guard !appended.isEmpty else { return base.system }
         return base.system + "\n\nHow this person writes:\n" + appended
     }
-    private let vocabulary: [String]
+    /// Set only by tests, which inject a fixed list.
+    private let fixedVocabulary: [String]?
+    /// The shipping path. `VocabularyBook.shared` stats the file on access and
+    /// refreshes, so a word added in the Dictionary reaches the very next
+    /// dictation.
+    private let book: VocabularyBook?
+
+    /// Read once per call, never captured.
+    ///
+    /// This was `Vocabulary.load().contextualStrings` evaluated in `init`, and
+    /// the cleaner is built once at launch — so every word added to the
+    /// Dictionary after that was invisible to the AI pass for the rest of the
+    /// session. It is the list that protects the user's own terms from being
+    /// rewritten, so a fresh word was not merely unprotected, it was the one most
+    /// likely to be "corrected" into something else.
+    private var vocabulary: [String] { fixedVocabulary ?? book?.terms ?? [] }
     private let safetyMargin: Duration
     private let minimumBudget: Duration
     private let homophones: Bool
     /// Propose-then-verify instead of choose-from-a-list. See ContextProjection.
-    private let contextRecovery: Bool
+    /// Asked, not remembered. The switch in Settings had no effect until the app
+    /// was relaunched, because this was a Bool captured when the cleaner was
+    /// built. Read once at the top of a pass so one dictation cannot see it flip
+    /// halfway through.
+    private let contextRecovery: @Sendable () -> Bool
 
     /// - Parameters:
     ///   - safetyMargin: taken off the caller's deadline before the request is
@@ -128,17 +147,19 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         fast: FastCleaner = FastCleaner(),
         prompt: CleanupPrompt = .current,
         style: @escaping @Sendable () -> StyleProfile = { StyleStore.shared.profile },
-        vocabulary: [String] = Vocabulary.load().contextualStrings,
+        vocabulary: [String]? = nil,
+        book: VocabularyBook = .shared,
         safetyMargin: Duration = .milliseconds(30),
         minimumBudget: Duration = .milliseconds(120),
         homophones: Bool = ProcessInfo.processInfo.environment["QUILL_HOMOPHONES"] != "0",
-        contextRecovery: Bool = QuillSettings.shared.contextRecovery
+        contextRecovery: @escaping @Sendable () -> Bool = { QuillSettings.shared.contextRecovery }
     ) {
         self.client = client
         self.fast = fast
         self.prompt = prompt
         self.style = style
-        self.vocabulary = vocabulary
+        self.fixedVocabulary = vocabulary
+        self.book = vocabulary == nil ? book : nil
         self.safetyMargin = safetyMargin
         self.minimumBudget = minimumBudget
         self.homophones = homophones
@@ -219,7 +240,10 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         // is a request spent on a question it cannot answer. The context pass
         // verifies against 2,281 words, and gating it on the small list would
         // mean shipping a table it almost never gets to use.
-        let hasCandidate = contextRecovery
+        // Once, at the top, so the two branches below cannot disagree about it
+        // within a single pass.
+        let usesContext = contextRecovery()
+        let hasCandidate = usesContext
             ? ContextProjection.hasCandidate(in: base)
             : HomophonePairs.hasCandidate(in: base)
         let needsHomophones = homophones
@@ -242,7 +266,7 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
             // choose from. The first covers 2,281 words against 44 and is the
             // default; the second stays reachable because its list carries pairs
             // CMUdict does not know this recogniser confuses.
-            if contextRecovery {
+            if usesContext {
                 return await recoverFromContext(in: base, budget: budget) ?? offline
             }
             return await correctHomophones(in: base, budget: budget) ?? offline

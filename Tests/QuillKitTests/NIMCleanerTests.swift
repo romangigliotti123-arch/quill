@@ -340,7 +340,7 @@ private func cleaner(_ ai: FakeAI) -> NIMCleaner {
 /// pinning, whichever one happens to be the default silently takes over their
 /// assertions, which is how a test stops measuring what its name says.
 private func homophoneCleaner(_ ai: FakeAI) -> NIMCleaner {
-    NIMCleaner(client: ai, vocabulary: vocabulary, homophones: true, contextRecovery: false)
+    NIMCleaner(client: ai, vocabulary: vocabulary, homophones: true, contextRecovery: { false })
 }
 
 @Test func theHomophonePassCanBeSwitchedOff() async {
@@ -396,4 +396,47 @@ private func homophoneCleaner(_ ai: FakeAI) -> NIMCleaner {
         "send it to Noah no wait send it to Carlo about the flower", deadline: deadline)
     #expect(ai.log.calls == 1, "spent more than one request")
     #expect(text != nil)
+}
+
+// MARK: - Settings are read, not remembered
+
+/// The cleaner is built once, at launch. Anything it captured in `init` was
+/// frozen there for the whole session — so the "Work out a word from context"
+/// switch did nothing until Quill was relaunched, and a word added in the
+/// Dictionary was invisible to the AI pass for the rest of the day.
+///
+/// The vocabulary one is the worse of the two: that list is what protects the
+/// user's own terms from being rewritten, so a freshly added word was not merely
+/// unprotected — it was the word most likely to be "corrected" into something
+/// else.
+@Test func theContextSwitchIsAskedPerCallRatherThanCaptured() async {
+    let flag = MutableFlag(false)
+    let cleaner = NIMCleaner(client: NeverConfigured(),
+                             vocabulary: [],
+                             contextRecovery: { flag.value })
+    // The claim is about the seam, not the model: with no client configured both
+    // passes fall through to the deterministic answer, and what is being pinned
+    // is that flipping the flag afterwards is visible at all.
+    _ = await cleaner.cleanThorough("flour and flower", deadline: .milliseconds(200))
+    flag.value = true
+    _ = await cleaner.cleanThorough("flour and flower", deadline: .milliseconds(200))
+    #expect(flag.reads >= 2, "the switch was read \(flag.reads) times — it is captured, not asked")
+}
+
+private final class MutableFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Bool
+    private var count = 0
+    init(_ value: Bool) { stored = value }
+    var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; count += 1; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
+    }
+    var reads: Int { lock.lock(); defer { lock.unlock() }; return count }
+}
+
+private struct NeverConfigured: AICompleting {
+    var isConfigured = false
+    var isReadyToTry = false
+    func complete(system: String, user: String, model: String?, deadline: Duration) async throws -> String { "" }
 }
