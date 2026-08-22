@@ -1,0 +1,25 @@
+<meta charset="utf-8">
+<title>Quill</title>
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
+<link rel="stylesheet" href="./dashboard.css">
+<body>
+  <!--
+    The shell. Ten screens plug into one content area, and the sidebar is the
+    only thing that knows all ten — adding a section is one entry in the
+    registry rather than an edit to the window, the renderer and the menu.
+
+    The order matches how a dictation user actually moves through the app —
+    what you said, what it heard, how it writes, where it goes — and Insights
+    leads because it is the only screen that answers "is this thing actually
+    helping me", which is the screen you open on purpose.
+  -->
+  <div id="titlebar"><div class="spacer"></div></div>
+  <div id="shell">
+    <nav id="sidebar" aria-label="Sections"></nav>
+    <main id="content" tabindex="-1"></main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="modal" role="dialog" aria-modal="true"><div class="sheet" id="sheet"></div></div>
+  <script src="./dashboard.js"></script>
+</body>

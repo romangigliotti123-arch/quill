@@ -1,0 +1,581 @@
+/*
+  The dashboard's entire visual vocabulary. Every colour, size, radius and
+  spacing the window draws with is declared here and nowhere else — a section
+  that reaches for a hand-picked padding is how ten screens built by ten
+  different hands stop looking like one app.
+
+  Two rules that are load-bearing rather than stylistic, carried across from the
+  macOS build:
+
+   1. SURFACES ARE TINTS, NOT COLOURS. The window is translucent; everything on
+      it is a low-alpha wash of black or white over that material rather than an
+      invented grey. Painting an opaque grey card on a translucent window is how
+      you get a window that is only see-through at its margins.
+
+   2. THERE ARE NO SHADOWS. Depth comes from the material and a hairline, which
+      is where a native app gets it. Adding one shadow means adding eleven.
+
+  One thing genuinely changed. macOS hands an app the user's chosen accent
+  colour; Windows and Linux do not expose one consistently, and inventing a
+  different accent per platform would make the app look like three apps. So
+  Quill brings its own — the same teal the HUD uses — and spends it in at most
+  three places per screen. If it appears more than that it has stopped being an
+  accent.
+*/
+
+:root {
+  /* 4-point spacing scale. Nothing here is spaced by a number off this list. */
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 40px;
+  --space-huge: 56px;
+
+  /* Radii climb with the size of the thing. A 14-point radius on a 28-point
+     chip reads as a lozenge; a 7-point radius on a 700-point panel reads as a
+     table. */
+  --radius-chip: 7px;
+  --radius-row: 9px;
+  --radius-control: 10px;
+  --radius-card: 14px;
+  --radius-panel: 18px;
+
+  --sidebar-width: 234px;
+  --titlebar-height: 52px;
+  --content-pad-x: 46px;
+  /* More room above the title than below it. An editorial page opens with air
+     and then gets on with it; padding the top and the bottom equally is what
+     makes a screen look like a form. */
+  --content-pad-y: 34px;
+
+  --font: -apple-system, "Segoe UI Variable Text", "Segoe UI", Inter, system-ui,
+          Ubuntu, Cantarell, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", "JetBrains Mono",
+               "Roboto Mono", Consolas, "DejaVu Sans Mono", monospace;
+
+  /* Light. Almost none of this is a colour, and that is the point. */
+  --canvas: #f1efeb;
+  --canvas-sidebar: rgba(0, 0, 0, 0.035);
+  --card: rgba(0, 0, 0, 0.020);
+  --raised: rgba(255, 255, 255, 0.75);
+  --row-selected: rgba(0, 0, 0, 0.055);
+  --hairline: rgba(0, 0, 0, 0.10);
+  --hairline-strong: rgba(0, 0, 0, 0.14);
+  --ink: #1b1b1d;
+  --ink-secondary: rgba(27, 27, 29, 0.78);
+  --ink-tertiary: rgba(27, 27, 29, 0.55);
+  --ink-quaternary: rgba(27, 27, 29, 0.36);
+  --accent: #3b6d6e;
+  --accent-soft: rgba(59, 109, 110, 0.12);
+  --on-accent: #ffffff;
+  --hover: rgba(0, 0, 0, 0.045);
+  --pressed: rgba(0, 0, 0, 0.085);
+  --danger: #a3341f;
+  --warn: #8a5a06;
+  --good: #2f6b4f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #131211;
+    --canvas-sidebar: rgba(255, 255, 255, 0.030);
+    --card: rgba(255, 255, 255, 0.030);
+    --raised: rgba(255, 255, 255, 0.11);
+    --row-selected: rgba(255, 255, 255, 0.11);
+    --hairline: rgba(255, 255, 255, 0.10);
+    --hairline-strong: rgba(255, 255, 255, 0.16);
+    --ink: #f2f1ef;
+    --ink-secondary: rgba(242, 241, 239, 0.80);
+    --ink-tertiary: rgba(242, 241, 239, 0.56);
+    --ink-quaternary: rgba(242, 241, 239, 0.34);
+    --accent: #6fb3a8;
+    --accent-soft: rgba(111, 179, 168, 0.20);
+    --on-accent: #10201e;
+    --hover: rgba(255, 255, 255, 0.06);
+    --pressed: rgba(255, 255, 255, 0.11);
+    --danger: #e08b76;
+    --warn: #e0b055;
+    --good: #7fc0a0;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 13px/1.45 var(--font);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* MARK: - Shell */
+
+#shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  height: 100%;
+}
+
+/* The strip the window controls live in. The sidebar material runs up behind
+   it, the way a native app's does, which is what makes the toolbar appear to
+   float over the content rather than sit in a band of its own. */
+#titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--titlebar-height);
+  -webkit-app-region: drag;
+  z-index: 20;
+  pointer-events: none;
+}
+#titlebar .spacer { -webkit-app-region: drag; height: 100%; }
+
+/* MARK: - Sidebar */
+
+#sidebar {
+  background: var(--canvas-sidebar);
+  border-right: 1px solid var(--hairline);
+  padding: var(--space-sm);
+  padding-top: calc(var(--titlebar-height) + var(--space-xs));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+  overflow-y: auto;
+  -webkit-app-region: drag;
+}
+#sidebar > * { -webkit-app-region: no-drag; }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--space-xs) var(--space-md);
+}
+.brand .mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--accent);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+/* The mark is an inline SVG using `currentColor`, so the tile sets the ink
+   once and the bars follow it — including through a theme change, which a
+   hard-coded fill would not. */
+.brand .mark { color: var(--on-accent); }
+.brand .name { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.brand .state { font-size: 11px; color: var(--ink-tertiary); }
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 var(--space-xs);
+  border-radius: var(--radius-row);
+  border: none;
+  background: transparent;
+  color: var(--ink-secondary);
+  text-align: left;
+  width: 100%;
+  transition: background 90ms ease, color 90ms ease;
+}
+.nav-row:hover { background: var(--hover); }
+.nav-row[aria-current="page"] {
+  background: var(--raised);
+  color: var(--ink);
+  font-weight: 500;
+}
+.nav-row .glyph { width: 17px; height: 17px; flex: none; opacity: 0.7; display: block; }
+.nav-row[aria-current="page"] .glyph { opacity: 1; }
+.nav-row:hover .glyph { opacity: 0.9; }
+.nav-row .count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-quaternary);
+  font-variant-numeric: tabular-nums;
+}
+.nav-rule { height: 1px; background: var(--hairline); margin: var(--space-xs) var(--space-xs); }
+.nav-spacer { flex: 1 1 auto; }
+
+/* MARK: - Content */
+
+#content {
+  overflow-y: auto;
+  padding: calc(var(--titlebar-height) + var(--content-pad-y)) var(--content-pad-x) var(--space-xxl);
+}
+
+.page-head { margin-bottom: var(--space-lg); }
+/* 28, not 20. The difference between this and a landing page is not the size of
+   the title, it is what is underneath it: dense content directly below, where a
+   landing page follows a big title with more air. */
+.page-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.page-subtitle {
+  margin: var(--space-xxs) 0 0;
+  color: var(--ink-tertiary);
+  font-size: 13px;
+  max-width: 62ch;
+}
+
+h2.section-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: var(--space-xl) 0 var(--space-sm);
+}
+h2.section-title:first-child { margin-top: 0; }
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-quaternary);
+  margin: 0 0 var(--space-xxs);
+}
+
+.muted { color: var(--ink-tertiary); }
+.tiny { font-size: 11.5px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* MARK: - Surfaces */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  padding: var(--space-md);
+}
+.card + .card { margin-top: var(--space-sm); }
+
+.grid { display: grid; gap: var(--space-sm); }
+.grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1180px) {
+  .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid.cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 860px) {
+  .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Size belongs to the number, not to the heading above it. */
+.metric { font-size: 28px; font-weight: 400; letter-spacing: -0.02em; line-height: 1.1; }
+.metric .unit { font-size: 15px; color: var(--ink-tertiary); font-weight: 400; }
+.metric-small { font-size: 19px; font-weight: 400; letter-spacing: -0.01em; }
+.metric-label { font-size: 11.5px; color: var(--ink-tertiary); margin-top: var(--space-xxs); }
+.metric-note { font-size: 11.5px; color: var(--ink-quaternary); margin-top: 2px; }
+
+/* MARK: - Rows */
+
+.rows { border: 1px solid var(--hairline); border-radius: var(--radius-card); overflow: hidden; }
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px var(--space-md);
+  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  width: 100%;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  text-align: left;
+  color: inherit;
+}
+.row:last-child { border-bottom: none; }
+.row:hover { background: var(--hover); }
+.row[aria-selected="true"] { background: var(--row-selected); }
+.row .primary { font-weight: 500; }
+.row .secondary { font-size: 11.5px; color: var(--ink-tertiary); }
+.row .grow { flex: 1 1 auto; min-width: 0; }
+.row .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* MARK: - Controls */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: 30px;
+  padding: 0 var(--space-md);
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background 90ms ease, border-color 90ms ease, opacity 90ms ease;
+}
+.button.primary { background: var(--accent); color: var(--on-accent); }
+.button.primary:hover { filter: brightness(1.06); }
+.button.secondary { background: var(--raised); border-color: var(--hairline); color: var(--ink); }
+.button.secondary:hover { background: var(--hover); }
+.button.ghost { background: transparent; color: var(--ink-secondary); }
+.button.ghost:hover { background: var(--hover); }
+.button.danger { background: transparent; color: var(--danger); border-color: var(--hairline); }
+.button.danger:hover { background: var(--hover); }
+.button:disabled { opacity: 0.45; cursor: default; }
+.button.small { height: 26px; padding: 0 10px; font-size: 12px; }
+
+.field {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--hairline);
+  background: var(--card);
+  color: var(--ink);
+  outline: none;
+}
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+textarea.field { height: auto; min-height: 90px; padding: 8px 10px; resize: vertical; line-height: 1.5; }
+
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-row .grow { flex: 1 1 auto; }
+.toggle-row .title { font-weight: 500; }
+.toggle-row .detail { font-size: 11.5px; color: var(--ink-tertiary); margin-top: 2px; max-width: 64ch; }
+
+/* A switch, drawn. A checkbox with an accent-colour is the one control that
+   makes an app look like a web form on every platform at once. */
+.switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--hairline-strong);
+  border: none;
+  flex: none;
+  transition: background 140ms ease;
+  margin-top: 2px;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.switch[aria-checked="true"] { background: var(--accent); }
+.switch[aria-checked="true"]::after { transform: translateX(16px); }
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--radius-control);
+  background: var(--card);
+  border: 1px solid var(--hairline);
+}
+.segmented button {
+  border: none;
+  background: transparent;
+  color: var(--ink-secondary);
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.segmented button[aria-pressed="true"] { background: var(--raised); color: var(--ink); }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 19px;
+  padding: 0 8px;
+  border-radius: var(--radius-chip);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-tertiary);
+  background: var(--card);
+  border: 1px solid var(--hairline);
+}
+.chip.accent { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+.chip.warn { color: var(--warn); border-color: var(--hairline); }
+.chip.good { color: var(--good); border-color: var(--hairline); }
+
+/* A physical-looking key. Quill is a hotkey-driven app; showing the binding as
+   a drawn key rather than the string "Right Alt" is the difference between
+   documentation and an interface. */
+.keycap {
+  display: inline-block;
+  min-width: 20px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--raised);
+  border: 1px solid var(--hairline);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-quaternary); flex: none; }
+.dot.live { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.dot.bad { background: var(--danger); }
+
+/* MARK: - Charts, drawn with divs rather than a library
+   Everything on the Insights screen is bars and squares, and a charting library
+   would be 200 KB to draw a rectangle. */
+
+.spark { display: flex; align-items: flex-end; gap: 2px; height: 56px; }
+.spark i {
+  flex: 1 1 0;
+  min-width: 2px;
+  background: var(--accent);
+  opacity: 0.55;
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+}
+.spark i.today { opacity: 1; }
+
+.heat { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 11px); gap: 3px; }
+.heat i { width: 11px; height: 11px; border-radius: 2.5px; background: var(--card); border: 1px solid var(--hairline); }
+.heat i[data-level="1"] { background: color-mix(in srgb, var(--accent) 25%, transparent); border-color: transparent; }
+.heat i[data-level="2"] { background: color-mix(in srgb, var(--accent) 50%, transparent); border-color: transparent; }
+.heat i[data-level="3"] { background: color-mix(in srgb, var(--accent) 75%, transparent); border-color: transparent; }
+.heat i[data-level="4"] { background: var(--accent); border-color: transparent; }
+.heat-wrap { overflow-x: auto; padding-bottom: 4px; }
+
+.bar-track { height: 6px; border-radius: 3px; background: var(--card); border: 1px solid var(--hairline); overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); }
+
+/* MARK: - Empty and message states */
+
+.message {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  padding: var(--space-lg);
+  max-width: 560px;
+}
+.message h3 { margin: 0 0 var(--space-xxs); font-size: 15px; font-weight: 600; }
+.message p { margin: 0 0 var(--space-sm); color: var(--ink-tertiary); }
+.message ol, .message ul { margin: 0 0 var(--space-sm); padding-left: 1.2em; color: var(--ink-tertiary); }
+.message li { margin-bottom: 4px; }
+
+.empty {
+  padding: var(--space-xxl) var(--space-lg);
+  text-align: center;
+  color: var(--ink-tertiary);
+  border: 1px dashed var(--hairline);
+  border-radius: var(--radius-card);
+}
+
+/* MARK: - Two-pane sections (Dictation, Snippets, Transforms, Scratchpad) */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: var(--space-lg);
+  align-items: start;
+}
+@media (max-width: 1000px) { .split { grid-template-columns: minmax(0, 1fr); } }
+
+.list-pane { border: 1px solid var(--hairline); border-radius: var(--radius-card); overflow: hidden; }
+.list-pane .row { cursor: default; }
+
+.detail-pane { min-width: 0; }
+
+.diff ins {
+  background: color-mix(in srgb, var(--good) 20%, transparent);
+  text-decoration: none;
+  border-radius: 3px;
+  padding: 1px 3px;
+  margin: 0 -1px;
+}
+.diff del {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  border-radius: 3px;
+  padding: 1px 3px;
+  margin: 0 -1px;
+  opacity: 0.85;
+}
+
+.transcript {
+  font-size: 13.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* MARK: - Toast */
+
+#toast {
+  position: fixed;
+  bottom: var(--space-lg);
+  left: 50%;
+  transform: translate(-50%, 12px);
+  background: var(--raised);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  padding: 8px 14px;
+  font-size: 12.5px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  backdrop-filter: blur(20px);
+  z-index: 50;
+  max-width: 60ch;
+}
+#toast.visible { opacity: 1; transform: translate(-50%, 0); }
+
+/* MARK: - Modal */
+
+#modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  display: none;
+  place-items: center;
+  z-index: 60;
+  backdrop-filter: blur(2px);
+}
+#modal.open { display: grid; }
+#modal .sheet {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-panel);
+  padding: var(--space-lg);
+  width: min(560px, calc(100vw - 64px));
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+#modal h3 { margin: 0 0 var(--space-xs); font-size: 17px; font-weight: 600; }
+.sheet-actions { display: flex; gap: var(--space-xs); justify-content: flex-end; margin-top: var(--space-lg); }
+
+label.stack { display: block; margin-bottom: var(--space-sm); }
+label.stack > span { display: block; font-size: 11.5px; color: var(--ink-tertiary); margin-bottom: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
