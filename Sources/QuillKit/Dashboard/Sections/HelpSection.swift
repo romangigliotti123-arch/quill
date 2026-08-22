@@ -144,6 +144,15 @@ public final class HelpSectionView: NSView {
                       control: HelpKeycap("⌥⌫", style: style)),
                 at: rowsWithUndo.count - 1)
         }
+        let setup = DashboardButton(title: "Open", kind: .secondary, style: style)
+        setup.onClick = { OnboardingWindowController.present() }
+        setup.frame.size = NSSize(width: setup.intrinsicWidth, height: 28)
+        rowsWithUndo.append(.init(
+            label: "Setup", detail: DashboardType.label(
+                "Permissions and the API key, in the order they are needed.",
+                font: DashboardType.caption, color: style.inkTertiary, lines: 2, lineHeight: 16),
+            control: setup))
+
         let shortcuts = SettingsGroup(title: "Keys", style: style, rows: rowsWithUndo)
         content.addSubview(shortcuts)
         groups.append(shortcuts)

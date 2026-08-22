@@ -264,11 +264,81 @@ public final class SettingsSectionView: NSView {
                                            color: style.inkTertiary, lines: 2, lineHeight: 16)
         retentionNote = keepNote
 
+        let erase = actionButton("Erase…") { [weak self] in self?.confirmErase() }
+        let eraseNote = DashboardType.label(
+            "Deletes every dictation, your Dictionary, transforms, notes, settings and API key, then restarts Quill. There is no undo.",
+            font: DashboardType.caption, color: style.inkTertiary, lines: 3, lineHeight: 16)
+
         return SettingsGroup(title: "Files", style: style, rows: [
             .init(label: "Vocabulary", detail: nil, control: vocabulary),
             .init(label: "History", detail: nil, control: history),
             .init(label: "Keep dictations for", detail: keepNote, control: keep),
+            .init(label: "Erase everything", detail: eraseNote, control: erase),
         ])
+    }
+
+    /// Two questions, not one, and the first one names what it is about to take.
+    ///
+    /// The rule this follows is that a destructive action must be refusable by
+    /// someone who clicked it by accident and irreversible only for someone who
+    /// meant it. So: the alert lists the files and their sizes rather than saying
+    /// "everything" and asking to be trusted, the destructive button is not the
+    /// default one, and Escape cancels.
+    private func confirmErase() {
+        let summary = QuillData.summary()
+        guard !summary.isEmpty else {
+            let nothing = NSAlert()
+            nothing.messageText = "There is nothing to erase"
+            nothing.informativeText = "Quill has not written anything yet."
+            nothing.runModal()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Erase everything Quill knows?"
+        alert.informativeText = """
+            This deletes \(summary.count) file\(summary.count == 1 ? "" : "s") and cannot be undone:
+
+            \(summary.map { "\($0.name) — \(Self.readable($0.bytes))" }.joined(separator: "\n"))
+
+            Quill will restart with nothing in it, exactly as it was the first             time you opened it.
+            """
+        alert.addButton(withTitle: "Cancel")
+        let erase = alert.addButton(withTitle: "Erase and restart")
+        erase.hasDestructiveAction = true
+        // Cancel is the default, so Return does the safe thing. Someone who
+        // reached this dialog by mistake has to read a word before losing a year
+        // of transcripts.
+        alert.window.defaultButtonCell = alert.buttons.first?.cell as? NSButtonCell
+
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+
+        let removed = QuillData.erase()
+        NSLog("[quill] erased %d file(s): %@", removed.count, removed.joined(separator: ", "))
+        Self.relaunch()
+    }
+
+    private static func readable(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
+    /// Start a second copy and stand down.
+    ///
+    /// Deleting the files is only half of "as if you just installed it": every
+    /// store in this app holds its records in memory and writes the whole file on
+    /// the next change, so a Quill left running would put its history back within
+    /// one dictation. The relaunch is what makes the erase stick, and it is also
+    /// what makes the result actually indistinguishable from a fresh install.
+    private static func relaunch() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL,
+                                           configuration: configuration) { _, _ in
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
     }
 
     private func actionButton(_ title: String, action: @escaping () -> Void) -> NSView {

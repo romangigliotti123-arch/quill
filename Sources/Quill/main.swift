@@ -40,6 +40,35 @@ if ProcessInfo.processInfo.environment["QUILL_UNDO_REHEARSE"] == "1" {
     }
 }
 
+// Erase probe: QUILL_ERASE_DRY_RUN=1 prints what "Erase everything" would take
+// and exits without taking it.
+//
+// The button behind it opens a modal, which no harness can drive — so the half
+// that matters, what is on the list and what is not, is checkable on its own. A
+// destructive feature nobody can rehearse is one that gets tested for the first
+// time on somebody's real data.
+if ProcessInfo.processInfo.environment["QUILL_ERASE_NOW"] == "1" {
+    // The destructive half, for the harness only. Pair it with QUILL_DATA_DIR.
+    let removed = QuillData.erase()
+    let path = QuillData.directory.appendingPathComponent("erased.txt")
+    try? (removed.sorted().joined(separator: "\n") + "\n")
+        .write(to: path, atomically: true, encoding: .utf8)
+    exit(0)
+}
+
+if ProcessInfo.processInfo.environment["QUILL_ERASE_DRY_RUN"] == "1" {
+    let summary = QuillData.summary()
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    var lines = ["would delete \(summary.count) file(s):"]
+    for entry in summary {
+        lines.append("  \(entry.name) — \(formatter.string(fromByteCount: Int64(entry.bytes)))")
+    }
+    let path = QuillData.directory.appendingPathComponent("erase-dry-run.txt")
+    try? (lines.joined(separator: "\n") + "\n").write(to: path, atomically: true, encoding: .utf8)
+    exit(0)
+}
+
 // Caret probe: QUILL_CARET_PROBE=1 asks every running app what Accessibility
 // says is behind its caret, and prints the answer.
 //

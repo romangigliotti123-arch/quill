@@ -21,6 +21,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public override init() { super.init() }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // Captured before anything can create the settings file. `isFirstRun` is
+        // "settings.json does not exist", and half the setup below writes it.
+        let needsSetup = OnboardingWindowController.isFirstRun
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Quill")
         item.button?.image?.isTemplate = true
@@ -123,6 +127,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: .quillSettingsChanged, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.rebuildMenu() }
+        }
+
+        // Last, and only on a Mac that has never run this before.
+        //
+        // Everything Quill needs fails silently when it is missing: no
+        // microphone is "nothing was heard", no Accessibility is a hotkey that
+        // does nothing with no error anywhere, and no key is a cleanup pass that
+        // quietly never runs. A stranger who cloned this would meet all three as
+        // "it doesn't work", in an order they did not choose, from a menu-bar
+        // icon with nothing to click. So they are asked for once, in order,
+        // before any of them can fail.
+        if needsSetup {
+            DispatchQueue.main.async { OnboardingWindowController.present() }
         }
     }
 

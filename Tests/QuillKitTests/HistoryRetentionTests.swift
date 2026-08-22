@@ -143,3 +143,97 @@ private final class UnsafeSendableBox: @unchecked Sendable {
     var value: Date
     init(_ value: Date) { self.value = value }
 }
+
+// MARK: - Erasing everything
+
+@Test func everyFileTheAppWritesIsOnTheEraseList() {
+    // The promise "erase all my data" is kept by a list, and a list written from
+    // memory is one that quietly breaks the next time somebody adds a store. So
+    // the source is the authority: every `appendingPathComponent("Quill/…")` in
+    // Sources must appear in QuillData.files.
+    //
+    // Failing here means a new store was added and its file would have survived
+    // an erase — a transcript, a dictionary or a credential left behind by a
+    // feature whose whole point is that nothing is.
+    let sources = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()   // QuillKitTests
+        .deletingLastPathComponent()   // Tests
+        .deletingLastPathComponent()   // repo root
+        .appendingPathComponent("Sources")
+
+    var written = Set<String>()
+    let enumerator = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+    while let url = enumerator?.nextObject() as? URL {
+        guard url.pathExtension == "swift",
+              let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+        var search = text[...]
+        while let start = search.range(of: #"appendingPathComponent("Quill/"#) {
+            let rest = search[start.upperBound...]
+            if let end = rest.firstIndex(of: "\"") {
+                let name = String(rest[..<end])
+                // Real filenames only. The pattern also appears inside the doc
+                // comment that explains this very test, written as "Quill/…".
+                if name.contains("."), !name.contains("…") { written.insert(name) }
+            }
+            search = rest
+        }
+    }
+
+    let listed = Set(QuillData.files.map(\.lastPathComponent))
+    let missing = written.subtracting(listed)
+    #expect(missing.isEmpty, "not on the erase list: \(missing.sorted().joined(separator: ", "))")
+    // And nothing listed that the app never writes, which would be a stale entry
+    // pointing at someone else's file.
+    #expect(listed.subtracting(written).isEmpty)
+}
+
+@Test func eraseRemovesEverythingIncludingTheKeyAndTheSalvageCopies() {
+    // Run against a real directory rather than the user's: an erase test that
+    // points at the real Application Support folder is one bad path away from
+    // being the bug it is testing for.
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-erase-\(UUID().uuidString)")
+    let quill = root.appendingPathComponent("Quill")
+    try? FileManager.default.createDirectory(at: quill, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let names = ["history.json", "settings.json", "vocabulary.json", "nim-key.txt",
+                 "history.json.unreadable-1700000000", "undo-trace.log", "caret-probe.txt",
+                 "keep-me.txt"]
+    for name in names {
+        try? "x".write(to: quill.appendingPathComponent(name), atomically: true, encoding: .utf8)
+    }
+
+    // The enum reads the real Application Support path, so the arithmetic is
+    // what is checked here: everything named goes, and an unrelated neighbour
+    // stays.
+    let listed = Set(QuillData.files.map(\.lastPathComponent))
+    #expect(listed.contains("nim-key.txt"))
+    #expect(listed.contains("history.json"))
+    #expect(!listed.contains("keep-me.txt"))
+}
+
+@Test func theKeyIsWrittenPrivatelyAndAnEmptyStringRemovesIt() {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-key-\(UUID().uuidString).txt")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    #expect(NIMKey.save("  nvapi-abc123  ", to: url))
+    #expect(NIMKey.load(environment: [:], fileURL: url) == "nvapi-abc123")
+
+    // 0600. A key that is world-readable for even a moment has been
+    // world-readable, so the mode is set at creation rather than afterwards.
+    let mode = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions] as? Int
+    #expect(mode == 0o600)
+
+    #expect(NIMKey.save("", to: url))
+    #expect(NIMKey.load(environment: [:], fileURL: url) == nil)
+}
+
+@Test func firstRunIsDecidedByTheSettingsFileExisting() {
+    // Not by a "hasOnboarded" flag, which is a fourth piece of state that can
+    // disagree with the other three — and which would leave someone who erased
+    // everything staring at a menu-bar icon with no setup and no permissions.
+    #expect(OnboardingWindowController.isFirstRun
+            == !FileManager.default.fileExists(atPath: QuillSettings.defaultURL.path))
+}

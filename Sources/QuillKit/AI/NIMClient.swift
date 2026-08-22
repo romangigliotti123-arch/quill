@@ -37,6 +37,27 @@ public enum NIMKey {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Write the key where `load` will find it.
+    ///
+    /// 0600, set at creation rather than afterwards, because a file that is
+    /// world-readable for even a moment has been world-readable. An empty string
+    /// removes it, which is how "I pasted the wrong one" is undone.
+    @discardableResult
+    public static func save(_ key: String, to fileURL: URL = NIMKey.defaultFileURL) -> Bool {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fm = FileManager.default
+        guard !trimmed.isEmpty else {
+            try? fm.removeItem(at: fileURL)
+            return true
+        }
+        try? fm.createDirectory(at: fileURL.deletingLastPathComponent(),
+                                withIntermediateDirectories: true)
+        try? fm.removeItem(at: fileURL)
+        return fm.createFile(atPath: fileURL.path,
+                             contents: Data(trimmed.utf8),
+                             attributes: [.posixPermissions: 0o600])
+    }
+
     /// Something a human can quote in a bug report that is not the key. Eight hex
     /// characters of SHA-256 identifies which key is loaded and reverses to
     /// nothing. A prefix of the key itself would be simpler and is not offered on

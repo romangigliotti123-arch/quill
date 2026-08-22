@@ -47,7 +47,7 @@ final class SnippetsField: NSView, NSTextFieldDelegate {
         set { field.stringValue = newValue }
     }
 
-    private let field = NSTextField()
+    private let field: NSTextField
     private let style: DashboardStyle
     private let badge: DashboardIconView?
     private var isFocused = false { didSet { needsDisplay = true } }
@@ -57,7 +57,16 @@ final class SnippetsField: NSView, NSTextFieldDelegate {
     init(style: DashboardStyle,
          placeholder: String,
          font: NSFont = DashboardType.bodyMedium,
-         badgeSymbol: String? = nil) {
+         badgeSymbol: String? = nil,
+         isSecure: Bool = false) {
+        // The whole field, not just the cell.
+        //
+        // Giving an NSTextField an NSSecureTextFieldCell is the obvious version
+        // and it terminates the process the moment the field takes focus:
+        // "NSSecureTextFieldCell is not secure because the secure field editor's
+        // delegate must be an NSSecureTextField". Which, on the API-key step of a
+        // first-run window, is a crash on launch for every new user.
+        field = isSecure ? NSSecureTextField() : NSTextField()
         self.style = style
         badge = badgeSymbol.map {
             DashboardIconView(image: DashboardIcon.image($0, pointSize: 12, weight: .semibold, color: style.accentInk))
