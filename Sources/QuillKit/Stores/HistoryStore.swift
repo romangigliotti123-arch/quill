@@ -106,12 +106,51 @@ public final class HistoryStore: @unchecked Sendable {
     private let url: URL
     private let queue = DispatchQueue(label: "com.romangigliotti.quill.history")
     private var records: [DictationRecord] = []
+    private let cutoff: @Sendable () -> Date?
 
     /// Tests pass their own URL. A self-test that writes to the real history
     /// file is a bug, not a shortcut.
-    public init(url: URL = HistoryStore.defaultURL) {
+    ///
+    /// `cutoff` answers "delete anything older than this, or nil to keep
+    /// everything". A closure rather than a stored date because the answer moves
+    /// with the clock — a store built at launch and still alive at midnight has
+    /// to prune to the new day, not the old one — and a closure rather than the
+    /// setting itself so a test can hand over a fixed instant instead of
+    /// depending on what the person running it happens to have configured.
+    public init(url: URL = HistoryStore.defaultURL,
+                cutoff: @escaping @Sendable () -> Date? = {
+                    QuillSettings.shared.historyRetention.cutoff(from: Date())
+                }) {
         self.url = url
+        self.cutoff = cutoff
         load()
+        prune()
+        startExpiryTimer()
+    }
+
+    deinit { expiryTimer?.cancel() }
+
+    private var expiryTimer: DispatchSourceTimer?
+
+    /// Hourly, because "a month old" becomes true while the app is sitting
+    /// there and Roman asked for the record to go that day rather than at the
+    /// next restart.
+    ///
+    /// On the store's own queue, so it cannot collide with a dictation being
+    /// appended, and it writes nothing on the hours where nothing expired —
+    /// which is all of them but one per record.
+    private func startExpiryTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 3600, repeating: 3600, leeway: .seconds(300))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let removed = self.expire()
+            guard removed > 0 else { return }
+            self.persist()
+            NSLog("[quill] history: deleted %d expired dictation(s)", removed)
+        }
+        timer.resume()
+        expiryTimer = timer
     }
 
     /// Newest first — the rig reads index 0.
@@ -122,8 +161,35 @@ public final class HistoryStore: @unchecked Sendable {
     public func append(_ record: DictationRecord) {
         queue.sync {
             records.insert(record, at: 0)
+            let removed = expire()
             persist()
+            if removed > 0 { NSLog("[quill] history: deleted %d expired dictation(s)", removed) }
         }
+    }
+
+    /// Delete anything past its date. Safe to call as often as you like — it
+    /// writes only when it actually removed something.
+    ///
+    /// Called at launch, after every dictation, and on a timer, because "a month
+    /// old" becomes true while the app is sitting there. Roman asked for exactly
+    /// that: a dictation made a month ago goes today, not the next time Quill
+    /// happens to restart.
+    public func prune() {
+        queue.sync {
+            let removed = expire()
+            guard removed > 0 else { return }
+            persist()
+            NSLog("[quill] history: deleted %d expired dictation(s)", removed)
+        }
+    }
+
+    /// Must be called on `queue`. Returns how many went.
+    @discardableResult
+    private func expire() -> Int {
+        guard let cutoff = cutoff() else { return 0 }
+        let before = records.count
+        records.removeAll { $0.date < cutoff }
+        return before - records.count
     }
 
     /// Set when the file exists but could not be read. While it is true nothing

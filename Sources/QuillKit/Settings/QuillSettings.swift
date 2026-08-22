@@ -61,6 +61,15 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         public var undoChord: Bool
         /// How a spoken number is written down. See `NumberStyle`.
         public var numberStyle: NumberStyle
+        /// How long dictations are kept before Quill deletes them.
+        ///
+        /// A month by default, which is a deletion the app performs on its own —
+        /// so the default is the one worth arguing about. A dictation history is
+        /// a transcript of everything its owner has said at their desk, and one
+        /// that grows forever by default is a liability nobody chose. A month is
+        /// long enough that "what did I dictate the other week" still works, and
+        /// short enough that the file is not an archive of the year.
+        public var historyRetention: HistoryRetention
         /// Let the model read the sentence, propose a fix of its own, and have
         /// `ContextProjection` refuse anything that is not a same-sounding swap.
         ///
@@ -94,6 +103,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                     inputDeviceUID: String? = nil,
                     liveText: Bool = true,
                     undoChord: Bool = true,
+                    historyRetention: HistoryRetention = .month,
                     numberStyle: NumberStyle = .spellOutSmall,
                     contextRecovery: Bool = true) {
             self.holdKeyCode = holdKeyCode
@@ -101,6 +111,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
             self.inputDeviceUID = inputDeviceUID
             self.liveText = liveText
             self.undoChord = undoChord
+            self.historyRetention = historyRetention
             self.numberStyle = numberStyle
             self.contextRecovery = contextRecovery
         }
@@ -113,6 +124,13 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
             inputDeviceUID = try c.decodeIfPresent(String.self, forKey: .inputDeviceUID)
             liveText = try c.decodeIfPresent(Bool.self, forKey: .liveText) ?? fallback.liveText
             undoChord = try c.decodeIfPresent(Bool.self, forKey: .undoChord) ?? fallback.undoChord
+            // Same shape as numberStyle below, and for the same reason: a value
+            // this build does not recognise falls back to the default rather than
+            // throwing the whole settings file away. It matters more here — the
+            // consequence of losing this setting is that the app starts deleting
+            // on a schedule the user did not pick.
+            historyRetention = (try? c.decodeIfPresent(HistoryRetention.self, forKey: .historyRetention))
+                .flatMap { $0 } ?? fallback.historyRetention
             // Every settings file written before this key existed decodes to the
             // default, which is the behaviour those files already had plus the
             // ordinary writing rule. An unknown value from a newer build does the
@@ -130,6 +148,55 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     /// two parties" as words. So the default is not an override — it is the
     /// ordinary writing rule applied on top, and the wholesale modes are there
     /// for the jobs that want them.
+    /// How long a dictation stays in the history before Quill deletes it.
+    ///
+    /// Stored as a string case rather than a number of days so the file stays
+    /// readable and a future option cannot be confused with an old one.
+    public enum HistoryRetention: String, Codable, Sendable, CaseIterable {
+        case day
+        case week
+        case month
+        case forever
+
+        public var label: String {
+            switch self {
+            case .day:     return "A day"
+            case .week:    return "A week"
+            case .month:   return "A month"
+            case .forever: return "Forever"
+            }
+        }
+
+        public var detail: String {
+            switch self {
+            case .day:     return "Anything dictated more than a day ago is deleted."
+            case .week:    return "Anything dictated more than a week ago is deleted."
+            case .month:   return "Anything dictated more than a month ago is deleted."
+            case .forever: return "Nothing is ever deleted. Insights keeps every number."
+            }
+        }
+
+        /// Days rather than seconds, and calendar days rather than 86,400-second
+        /// ones: "a month ago" has to mean the same wall-clock moment across the
+        /// two days a year when a day is not 24 hours long, or a record survives
+        /// an hour longer than it should each October and dies an hour early each
+        /// April. Nobody would notice, which is exactly why it should be right.
+        public var days: Int? {
+            switch self {
+            case .day:     return 1
+            case .week:    return 7
+            case .month:   return 30
+            case .forever: return nil
+            }
+        }
+
+        /// The cutoff, or nil when nothing expires.
+        public func cutoff(from now: Date, calendar: Calendar = .current) -> Date? {
+            guard let days else { return nil }
+            return calendar.date(byAdding: .day, value: -days, to: now)
+        }
+    }
+
     public enum NumberStyle: String, Codable, Sendable, CaseIterable {
         /// Whatever the recogniser wrote. No rule applied.
         case asHeard
@@ -184,6 +251,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public var inputDeviceUID: String? { withLock { values.inputDeviceUID } }
     public var liveText: Bool { withLock { values.liveText } }
     public var undoChord: Bool { withLock { values.undoChord } }
+    public var historyRetention: Values.HistoryRetention { withLock { values.historyRetention } }
     public var numberStyle: Values.NumberStyle { withLock { values.numberStyle } }
     public var contextRecovery: Bool { withLock { values.contextRecovery } }
 
@@ -225,6 +293,9 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public func setInputDeviceUID(_ uid: String?) { update { $0.inputDeviceUID = uid } }
     public func setLiveText(_ on: Bool) { update { $0.liveText = on } }
     public func setUndoChord(_ on: Bool) { update { $0.undoChord = on } }
+    public func setHistoryRetention(_ value: Values.HistoryRetention) {
+        update { $0.historyRetention = value }
+    }
     public func setNumberStyle(_ style: Values.NumberStyle) { update { $0.numberStyle = style } }
     public func setContextRecovery(_ on: Bool) { update { $0.contextRecovery = on } }
 

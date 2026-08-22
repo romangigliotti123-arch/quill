@@ -163,6 +163,18 @@ public final class SettingsSectionView: NSView {
         ])
     }
 
+    private var retentionPicker: DashboardMenuButton?
+    private var retentionNote: NSTextField?
+
+    /// The picker's own title and caption, after the menu changed the value.
+    /// Same shape as `refreshNumberStyle` — a menu button does not restate
+    /// itself, so the screen would keep showing the old answer.
+    private func refreshRetention() {
+        retentionPicker?.title = settings.historyRetention.label
+        retentionNote?.stringValue = settings.historyRetention.detail
+        relayout()
+    }
+
     private var numberPicker: DashboardMenuButton?
     private var numberNote: NSTextField?
 
@@ -234,9 +246,28 @@ public final class SettingsSectionView: NSView {
         let history = actionButton("Reveal") {
             NSWorkspace.shared.activateFileViewerSelecting([HistoryStore.defaultURL])
         }
+
+        let keep = DashboardMenuButton(title: settings.historyRetention.label, style: style) {
+            [weak self] in
+            guard let self else { return [] }
+            let chosen = self.settings.historyRetention
+            return QuillSettings.Values.HistoryRetention.allCases.map { option in
+                .init(title: option.label, isSelected: option == chosen) { [weak self] in
+                    self?.settings.setHistoryRetention(option)
+                    self?.refreshRetention()
+                }
+            }
+        }
+        retentionPicker = keep
+        let keepNote = DashboardType.label(settings.historyRetention.detail,
+                                           font: DashboardType.caption,
+                                           color: style.inkTertiary, lines: 2, lineHeight: 16)
+        retentionNote = keepNote
+
         return SettingsGroup(title: "Files", style: style, rows: [
             .init(label: "Vocabulary", detail: nil, control: vocabulary),
             .init(label: "History", detail: nil, control: history),
+            .init(label: "Keep dictations for", detail: keepNote, control: keep),
         ])
     }
 
