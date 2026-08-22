@@ -121,7 +121,11 @@ public final class AudioCapture: AudioSource {
         let replacement = captureFormat
         if let replacement,
            replacement.sampleRate == installed.sampleRate,
-           replacement.channelCount == installed.channelCount {
+           replacement.channelCount == installed.channelCount,
+           // Asked of the node itself, immediately before handing the format
+           // back to it. Same reason as in `start()`: a mismatch here is an
+           // uncatchable exception rather than a returned error.
+           engine.inputNode.inputFormat(forBus: 0).sampleRate == installed.sampleRate {
             engine.inputNode.removeTap(onBus: 0)
             installTap(format: installed)
             engine.prepare()
@@ -288,6 +292,43 @@ public final class AudioCapture: AudioSource {
         let warmupDeadline = (enableVoiceProcessing && input.isVoiceProcessingEnabled)
             ? Date().addingTimeInterval(0.3)
             : nil
+
+        // `installTapOnBus` is the one call in this app that can kill the
+        // process, and it did: every one of the fourteen crash reports on this
+        // Mac is this line. It validates its arguments with an Objective-C
+        // exception, which Swift cannot catch, so a bad argument is not an error
+        // — it is `abort()`. From the outside that is "the app quits by itself",
+        // with no message and nothing on screen, usually just as you press the
+        // key to speak.
+        //
+        // Two arguments can be bad, and both are now checked here rather than
+        // discovered by the assertion:
+        //
+        // 1. A tap is already on the bus. `installTapOnBus` throws rather than
+        //    replacing, and this method could reach it with one installed —
+        //    `running` is not set until the very end, so two starts racing each
+        //    other both pass the guard at the top, and the recovery path in
+        //    `handleConfigurationChange` installs one too. `removeTap` is a
+        //    no-op when there is nothing there, so it is free to call always.
+        // 2. The format does not describe the hardware. The engine asserts that
+        //    the format handed in matches the input node's own, and the device
+        //    can change in the microseconds between reading it and using it —
+        //    unplugging a headset while pressing the key is enough.
+        input.removeTap(onBus: 0)
+
+        let live = input.inputFormat(forBus: 0)
+        guard live.sampleRate > 0, live.channelCount > 0 else {
+            throw AudioSourceError.noInputDevice
+        }
+        guard live.sampleRate == format.sampleRate,
+              live.channelCount == format.channelCount else {
+            // Changed underneath us between the read above and this line. An
+            // error is the right answer: the caller shows "could not start
+            // listening" and the next press works, which is a far better day
+            // than the process disappearing.
+            throw AudioSourceError.engineFailed(
+                "the microphone changed while starting — press the key again")
+        }
 
         installTap(format: format, warmupDeadline: warmupDeadline)
         activeFormat = format

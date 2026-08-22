@@ -312,3 +312,39 @@ private final class SlowToFinish: Transcriber, @unchecked Sendable {
         return false
     })
 }
+
+// MARK: - The call that could kill the process
+
+@Test func startingTwiceDoesNotStackTwoTapsOnOneBus() {
+    // Not a unit test of AVAudioEngine — a statement of the rule that made the
+    // crash possible, so it cannot be quietly dropped.
+    //
+    // `AudioCapture.start()` guards on `running`, and `running` is set at the
+    // very END of the method, after the engine has started. Everything between
+    // the guard and that line is therefore reachable twice: two starts racing
+    // each other both pass, and both reach `installTapOnBus`. The second one
+    // does not fail — it raises an Objective-C exception, which Swift cannot
+    // catch, so the process aborts. Every one of the fourteen crash reports on
+    // this machine is that line.
+    //
+    // The fix is a `removeTap` immediately before the install, which is a no-op
+    // when there is nothing there. This test pins that the source still says so.
+    let source = try! String(
+        contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/QuillKit/Audio/AudioCapture.swift"),
+        encoding: .utf8)
+
+    guard let installIndex = source.range(of: "installTap(format: format, warmupDeadline:")?.lowerBound,
+          let guardIndex = source.range(of: "guard !running else { return }")?.upperBound
+    else {
+        Issue.record("AudioCapture.start() no longer has the shape this pins")
+        return
+    }
+    let between = source[guardIndex ..< installIndex]
+    #expect(between.contains("removeTap(onBus: 0)"),
+            "installTapOnBus can abort the process if a tap is already on the bus")
+    #expect(between.contains("inputFormat(forBus: 0)"),
+            "the format must be re-checked against the node immediately before the install")
+}
