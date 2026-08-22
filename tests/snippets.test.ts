@@ -142,22 +142,28 @@ test('ordering puts the one you just used on top', () => {
   assert.equal(store.ordered[0]!.phrase, 'sign off');
 });
 
-test('the seed is a demonstration, not somebody’s life', () => {
-  // It used to be the author's actual week: his email address, his studio URL,
-  // his sign-off, his pricing. Useful to exactly one person and shipped to
-  // everybody, so the first thing any other user had to do was delete somebody
-  // else's contact details out of their own app.
-  const seed = snippetSeed();
-  assert.equal(seed.length, 3);
-  const text = JSON.stringify(seed);
-  for (const personal of ['gigliotti', 'romandesign', 'kassbarbers', 'Roman']) {
-    assert.ok(!text.toLowerCase().includes(personal.toLowerCase()), `the seed names ${personal}`);
+test('a new install has no snippets at all', () => {
+  // Two rounds of this: the seed was the author's actual week — his email, his
+  // studio URL, his sign-off, his pricing — and was then cut back to three
+  // generic examples. Both were wrong in the same way. A snippet fires on words
+  // you SAY, so anything shipped is a phrase waiting to expand into somebody
+  // else's text the first time you happen to say "my email" out loud, before
+  // you have seen the screen that would have told you it exists.
+  assert.deepEqual(snippetSeed(), []);
+});
+
+test('nothing personal can ever be shipped in the seed', () => {
+  // Kept as a standing guard rather than deleted with the seed it checked. The
+  // failure it exists to catch is somebody adding a starter set back, and that
+  // is exactly when nobody is looking for this test.
+  const text = JSON.stringify(snippetSeed());
+  for (const personal of ['gigliotti', 'romandesign', 'kassbarbers', 'roman']) {
+    assert.ok(!text.toLowerCase().includes(personal), `the seed names ${personal}`);
   }
-  // And every trigger made of one ordinary word is `alone`, or it would fire
-  // inside a sentence and eat it.
-  for (const snippet of seed) {
-    const words = snippet.phrase.trim().split(/\s+/).length;
-    if (words === 1) {
+  // And any trigger made of one ordinary word must be `alone`, or it fires
+  // inside a sentence and eats it.
+  for (const snippet of snippetSeed()) {
+    if (snippet.phrase.trim().split(/\s+/).length === 1) {
       assert.equal(snippet.mode, 'alone', `"${snippet.phrase}" can fire mid-sentence`);
     }
   }

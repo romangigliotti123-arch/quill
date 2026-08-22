@@ -19,32 +19,25 @@ export interface Vocabulary {
   terms: string[];
 }
 
-/// Seeded from the names a general speech model reliably mishears.
+/// Nothing. A new install has an empty Dictionary.
 ///
-/// This list used to be the author's life: his suburb, his school, his family,
-/// and eleven clients by full name. It shipped in the binary, so every stranger
-/// who installed Quill got a Dictionary of people they have never met — and
-/// those people never agreed to be in it. A seed is a guess at what ANY user
-/// says; anything narrower belongs in the file on their own machine, which is
-/// what the Dictionary tab is for.
-export const VOCABULARY_SEED: Vocabulary = {
-  terms: [
-    'Firebase', 'Firestore', 'Netlify', 'Supabase', 'SQLite', 'Postgres',
-    'Redis', 'Docker', 'Kubernetes', 'nginx', 'GraphQL', 'OAuth', 'JWT',
-    'SwiftUI', 'SwiftPM', 'Xcode', 'TypeScript', 'JavaScript', 'Playwright',
-    'PyTorch', 'NumPy', 'pandas', 'pytest', 'venv', 'CPython', 'codesign',
-    'npm', 'pnpm', 'webpack', 'Vite', 'ESLint', 'Prettier', 'Tailwind',
-    'React', 'Next.js', 'Node.js', 'Deno', 'Rust', 'Kotlin', 'Golang',
-    'tmux', 'xterm', 'ssh', 'sudo', 'cron', 'regex', 'stdout', 'stderr',
-    'API', 'CLI', 'SDK', 'UUID', 'JSON', 'YAML', 'CSV', 'HTTP', 'HTTPS',
-    'CI', 'CD', 'repo', 'monorepo', 'changelog', 'hotfix', 'linting',
-    // Cross-platform additions. The macOS build could assume a Mac vocabulary;
-    // this one runs where people say these instead.
-    'PowerShell', 'WSL', 'systemd', 'Wayland', 'Xorg', 'GNOME', 'KDE',
-    'Ubuntu', 'Debian', 'Fedora', 'Arch', 'NixOS', 'winget', 'Chocolatey',
-    'Electron', 'Vulkan', 'CUDA', 'ONNX', 'Whisper',
-  ],
-};
+/// The list started as the author's life — his suburb, his school, his family
+/// and eleven clients by full name — which meant every stranger who installed
+/// Quill got a Dictionary of people they had never met. That was replaced with
+/// sixty-odd general developer terms, which was better and still wrong: the
+/// Dictionary is not a starter kit, it is the list of words THIS person says
+/// that a general model gets wrong, and nobody can guess that from outside.
+///
+/// It is not cosmetic. Every term here is fed to Whisper as biasing on every
+/// dictation and is what the vocabulary corrector matches against, so a seed is
+/// a standing instruction to hear words the user may never say — and the prompt
+/// is capped, so shipped guesses displace the terms they actually added.
+///
+/// The empty state on the Dictionary screen does the job the seed was doing:
+/// it says what the feature is for and offers the words Quill has already
+/// misheard, harvested from real dictations, which are guesses about THEM.
+export const VOCABULARY_SEED: Vocabulary = { terms: [] };
+
 
 export function vocabularyURL(): string {
   const override = process.env.QUILL_VOCABULARY_FILE;

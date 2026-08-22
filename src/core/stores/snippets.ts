@@ -107,30 +107,20 @@ function encode(snippets: Snippet[]): unknown {
 
 /// First-run contents.
 ///
-/// Three examples that show the three shapes a snippet can take — a block of
-/// prose, a single line, and a template with gaps to fill — and nothing that
-/// belongs to a particular person.
+/// Nothing. A new install has no snippets.
 ///
-/// This used to be the author's actual week: his email address, his studio URL,
-/// his sign-off, his pricing. Useful to exactly one person and shipped to
-/// everybody, so the first thing any other user had to do was delete somebody
-/// else's contact details out of their own app. A seed is a demonstration of
-/// the feature, not a starter kit of the author's life.
+/// It shipped three examples, and examples are the wrong shape for this
+/// feature. A snippet fires on words you say out loud — so a starter set is
+/// three phrases that will expand into somebody else's text the first time you
+/// happen to say "my email" or "sign off" in a sentence, before you have read
+/// the screen that would have told you they exist. The demonstration value is
+/// one glance; the cost is being surprised by your own keyboard.
+///
+/// Kept as a function rather than folded away, because `SnippetStore` still has
+/// to tell "no file yet" from "a file I could not read" — those are different
+/// facts and only one of them is allowed to write.
 export function snippetSeed(): Snippet[] {
-  const now = new Date();
-  return [
-    makeSnippet({ phrase: 'my email', replacement: 'you@example.com', created: now }),
-    makeSnippet({ phrase: 'sign off', replacement: 'Thanks,\nYour name', created: now }),
-    // `alone` because "standup" is one ordinary word: matched anywhere in a
-    // sentence it would fire on someone saying "the standup is at nine" and eat
-    // their words.
-    makeSnippet({
-      phrase: 'standup',
-      replacement: 'Yesterday:\nToday:\nBlocked on:',
-      mode: 'alone',
-      created: now,
-    }),
-  ];
+  return [];
 }
 
 /// Snippets on disk, plus the usage counters.

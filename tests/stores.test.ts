@@ -73,13 +73,20 @@ test('a zero-byte file is a crash mid-write, not an empty collection', () => {
   assert.equal(readFileSync(path, 'utf8'), '');
 });
 
-test('a missing file is not damage — the seed is written on the first change', () => {
+test('a missing file is not damage — the first change is written', () => {
+  // The distinction that matters, now that the seed is empty and both cases
+  // start from an empty list: a file that does not exist yet may be created,
+  // and a file that exists but will not decode may NOT be written over.
   const dir = scratch();
   const path = join(dir, 'snippets.json');
   const store = new SnippetStore(path);
-  assert.ok(store.all.length > 0, 'a missing file should seed');
-  store.recordUses([store.all[0]!.id]);
-  assert.ok(existsSync(path));
+  assert.deepEqual(store.all, [], 'a new install has no snippets');
+  store.upsert({
+    id: uuid(), phrase: 'sign off', replacement: 'Cheers', mode: 'anywhere',
+    isEnabled: true, useCount: 0, lastUsed: null, created: new Date(),
+  });
+  assert.ok(existsSync(path), 'the first snippet was not written');
+  assert.equal(new SnippetStore(path).all.length, 1, 'it did not survive a reload');
 });
 
 test('a damaged transforms file keeps the built-ins in memory and writes nothing', () => {
