@@ -467,3 +467,44 @@ private let referenceURL = URL(fileURLWithPath: #filePath)
     #expect(flagged > sentences.count / 2,
             "only \(flagged) of \(sentences.count) flagged — the scorer may have tightened enough that a detector-plus-model pass is worth rebuilding")
 }
+
+// MARK: - Punctuation the user said survives a repair
+
+/// A name is split across adjacent WORDS, never across a clause boundary.
+///
+/// Nothing in the span guard looked at trailing punctuation, so a full stop
+/// inside a candidate span was invisible to matching and then deleted by the
+/// replacement — which keeps only the last token's trailing. Two sentences
+/// merged into one, and the full stop gone.
+@Test func aRepairNeverSpansAFullStopOrComma() {
+    let cleaner = FastCleaner()
+    #expect(cleaner.cleanFast("Ship the code. Sign the release before you go")
+                .contains("code."),
+            "a full stop inside a span was eaten")
+    #expect(!cleaner.cleanFast("Ship the code. Sign the release before you go")
+                .lowercased().contains("codesign"))
+
+    #expect(cleaner.cleanFast("pushed the code, sign off").contains("code,"),
+            "a comma inside a span was eaten")
+}
+
+/// Leading punctuation lived inside `word` and was dropped whenever the token was
+/// rebuilt around a match.
+@Test func aRepairKeepsTheQuoteOrBulletInFrontOfTheWord() {
+    let corrector = VocabularyCorrector(vocabulary: Vocabulary(terms: ["Netlify", "Firestore"]))
+
+    let quoted = corrector.correct("he said \"netlify\" was down")
+    #expect(quoted.contains("\"Netlify\""), "lost the opening quote: \(quoted)")
+
+    let bulleted = corrector.correct("- netlify is down")
+    #expect(bulleted.hasPrefix("- "), "lost the bullet: \(bulleted)")
+    #expect(bulleted.contains("Netlify"))
+}
+
+/// A token that is nothing but punctuation must not be swallowed into a span.
+@Test func aStrayDashBetweenWordsIsNotEatenByARepair() {
+    let corrector = VocabularyCorrector(vocabulary: Vocabulary(terms: ["Netlify"]))
+    let out = corrector.correct("I checked - netlify was down")
+    #expect(out.contains("-"), "the dash was swallowed: \(out)")
+    #expect(out.contains("Netlify"))
+}

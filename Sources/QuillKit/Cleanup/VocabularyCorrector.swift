@@ -102,6 +102,32 @@ public struct VocabularyCorrector: Sendable {
                 guard !Self.isBoundaryWord(window.first?.word),
                       !Self.isBoundaryWord(window.last?.word) || span == 1
                 else { continue }
+                // A name is split across adjacent WORDS, never across a clause
+                // boundary or around a stray mark.
+                //
+                // Nothing looked at `trailing` when building the candidate, so a
+                // full stop inside the span was invisible to matching and then
+                // deleted by the replacement, which keeps only the LAST token's
+                // trailing:
+                //
+                //     "Ship the code. Sign the release"  ->  "Ship the codesign the release"
+                //     "pushed the code, sign off"        ->  "pushed the codesign off"
+                //
+                // Two sentences merged into one, and a full stop gone. The comma
+                // is in the set for the same reason — carrying it forward instead
+                // would produce "the codesign, off", which is no better.
+                //
+                // A punctuation-only token is a hard boundary too: it contributes
+                // nothing to the candidate and would be swallowed by the range
+                // that gets replaced, so "I checked - netlify was down" lost its
+                // dash.
+                //
+                // `continue` rather than `break`, so the shorter span is still
+                // tried — that is what keeps the legitimate repair in shapes like
+                // "Air Tasker. He's".
+                guard window.dropLast().allSatisfy({ !$0.trailing.contains(where: { ".,!?;:".contains($0) }) }),
+                      window.allSatisfy({ !$0.word.isEmpty })
+                else { continue }
                 let candidate = window.map(\.word).joined(separator: " ")
                 // An email address is not a misheard name. Its local part is
                 // whatever the person chose to call themselves, and fuzzy-matching
@@ -122,7 +148,9 @@ public struct VocabularyCorrector: Sendable {
                 guard let match = resolved else { continue }
 
                 // Keep the trailing punctuation of the last token in the span.
-                tokens[index] = Token(word: match, trailing: window[span - 1].trailing)
+                // The opening quote or bracket the user said comes back too.
+                tokens[index] = Token(leading: window[0].leading, word: match,
+                                      trailing: window[span - 1].trailing)
                 if span > 1 {
                     tokens.removeSubrange(index + 1 ..< index + span)
                 }
@@ -133,7 +161,7 @@ public struct VocabularyCorrector: Sendable {
             if !replaced { index += 1 }
         }
 
-        return tokens.map { $0.word + $0.trailing }.joined(separator: " ")
+        return tokens.map { $0.leading + $0.word + $0.trailing }.joined(separator: " ")
             .replacingOccurrences(of: " \n", with: "\n")
     }
 
@@ -586,6 +614,12 @@ public struct VocabularyCorrector: Sendable {
     // MARK: - Tokens
 
     struct Token {
+        /// Punctuation that came before the word — an opening quote, a bracket,
+        /// a bullet. It used to be left inside `word`, and a match rebuilt the
+        /// token as `Token(word: match, …)`, so it was silently deleted:
+        ///
+        ///     he said "Netlify" was down   ->   he said Netlify" was down
+        var leading: String = ""
         var word: String
         /// Punctuation that followed the word, preserved so correcting a term
         /// never eats the comma after it.
@@ -595,9 +629,16 @@ public struct VocabularyCorrector: Sendable {
     static func tokenise(_ text: String) -> [Token] {
         text.split(separator: " ", omittingEmptySubsequences: true).map { chunk in
             let s = String(chunk)
+            // Trailing first, then leading off what is left. The other order
+            // makes a chunk that is entirely punctuation — a lone quote, a dash —
+            // land in both fields and get emitted twice.
             let trailing = s.suffix(while: { $0.isPunctuation || $0.isSymbol })
-            return Token(word: String(s.dropLast(trailing.count)), trailing: String(trailing))
-        }.filter { !$0.word.isEmpty || !$0.trailing.isEmpty }
+            let core = String(s.dropLast(trailing.count))
+            let leading = core.prefix(while: { $0.isPunctuation || $0.isSymbol })
+            return Token(leading: String(leading),
+                         word: String(core.dropFirst(leading.count)),
+                         trailing: String(trailing))
+        }.filter { !$0.word.isEmpty || !$0.trailing.isEmpty || !$0.leading.isEmpty }
     }
 }
 
