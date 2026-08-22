@@ -70,6 +70,17 @@ public protocol TranscriberDelegate: AnyObject {
     /// Called for every partial and final.
     func transcriber(didProduce transcript: Transcript)
     func transcriber(didFail error: Error)
+    /// The microphone went away part-way through, so there is no more audio
+    /// coming. Distinct from `didFail` because there IS a transcript: whatever
+    /// was heard before the device disappeared is real and must not be thrown
+    /// away — it only has to stop being presented as the whole sentence.
+    func transcriberDidLoseInput()
+}
+
+public extension TranscriberDelegate {
+    /// Default for the delegates that are not a running app — the probe, the
+    /// harness collector, the fakes. They have no dictation to end.
+    func transcriberDidLoseInput() {}
 }
 
 public protocol Transcriber: AnyObject {

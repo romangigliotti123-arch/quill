@@ -172,7 +172,11 @@ public enum AudioDeviceInfo {
         return value as String
     }
 
-    private static func defaultInputDeviceID() -> AudioDeviceID? {
+    /// The device CoreAudio would pick on its own. `AudioCapture` needs it by
+    /// name rather than by omission: once its HAL unit has been pointed at a
+    /// specific device, "no preference" has to be written back explicitly or the
+    /// unit stays where it was pointed.
+    static func defaultInputDeviceID() -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,

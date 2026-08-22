@@ -18,6 +18,8 @@ public final class AudioFileSource: AudioSource, @unchecked Sendable {
 
     public var onBuffer: ((AVAudioPCMBuffer, AVAudioTime?) -> Void)?
     public var onLevel: ((Float) -> Void)?
+    /// Never called. A file has no device behind it to go away.
+    public var onInterruption: ((AudioSourceError) -> Void)?
     /// Fired once the last buffer has been delivered.
     public var onEnded: (() -> Void)?
 

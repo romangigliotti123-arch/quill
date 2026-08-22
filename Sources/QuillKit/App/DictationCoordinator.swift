@@ -281,6 +281,7 @@ public final class DictationCoordinator {
     private func beginDictation() {
         guard !isDictating else { return }
         isDictating = true
+        inputLost = false
 
         if !isSpeculating {
             // Defensive: a confirmation with no speculation behind it. Start now
@@ -315,6 +316,14 @@ public final class DictationCoordinator {
         overlay.show(.listening(level: 0))
     }
 
+    /// The microphone disappeared during this dictation.
+    ///
+    /// Changes two decisions and nothing else: the change-of-mind shortcut must
+    /// not bin the recording (this was not a change of mind), and the user has to
+    /// be told the sentence is short because the device went away rather than
+    /// because that is all they said.
+    private var inputLost = false
+
     private func endDictation() {
         guard isDictating else { return }
         isDictating = false
@@ -342,8 +351,13 @@ public final class DictationCoordinator {
         // for a long hold at a dead microphone, which is exactly when he needs to
         // be told. Only short AND silent is a change of mind, and the right answer
         // to a change of mind is to leave no trace.
+        //
+        // Not when the microphone was pulled out from under it, though. A short,
+        // silent recording is a change of mind when the user made it one and a
+        // truncation when the device decided — and binning a truncation without a
+        // word is the same silent loss from the other end.
         let held = timeline.hotkeyDown.map { timeline.hotkeyUp?.timeIntervalSince($0) ?? 0 } ?? 0
-        if Self.isChangeOfMind(heldFor: held, sawLevels: sawLevels, peak: peakLevel) {
+        if !inputLost, Self.isChangeOfMind(heldFor: held, sawLevels: sawLevels, peak: peakLevel) {
             isSpeculating = false
             sessionID += 1
             if isLive { liveTyper.retract(generation: liveGeneration) }
@@ -446,9 +460,17 @@ public final class DictationCoordinator {
                 // Telling someone to try again, when trying again cannot work, is
                 // worse than saying nothing.
                 let device = self.capturedInputDevice ?? "Your microphone"
-                overlay.show(.error(self.peakLevel < DictationCoordinator.silenceFloor
-                    ? "\(device) sent no sound at all. Pick a different microphone in Settings."
-                    : "Nothing was heard — try again, or check the microphone in Settings."))
+                if self.inputLost {
+                    // Not the user's microphone choice and not a mishearing: the
+                    // device went away mid-sentence. Telling them to pick a
+                    // different one would send them to fix something that is not
+                    // broken.
+                    overlay.show(.error("\(device) disconnected — nothing was captured."))
+                } else {
+                    overlay.show(.error(self.peakLevel < DictationCoordinator.silenceFloor
+                        ? "\(device) sent no sound at all. Pick a different microphone in Settings."
+                        : "Nothing was heard — try again, or check the microphone in Settings."))
+                }
                 try? await Task.sleep(for: .milliseconds(1_600))
                 overlay.hide()
                 return
@@ -612,7 +634,15 @@ public final class DictationCoordinator {
                 self.lastInsertion = .init(text: final, insertedAt: Date())
                 // Split on whitespace, not on the space character: a transform
                 // that returns a bullet list is one word by the old count.
-                overlay.show(.inserted(words: final.split(whereSeparator: \.isWhitespace).count))
+                if self.inputLost {
+                    // Say it plainly. The text is real and it is inserted, but it
+                    // is only as much of the sentence as reached the app before
+                    // the device disappeared — and a half-thought that reads as a
+                    // whole one is the failure mode this message exists to break.
+                    overlay.show(.error("\(self.capturedInputDevice ?? "The microphone") disconnected — kept what was heard."))
+                } else {
+                    overlay.show(.inserted(words: final.split(whereSeparator: \.isWhitespace).count))
+                }
             case .fellBackToClipboard(let reason):
                 self.undo?.discard()
                 overlay.show(.error("Copied to clipboard — \(reason)"))
@@ -833,5 +863,24 @@ extension DictationCoordinator: TranscriberDelegate {
 
     public func transcriber(didFail error: Error) {
         fail(error.localizedDescription)
+    }
+
+    /// The device went away mid-sentence. End the dictation now rather than wait
+    /// for a key release that will arrive against a dead microphone.
+    ///
+    /// Deliberately not `fail()`: fail tears the session down and shows an error,
+    /// which would throw away words the user actually said. Everything heard up
+    /// to the disconnect is a real transcript and goes in exactly as it would
+    /// have — the only thing that changes is that the user is told why it stops
+    /// where it does.
+    public func transcriberDidLoseInput() {
+        guard isDictating else {
+            // Still speculating: nothing has been shown and nothing was said, so
+            // there is nothing to tell anyone about. Bin it quietly.
+            abandonSpeculation()
+            return
+        }
+        inputLost = true
+        endDictation()
     }
 }

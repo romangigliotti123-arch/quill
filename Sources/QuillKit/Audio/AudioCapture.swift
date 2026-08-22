@@ -36,8 +36,14 @@ public final class AudioCapture: AudioSource {
         set { withLock { _onLevel = newValue } }
     }
 
+    public var onInterruption: ((AudioSourceError) -> Void)? {
+        get { withLock { _onInterruption } }
+        set { withLock { _onInterruption = newValue } }
+    }
+
     private var _onBuffer: ((AVAudioPCMBuffer, AVAudioTime?) -> Void)?
     private var _onLevel: ((Float) -> Void)?
+    private var _onInterruption: ((AudioSourceError) -> Void)?
     private let lock = NSLock()
 
     private func withLock<T>(_ body: () -> T) -> T {
@@ -51,6 +57,12 @@ public final class AudioCapture: AudioSource {
     private let settings: QuillSettings
     private var running = false
     private var prepared = false
+    /// The format the live tap was installed with, kept so a configuration change
+    /// can be compared against it. The transcriber built its analyzer feed from
+    /// this exact format once and never re-asks, so "the same numbers" is the
+    /// difference between carrying on and having to stop.
+    private var activeFormat: AVAudioFormat?
+    private var configurationObserver: NSObjectProtocol?
 
     /// Voice processing needs roughly 300 ms to settle, and buffers captured
     /// inside that window come back attenuated or silent — murmur lost the first
@@ -63,6 +75,69 @@ public final class AudioCapture: AudioSource {
                 settings: QuillSettings = .shared) {
         self.enableVoiceProcessing = enableVoiceProcessing
         self.settings = settings
+        // Block-based, so the token is what removes it. `removeObserver(self)`
+        // does not touch observers registered this way.
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleConfigurationChange()
+        }
+    }
+
+    deinit {
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+        }
+    }
+
+    /// The input hardware changed underneath a live dictation.
+    ///
+    /// AirPods connecting or dropping, a call starting and moving them between
+    /// their 48 kHz and 16 kHz modes, a USB interface unplugged, the system
+    /// default switching. Per Apple's contract the engine stops and uninitializes
+    /// itself when this happens, taking the installed tap with it — so buffers
+    /// simply stop. Nothing downstream can tell: `running` is still true,
+    /// `engine.isRunning` is read nowhere, and the coordinator's only liveness
+    /// signal is the level meter, which has no timeout on its own absence. Roman
+    /// loses the second half of a sentence and is handed the first half as though
+    /// it were all of it.
+    ///
+    /// Two outcomes, and the difference is the format. The transcriber reads
+    /// `captureFormat` once at `start()` and builds an `AnalyzerFeeding` around
+    /// it — on macOS 26 that is a single long-lived `AVAudioConverter` with
+    /// `primeMethod = .none` — and never re-asks. Feeding it buffers at a
+    /// different sample rate is API misuse: at best it resamples at the wrong
+    /// ratio and the recogniser hears garbled speech, which is worse than
+    /// truncation because the text comes out plausible. So:
+    ///
+    ///   - same format → reinstall the tap and restart. Only the gap is lost.
+    ///   - different, or gone → stop, and say so. Visible truncation beats
+    ///     silent truncation, and beats invented words by more than that.
+    private func handleConfigurationChange() {
+        guard running, let installed = activeFormat else { return }
+
+        let replacement = captureFormat
+        if let replacement,
+           replacement.sampleRate == installed.sampleRate,
+           replacement.channelCount == installed.channelCount {
+            engine.inputNode.removeTap(onBus: 0)
+            installTap(format: installed)
+            engine.prepare()
+            if (try? engine.start()) != nil { return }
+        }
+
+        // Recovery is not possible or did not take. Tear down rather than sit
+        // there `running` with no audio behind it.
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        engine.reset()
+        running = false
+        prepared = false
+        activeFormat = nil
+        let handler = withLock { _onInterruption }
+        handler?(.noInputDevice)
     }
 
     /// The format the tap must be installed with: the input node's INPUT side.
@@ -139,13 +214,47 @@ public final class AudioCapture: AudioSource {
     /// falling through to the system default is what the user expects when they
     /// unplug a headset mid-day, and `AudioDeviceInfo.activeInputName` reports the
     /// same fallback so the transcript is stamped with what actually recorded it.
+    ///
+    /// The default has to be written back BY NAME, which is the whole reason this
+    /// resolves a device id in the nil case instead of returning early.
+    ///
+    /// There is one `AVAudioEngine` for the process, and an audio-unit property
+    /// persists on its instance — `stop()`/`reset()` do not clear one. So the
+    /// early return this used to take when `inputDeviceUID` was nil left the unit
+    /// pinned to whatever was chosen last. Pick "Shure MV7" in Settings, dictate
+    /// once, put the picker back to "System default", put your AirPods in: every
+    /// dictation after that still records the Shure, while the picker reads
+    /// System default and `activeInputName(uid: nil)` stamps the history row
+    /// "AirPods Pro" — capture and stamp disagreeing, which is the audit failure
+    /// AudioDeviceInfo says it exists to prevent. With a loopback device selected
+    /// during an eval it is total loss: silence every time, and an overlay
+    /// blaming a microphone the user never chose. The documented unplug fallback
+    /// had the same hole and only ever worked across a relaunch.
+    ///
+    /// Read before write, because this runs on the latency path. `prepare()` is
+    /// called on key-down, and a CurrentDevice write forces a HAL renegotiation
+    /// and changes the input node's format underneath the about-to-be-read
+    /// `captureFormat`. On the common never-touched-the-picker case the device is
+    /// already right, and the correct amount of work is none.
     private func selectConfiguredInputDevice() {
-        guard let uid = settings.inputDeviceUID,
-              let deviceID = AudioDeviceInfo.deviceID(forUID: uid),
-              let unit = engine.inputNode.audioUnit
-        else { return }
+        guard let unit = engine.inputNode.audioUnit else { return }
+        let target = settings.inputDeviceUID.flatMap(AudioDeviceInfo.deviceID(forUID:))
+            ?? AudioDeviceInfo.defaultInputDeviceID()
+        // No input device at all: leave the unit alone. `captureFormat` then
+        // reports 0 and `start()` throws `noInputDevice`, which is the truth.
+        guard var id = target else { return }
 
-        var id = deviceID
+        var current = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        if AudioUnitGetProperty(unit,
+                                kAudioOutputUnitProperty_CurrentDevice,
+                                kAudioUnitScope_Global,
+                                0,
+                                &current,
+                                &size) == noErr, current == id {
+            return
+        }
+
         AudioUnitSetProperty(unit,
                              kAudioOutputUnitProperty_CurrentDevice,
                              kAudioUnitScope_Global,
@@ -180,7 +289,23 @@ public final class AudioCapture: AudioSource {
             ? Date().addingTimeInterval(0.3)
             : nil
 
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
+        installTap(format: format, warmupDeadline: warmupDeadline)
+        activeFormat = format
+
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            throw AudioSourceError.engineFailed(error.localizedDescription)
+        }
+        running = true
+    }
+
+    /// One tap, in one place, so the recovery path cannot install a subtly
+    /// different one from the start path.
+    private func installTap(format: AVAudioFormat, warmupDeadline: Date? = nil) {
+        engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
             guard let self else { return }
             if let warmupDeadline, Date() < warmupDeadline { return }
             // Read once, call outside the lock: the handler runs a transcription
@@ -194,15 +319,6 @@ public final class AudioCapture: AudioSource {
                 meter?(level)
             }
         }
-
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            input.removeTap(onBus: 0)
-            throw AudioSourceError.engineFailed(error.localizedDescription)
-        }
-        running = true
     }
 
     public func stop() {
@@ -225,6 +341,7 @@ public final class AudioCapture: AudioSource {
 
         running = false
         prepared = false
+        activeFormat = nil
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let meter = self.withLock { self._onLevel }

@@ -256,6 +256,10 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
             }
             audio.onBuffer = { [weak self] buffer, time in self?.ingest(buffer, at: time, session: id) }
             audio.onLevel = { [weak self] level in self?.publish(level: level) }
+            audio.onInterruption = { [weak self] _ in
+                guard let self, self.withLock({ self.session === session }) else { return }
+                Task { @MainActor in self.delegate?.transcriberDidLoseInput() }
+            }
             try audio.start()
         } catch {
             // A throw here — no microphone, a refused analyzer — would otherwise

@@ -13,6 +13,21 @@ public protocol AudioSource: AnyObject {
     /// Normalized 0…1 input level for the overlay waveform, delivered on main.
     var onLevel: ((Float) -> Void)? { get set }
 
+    /// Capture died on its own, part-way through, rather than because anyone
+    /// asked it to stop. Delivered on main.
+    ///
+    /// Without this the failure has no way of being noticed at all. Buffers just
+    /// stop arriving: `running` is still true, the level meter's last frame is
+    /// still on screen because it only repaints from tap callbacks, and nothing
+    /// times out on silence — so the first half of the sentence is inserted as
+    /// though it were the whole of it. A grammatical half-thought is the worst
+    /// shape this failure can take, because it does not look like a failure.
+    ///
+    /// "Losing words is the one thing this app may never do" is the rule
+    /// elsewhere in this codebase. Losing them invisibly is that rule broken
+    /// twice.
+    var onInterruption: ((AudioSourceError) -> Void)? { get set }
+
     /// The format buffers will arrive in. Only meaningful once `start()` has
     /// been called, because the microphone's format is decided by the device.
     ///

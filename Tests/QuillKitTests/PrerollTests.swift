@@ -15,6 +15,7 @@ import Testing
 private final class SpyAudio: AudioSource, @unchecked Sendable {
     var onBuffer: ((AVAudioPCMBuffer, AVAudioTime?) -> Void)?
     var onLevel: ((Float) -> Void)?
+    var onInterruption: ((AudioSourceError) -> Void)?
 
     private let lock = NSLock()
     private var _running = false
