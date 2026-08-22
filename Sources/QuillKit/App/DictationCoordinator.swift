@@ -299,6 +299,9 @@ public final class DictationCoordinator {
         isDictating = true
         inputLost = false
         isSpeculating = false
+        // Here and nowhere else on the way in: this is the moment a gesture stops
+        // being speculative and becomes something that will write to the caret.
+        insertionEpoch += 1
         // Decided here, once, rather than per partial: the focused app is
         // whatever the user was in when they pressed the key, and it is the only
         // window it is ever safe to type into during this dictation.
@@ -326,6 +329,30 @@ public final class DictationCoordinator {
         overlay.show(.listening(level: 0))
     }
 
+    /// Which CONFIRMED dictation owns the caret, as distinct from which capture
+    /// session is installed.
+    ///
+    /// `sessionID` moves on every speculative key-down, because that is what the
+    /// transcriber's start/stop tasks have to be fenced against. Fencing the
+    /// INSERTION on it too meant that any abandoned gesture — a stray isolated
+    /// tap, a chord that arms and aborts — superseded a dictation that was still
+    /// finalising and pushed its sentence to the clipboard instead of into the
+    /// document.
+    ///
+    /// The shape that made this routine: hands-free is taught as a double-tap and
+    /// nothing anywhere says stopping is a single tap, so people double-tap to
+    /// stop. Tap one stops it and starts the finalise, which is hundreds of
+    /// milliseconds of drain and barrier. Tap two, 150 ms later, lands in `.idle`
+    /// and opens a speculation — enough to invalidate the sentence the user was
+    /// in the middle of dictating. They get "You started again before that
+    /// finished — it is on your clipboard", for a gesture they made to STOP.
+    ///
+    /// A gesture that was abandoned has by definition inserted nothing, so it has
+    /// no business invalidating the previous sentence. A confirmed hold or a new
+    /// hands-free still supersedes, which is the case the rescue branch is
+    /// actually defending against.
+    private var insertionEpoch = 0
+
     /// The microphone disappeared during this dictation.
     ///
     /// Changes two decisions and nothing else: the change-of-mind shortcut must
@@ -342,7 +369,7 @@ public final class DictationCoordinator {
         // is the moment the user stopped talking, and everything after it is
         // latency they sit through.
         timeline.hotkeyUp = Date()
-        let session = sessionID
+        let epoch = insertionEpoch
 
         // A tap, not a dictation.
         //
@@ -386,8 +413,8 @@ public final class DictationCoordinator {
             // typing for the rest of the session.
             defer { self.isFinalising = false }
             let raw = await transcriber.stop()
-            guard session == self.sessionID else {
-                // A newer gesture started while this one was finalising.
+            guard epoch == self.insertionEpoch else {
+                // A newer DICTATION was confirmed while this one was finalising.
                 //
                 // Not inserting is right: pasting a sentence from thirty seconds
                 // ago into whatever the user is typing in NOW is the failure this
@@ -556,7 +583,7 @@ public final class DictationCoordinator {
             // world: the insertion, `isLive`, the timeline, the undo record and
             // the history row. None of it may be written by a session that has
             // been superseded.
-            guard session == self.sessionID else {
+            guard epoch == self.insertionEpoch else {
                 // The sentence is not thrown away — losing words is the one thing
                 // this app may never do — but it is NOT re-inserted either, and
                 // this is where that differs from the earlier rescue above.

@@ -123,6 +123,15 @@ public final class HelpSectionView: NSView {
                   control: HelpKeycap(settings.toggleSharesHoldKey
                                         ? "Double-tap \(hold)" : "Tap \(settings.toggle.displayName)",
                                       style: style)),
+            // Named, because nothing else in the app ever said it. Hands-free is
+            // taught as a double-tap and stopping is a single tap, so people
+            // double-tap to stop — the second half of which is a fresh gesture.
+            .init(label: "Stop hands-free", detail: nil,
+                  control: HelpKeycap(settings.toggleSharesHoldKey
+                                        ? "Tap \(hold)" : "Tap \(settings.toggle.displayName)",
+                                      style: style)),
+            .init(label: "Take back what was just inserted", detail: nil,
+                  control: HelpKeycap("⌥⌫", style: style)),
             .init(label: "Throw the dictation away", detail: nil,
                   control: HelpKeycap("Escape", style: style)),
         ]

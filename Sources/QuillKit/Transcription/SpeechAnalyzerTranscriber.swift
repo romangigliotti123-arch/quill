@@ -102,6 +102,33 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         return body()
     }
 
+    /// Guards the microphone: who owns it, and the calls that start and stop it.
+    ///
+    /// A second mutex rather than `lock`, because `lock` is held across reads of
+    /// the whole session graph and this one must be held across `audio.start()`
+    /// and `audio.stop()` — narrow, and never at the same time as the other.
+    ///
+    /// The ownership scheme already existed; only the check was atomic, not the
+    /// act. `performStop` for dictation N read `audioOwner == session.id`, got
+    /// true, released the lock, and could be descheduled there. Dictation N+1's
+    /// `start()` — a separate detached Task, and the transcriber's own comment
+    /// says overlap is the premise, not an accident — then claimed the mic and
+    /// called `audio.start()`. Thread A resumed on the next line and executed
+    /// `audio.onBuffer = nil; audio.stop()` against the dictation that had just
+    /// begun. That is the failure the ownership scheme was written for, measured
+    /// once as 10 of 40 clips producing no transcript at all; it was closed on
+    /// the ordinary path and left open on the interleaving.
+    ///
+    /// There is no suspension point inside any critical section below, so an
+    /// NSLock is safe: B cannot start the engine while A is stopping it, and A
+    /// cannot stop an engine B has already claimed.
+    private let audioLock = NSLock()
+
+    private func withAudioLock<T>(_ body: () throws -> T) rethrows -> T {
+        audioLock.lock(); defer { audioLock.unlock() }
+        return try body()
+    }
+
     /// The two stamps this type is the only witness to are filled in here;
     /// `hotkeyDown`, `finalTranscript` and `textInserted` belong to the
     /// coordinator, which copies this value and completes it. `finalTranscript`
@@ -213,7 +240,11 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         let session: Session = withLock {
             sessionCounter += 1
             liveSessionID = sessionCounter
-            audioOwner = sessionCounter
+            // `audioOwner` is deliberately NOT claimed here. It is claimed in the
+            // same critical section as `audio.start()` below, so the claim and the
+            // act cannot be separated by a deschedule. `liveSessionID` stays —
+            // `ingest()` and the grace loop key off it, and neither touches the
+            // engine.
             let new = Session(
                 id: sessionCounter,
                 module: engine.module,
@@ -254,13 +285,16 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
                 withLock { if self.session === session { self.session = nil } }
                 return
             }
-            audio.onBuffer = { [weak self] buffer, time in self?.ingest(buffer, at: time, session: id) }
-            audio.onLevel = { [weak self] level in self?.publish(level: level) }
-            audio.onInterruption = { [weak self] _ in
-                guard let self, self.withLock({ self.session === session }) else { return }
-                Task { @MainActor in self.delegate?.transcriberDidLoseInput() }
+            try withAudioLock {
+                audioOwner = id
+                audio.onBuffer = { [weak self] buffer, time in self?.ingest(buffer, at: time, session: id) }
+                audio.onLevel = { [weak self] level in self?.publish(level: level) }
+                audio.onInterruption = { [weak self] _ in
+                    guard let self, self.withLock({ self.session === session }) else { return }
+                    Task { @MainActor in self.delegate?.transcriberDidLoseInput() }
+                }
+                try audio.start()
             }
-            try audio.start()
         } catch {
             // A throw here — no microphone, a refused analyzer — would otherwise
             // leave an installed session with a live drain task behind it, and
@@ -359,7 +393,9 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         // Only if this session still owns the microphone. A newer dictation may
         // have claimed it while this one was finalising, and pulling the tap out
         // from under it is what produced the silent failures.
-        if withLock({ audioOwner == session.id }) {
+        withAudioLock {
+            guard audioOwner == session.id else { return }
+            audioOwner = 0
             audio.onBuffer = nil
             audio.stop()
         }
@@ -636,8 +672,17 @@ public final class SpeechAnalyzerTranscriber: Transcriber {
         }
         guard let session else { return }
 
-        audio.onBuffer = nil
-        audio.stop()
+        withAudioLock {
+            // `teardown(current: nil)` is the top of `start()`, which runs before
+            // that start claims anything — it may stop unconditionally, and must,
+            // because the new dictation genuinely does take the microphone. Any
+            // other caller is finishing a specific session and may only stop the
+            // engine if that session still owns it.
+            if current != nil, audioOwner != session.id { return }
+            audioOwner = 0
+            audio.onBuffer = nil
+            audio.stop()
+        }
 
         // A NEW dictation must not kill the previous one's analyser.
         //

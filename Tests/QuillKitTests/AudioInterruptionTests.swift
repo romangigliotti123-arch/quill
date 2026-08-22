@@ -225,3 +225,70 @@ private final class FailsFirstStart: Transcriber, @unchecked Sendable {
     }
     #expect(transcriber.starts == 2)
 }
+
+// MARK: - An abandoned gesture must not supersede a finalising dictation
+
+private final class SlowToFinish: Transcriber, @unchecked Sendable {
+    weak var delegate: TranscriberDelegate?
+    var onLevel: ((Float) -> Void)?
+    let text: String
+    init(_ text: String) { self.text = text }
+    func prepare() async {}
+    func start() async throws {}
+    func stop() async -> String {
+        // The real one waits out a short-utterance grace, then a drain, then a
+        // bounded cancel barrier. Hundreds of milliseconds is the normal case,
+        // and it is the whole window this test is about.
+        try? await Task.sleep(for: .milliseconds(120))
+        return text
+    }
+    func cancel() async {}
+}
+
+@MainActor
+@Test func aSecondTapMeantAsAStopDoesNotPushTheSentenceToTheClipboard() async {
+    // Hands-free is taught as a double-tap and nothing says stopping is a single
+    // tap, so people double-tap to stop. Tap one stops the dictation and starts
+    // the finalise; tap two, 150 ms later, lands in .idle and opens a
+    // speculation. That speculation used to move `sessionID`, which was also the
+    // fence on the insertion — so the sentence went to the clipboard with "You
+    // started again before that finished", for a gesture made to STOP.
+    //
+    // An abandoned gesture has by definition inserted nothing. It has no business
+    // invalidating the sentence in flight.
+    let inserter = Inserted()
+    let overlay = Watching()
+    let scratch = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-epoch-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+    let quill = DictationCoordinator(
+        hotkey: SilentHotkey(),
+        transcriber: SlowToFinish("the sentence he was dictating"),
+        inserter: inserter,
+        overlay: overlay,
+        cleaner: FastCleaner(),
+        history: HistoryStore(url: scratch.appendingPathComponent("history.json")),
+        snippets: SnippetStore(inMemory: []),
+        settings: pasteOnlySettings(),
+        liveTyper: LiveTyper(keyboard: SilentKeystrokes()),
+        context: { .prose }
+    )
+
+    quill.hotkeyMayBegin()
+    quill.hotkeyPressed()
+    quill.hotkeyReleased()
+
+    // The second tap of the double-tap, while the first is still finalising.
+    try? await Task.sleep(for: .milliseconds(30))
+    quill.hotkeyMayBegin()
+    quill.hotkeyAborted()
+
+    for _ in 0 ..< 200 where inserter.text == nil {
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(inserter.text == "The sentence he was dictating")
+    #expect(!overlay.states.contains { state in
+        if case let .error(message) = state { return message.contains("clipboard") }
+        return false
+    })
+}
