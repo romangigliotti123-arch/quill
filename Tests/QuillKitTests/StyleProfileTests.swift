@@ -329,3 +329,37 @@ private func temporaryStoreURL() -> URL {
     #expect(StyleProfile(preset: .neutral).summaryLine == "Neutral · nothing learned yet")
     #expect(StyleProfile.romanDefault.summaryLine.contains("British spelling"))
 }
+
+// MARK: - The style profile actually reaches the model
+
+/// `promptRules` was measured line by line against live transcripts, rendered on
+/// its own dashboard screen, and called by nothing. Picking "Professional" wrote
+/// style.json, moved the tick, and changed not one character of any dictation
+/// that followed.
+@Test func theTonePresetReachesTheCleanupPrompt() {
+    let base = CleanupPrompt.current
+
+    var casual = StyleProfile()
+    casual.preset = .casual
+    let casualPrompt = NIMCleaner.systemPrompt(base, style: casual)
+
+    var technical = StyleProfile()
+    technical.preset = .technical
+    let technicalPrompt = NIMCleaner.systemPrompt(base, style: technical)
+
+    #expect(casualPrompt != base.system, "the profile never reached the prompt")
+    #expect(casualPrompt != technicalPrompt, "the tone made no difference to the prompt")
+    // The measured base prompt is intact underneath; the rules are additive.
+    #expect(casualPrompt.hasPrefix(base.system))
+    #expect(technicalPrompt.hasPrefix(base.system))
+}
+
+/// And the tail is dropped rather than the prompt growing without bound.
+@Test func theStyleRulesAreCappedRatherThanUnbounded() {
+    var profile = StyleProfile()
+    profile.preset = .professional
+    let prompt = NIMCleaner.systemPrompt(CleanupPrompt.current, style: profile)
+    let appended = prompt.dropFirst(CleanupPrompt.current.system.count)
+    #expect(appended.count <= StyleProfile.maximumPromptCharacters + 40,
+            "the appended rules ran to \(appended.count) characters")
+}

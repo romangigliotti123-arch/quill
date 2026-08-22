@@ -60,6 +60,35 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
     private let fast: FastCleaner
     private let client: AICompleting
     private let prompt: CleanupPrompt
+    /// Read at call time, not captured at launch. The Style screen writes
+    /// style.json on a click and the profile is meant to affect the very next
+    /// dictation — a snapshot taken in `init` would apply the tone the app
+    /// started with, forever.
+    private let style: @Sendable () -> StyleProfile
+
+    /// The cleanup prompt with the user's style rules appended.
+    ///
+    /// `StyleProfile.promptRules` has existed, been measured — line by line,
+    /// against live transcripts — and been rendered on its own dashboard screen
+    /// for the whole life of this feature, and nothing ever called it. Picking
+    /// "Professional" wrote style.json, moved the tick, and changed not one
+    /// character of any dictation that followed.
+    ///
+    /// Appended rather than woven in, and capped, because the base prompt is the
+    /// part that was measured to 10/10 and must not be diluted: every rule below
+    /// is additive, and the tail is dropped when the budget runs out.
+    static func systemPrompt(_ base: CleanupPrompt, style: StyleProfile) -> String {
+        let rules = style.promptRules()
+        guard !rules.isEmpty else { return base.system }
+        var appended = ""
+        for rule in rules {
+            let next = appended.isEmpty ? rule : appended + "\n" + rule
+            guard next.count <= StyleProfile.maximumPromptCharacters else { break }
+            appended = next
+        }
+        guard !appended.isEmpty else { return base.system }
+        return base.system + "\n\nHow this person writes:\n" + appended
+    }
     private let vocabulary: [String]
     private let safetyMargin: Duration
     private let minimumBudget: Duration
@@ -98,6 +127,7 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         client: AICompleting = NIMClient(),
         fast: FastCleaner = FastCleaner(),
         prompt: CleanupPrompt = .current,
+        style: @escaping @Sendable () -> StyleProfile = { StyleStore.shared.profile },
         vocabulary: [String] = Vocabulary.load().contextualStrings,
         safetyMargin: Duration = .milliseconds(30),
         minimumBudget: Duration = .milliseconds(120),
@@ -107,6 +137,7 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         self.client = client
         self.fast = fast
         self.prompt = prompt
+        self.style = style
         self.vocabulary = vocabulary
         self.safetyMargin = safetyMargin
         self.minimumBudget = minimumBudget
@@ -220,7 +251,8 @@ public struct NIMCleaner: TranscriptCleaning, Sendable {
         do {
             let completion = try await Self.withDeadline(budget) {
                 try await client.complete(
-                    system: prompt.system, user: tidy, model: nil, deadline: budget
+                    system: Self.systemPrompt(prompt, style: style()),
+                    user: tidy, model: nil, deadline: budget
                 )
             }
             guard let checked = CleanupProjection.project(completion, onto: tidy, protecting: vocabulary),
