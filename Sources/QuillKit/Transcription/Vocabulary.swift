@@ -31,30 +31,27 @@ public struct Vocabulary: Codable, Sendable, Equatable {
         return base.appendingPathComponent("Quill/vocabulary.json")
     }()
 
-    /// Seeded from the names that actually appear in Roman's dictation. Editable
-    /// on disk; the file is the source of truth once it exists.
-    public static let seed = Vocabulary(terms: [
-        // General technical vocabulary only.
-        //
-        // This list used to be the author's life: his suburb, his school, his
-        // family, and eleven clients by full name. It shipped in the binary, so
-        // every stranger who installed Quill got a Dictionary of people they have
-        // never met — and those people never agreed to be in it. A seed is a
-        // guess at what ANY user says; anything narrower belongs in the file on
-        // their own machine, which is what the Dictionary tab is for.
-        //
-        // What survives is what a general speech model reliably mishears and any
-        // developer is likely to say out loud.
-        "Firebase", "Firestore", "Netlify", "Supabase", "SQLite", "Postgres",
-        "Redis", "Docker", "Kubernetes", "nginx", "GraphQL", "OAuth", "JWT",
-        "SwiftUI", "SwiftPM", "Xcode", "TypeScript", "JavaScript", "Playwright",
-        "PyTorch", "NumPy", "pandas", "pytest", "venv", "CPython", "codesign",
-        "npm", "pnpm", "webpack", "Vite", "ESLint", "Prettier", "Tailwind",
-        "React", "Next.js", "Node.js", "Deno", "Rust", "Kotlin", "Golang",
-        "tmux", "xterm", "ssh", "sudo", "cron", "regex", "stdout", "stderr",
-        "API", "CLI", "SDK", "UUID", "JSON", "YAML", "CSV", "HTTP", "HTTPS",
-        "CI", "CD", "repo", "monorepo", "changelog", "hotfix", "linting",
-    ])
+    /// Nothing. A new install has an empty Dictionary.
+    ///
+    /// The list started as the author's life: his suburb, his school, his
+    /// family, and eleven clients by full name. It shipped in the binary, so
+    /// every stranger who installed Quill got a Dictionary of people they have
+    /// never met — and those people never agreed to be in it. That was replaced
+    /// with sixty-odd general developer terms, which was better and still
+    /// wrong: the Dictionary is not a starter kit, it is the list of words THIS
+    /// person says that a general model gets wrong, and nobody can guess that
+    /// from outside.
+    ///
+    /// It is not cosmetic either. Every term is fed to the recogniser as
+    /// biasing on every dictation and is what the vocabulary corrector matches
+    /// against, so a shipped list is a standing instruction to hear words the
+    /// user may never say.
+    ///
+    /// The empty state on the Dictionary screen does the job the seed was
+    /// doing: it says what the feature is for, and offers the words Quill has
+    /// already misheard — harvested from real dictations, so they are guesses
+    /// about THEM.
+    public static let seed = Vocabulary(terms: [])
 
     public init(terms: [String]) {
         self.terms = terms

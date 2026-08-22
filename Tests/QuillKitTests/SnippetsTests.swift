@@ -140,8 +140,10 @@ private func snippet(_ phrase: String,
     defer { try? FileManager.default.removeItem(at: url) }
 
     let store = SnippetStore(url: url)
-    // A fresh file seeds rather than starting empty, same as Vocabulary.
-    #expect(!store.isEmpty)
+    // A new install has no snippets. What matters here is the distinction the
+    // store exists to make: a file that does not exist yet may be created, and
+    // a file that exists but will not decode may not be written over.
+    #expect(store.isEmpty)
 
     let added = Snippet(phrase: "test phrase", replacement: "expanded")
     store.upsert(added)
@@ -168,7 +170,7 @@ private func snippet(_ phrase: String,
 @Test func inMemoryStoresNeverTouchDisk() {
     // The harness rule: a self-test that writes to a real user's data is a bug.
     let before = try? Data(contentsOf: SnippetStore.defaultURL)
-    let store = SnippetStore(inMemory: SnippetStore.seed)
+    let store = SnippetStore(inMemory: SnippetStore.demonstration)
     store.upsert(Snippet(phrase: "x", replacement: "y"))
     let after = try? Data(contentsOf: SnippetStore.defaultURL)
     #expect(before == after)
@@ -182,8 +184,19 @@ private func snippet(_ phrase: String,
     #expect(store.ordered.map(\.phrase) == ["b", "a", "c"])
 }
 
-@Test func seedIsUsableRatherThanFiller() {
-    for snippet in SnippetStore.seed {
+@Test func nothingIsShippedToANewInstall() {
+    // Two rounds of this. The seed was the author's actual week — his email,
+    // his studio URL, his sign-off, his pricing — and was then cut back to
+    // three generic examples. Both were wrong the same way: a snippet fires on
+    // words you SAY, so anything shipped lies in wait to expand into somebody
+    // else's text the first time you happen to say "my email" out loud.
+    #expect(SnippetStore.seed.isEmpty)
+}
+
+@Test func demonstrationSnippetsAreUsableRatherThanFiller() {
+    // Retargeted from the seed to the preview list when the seed became empty.
+    // The check is about risky triggers, and the risk moved with the data.
+    for snippet in SnippetStore.demonstration {
         #expect(!snippet.phrase.isEmpty)
         #expect(!snippet.replacement.isEmpty)
         // A phrase that is one ordinary word will fire in the middle of normal
@@ -191,7 +204,7 @@ private func snippet(_ phrase: String,
         let words = SnippetExpander.words(of: snippet.phrase).count
         #expect(words >= 2 || snippet.mode == .alone, "risky trigger: \(snippet.phrase)")
     }
-    #expect(SnippetStore.seed.count == Set(SnippetStore.seed.map { $0.phrase.lowercased() }).count)
+    #expect(SnippetStore.demonstration.count == Set(SnippetStore.demonstration.map { $0.phrase.lowercased() }).count)
 }
 
 // MARK: - Section

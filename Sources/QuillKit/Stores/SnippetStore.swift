@@ -234,33 +234,48 @@ public final class SnippetStore: @unchecked Sendable {
 
 public extension SnippetStore {
 
-    /// First-run contents.
+    /// Nothing. A new install has no snippets.
     ///
-    /// Three examples that show the three shapes a snippet can take — a block of
-    /// prose, a single line, and a template with gaps to fill — and nothing that
-    /// belongs to a particular person.
+    /// Two rounds of this. It was the author's actual week — his email address,
+    /// his studio URL, his sign-off, his pricing — shipped to everybody, so the
+    /// first thing any other user had to do was delete somebody else's contact
+    /// details out of their own app. That was cut back to three generic
+    /// examples, which was better and still the wrong shape.
     ///
-    /// This used to be the author's actual week: his email address, his studio
-    /// URL, his sign-off, his pricing. Useful to exactly one person and shipped
-    /// to everybody, so the first thing any other user had to do was delete
-    /// somebody else's contact details out of their own app. A seed is a
-    /// demonstration of the feature, not a starter kit of the author's life.
+    /// A snippet fires on words you SAY. Anything shipped is therefore a phrase
+    /// lying in wait to expand into somebody else's text the first time you
+    /// happen to say "my email" or "sign off" in a sentence — before you have
+    /// read the screen that would have told you it was there. The demonstration
+    /// is worth one glance; being surprised by your own keyboard is not.
     ///
-    /// Deliberately short: a starter set nobody reads is one that gets deleted
-    /// unread, and three is enough to make the idea obvious.
-    static var seed: [Snippet] {
-        let now = Date()
+    /// Kept as a property rather than deleted, because the store still has to
+    /// tell `.missing` from `.unreadable`: those are different facts, and only
+    /// one of them is allowed to write.
+    static var seed: [Snippet] { [] }
 
+    /// A store for the screenshot renderer and for previews — never a file.
+    ///
+    /// Its own list rather than `seed`, and the separation is the point — the
+    /// same argument as `VocabularyFixture`. A renderer needs rows on screen to
+    /// prove the layout holds; a new user needs nothing at all. Tying the two
+    /// together is what made "ship no starter snippets" look like "the section
+    /// no longer draws".
+    static func preview() -> SnippetStore { SnippetStore(inMemory: demonstration) }
+
+    /// Three snippets that show the three shapes one can take — a block of
+    /// prose, a single line, and a template with gaps to fill.
+    static var demonstration: [Snippet] {
+        let now = Date()
         return [
             Snippet(phrase: "my email",
                     replacement: "you@example.com",
-                    useCount: 0, lastUsed: nil, created: now),
+                    useCount: 12, lastUsed: now, created: now),
             Snippet(phrase: "sign off",
                     replacement: "Thanks,\nYour name",
-                    useCount: 0, lastUsed: nil, created: now),
+                    useCount: 31, lastUsed: now, created: now),
             // `.alone` because "standup" is one ordinary word: matched anywhere
             // in a sentence it would fire on someone saying "the standup is at
-            // nine" and eat their words. The existing seed test catches exactly
+            // nine" and eat their words. The trigger test below catches exactly
             // this, and caught it here.
             Snippet(phrase: "standup",
                     replacement: """
@@ -269,10 +284,7 @@ public extension SnippetStore {
                     Blocked on:
                     """,
                     mode: .alone,
-                    useCount: 0, lastUsed: nil, created: now),
+                    useCount: 4, lastUsed: now, created: now),
         ]
     }
-
-    /// A store for the screenshot renderer and for previews — never a file.
-    static func preview() -> SnippetStore { SnippetStore(inMemory: seed) }
 }
