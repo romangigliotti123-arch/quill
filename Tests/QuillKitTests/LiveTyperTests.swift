@@ -230,3 +230,30 @@ private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
     #expect(result == .inserted)
     #expect(typer.typed == "Hello there.")
 }
+
+// MARK: - Two dictations cannot interleave in one field
+
+/// The session fence stops a finalising dictation from INSERTING into the one
+/// that replaced it. It cannot stop the two from being in the same field at once:
+/// the older one's live-typed partials are already sitting there, and the newer
+/// one would start streaming its own characters on top of them.
+///
+/// So a dictation started while another is still finishing does not live-type at
+/// all. It pastes on release, which arrives whole. Roman's call, asked directly.
+@MainActor
+@Test func aDictationStartedWhileAnotherIsFinishingDoesNotLiveType() {
+    // The ordinary case: nothing else in flight, live text on, typer available.
+    #expect(DictationCoordinatorTestHooks.wouldLiveType(
+        liveTextEnabled: true, typerAvailable: true, previousStillFinalising: false))
+
+    // The overlap. Everything else is identical — only the previous dictation's
+    // unfinished state changes the answer.
+    #expect(!DictationCoordinatorTestHooks.wouldLiveType(
+        liveTextEnabled: true, typerAvailable: true, previousStillFinalising: true))
+
+    // And the two pre-existing reasons to fall back still hold on their own.
+    #expect(!DictationCoordinatorTestHooks.wouldLiveType(
+        liveTextEnabled: false, typerAvailable: true, previousStillFinalising: false))
+    #expect(!DictationCoordinatorTestHooks.wouldLiveType(
+        liveTextEnabled: true, typerAvailable: false, previousStillFinalising: false))
+}

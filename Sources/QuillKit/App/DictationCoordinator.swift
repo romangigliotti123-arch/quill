@@ -42,6 +42,19 @@ public final class DictationCoordinator {
     /// presents it, so a session that was superseded mid-finalise cannot type
     /// through the one that replaced it.
     private var liveGeneration = 0
+    /// True from the moment a dictation stops recording until its text has landed.
+    ///
+    /// The session fence stops a finalising dictation from INSERTING into the one
+    /// that replaced it. It does not stop the two from being in the same field at
+    /// once: the older one's live-typed partials are already sitting there, and
+    /// the newer one would start streaming its own on top of them. Two sentences
+    /// interleaving character by character in somebody's document is not something
+    /// a fence can tidy up afterwards.
+    ///
+    /// So a dictation started while another is still finishing does not live-type
+    /// at all — it falls back to paste-on-release, which lands in one piece after
+    /// the older one is done. Roman's call, asked directly.
+    private var isFinalising = false
     /// Remembers the last insertion so ⌥⌫ can take it back. Optional because
     /// every path in this file works without one, and a test that does not care
     /// about the chord should not have to build one.
@@ -271,9 +284,11 @@ public final class DictationCoordinator {
         // caret — live typing starts writing into that same field, and a paste
         // lands after it. Either way the record is stale from here on.
         undo?.discard()
+        // Not while the previous dictation is still landing its text. This one
+        // pastes on release instead, which arrives whole rather than interleaved.
         let live = liveTyper.begin()
         liveGeneration = live.generation
-        isLive = settings.liveText && live.ok
+        isLive = settings.liveText && live.ok && !isFinalising
         overlay.show(.listening(level: 0))
     }
 
@@ -317,7 +332,12 @@ public final class DictationCoordinator {
 
         overlay.show(.transcribing)
 
+        isFinalising = true
         Task { [transcriber, cleaner, inserter, overlay, history, snippets, cleanupDeadline] in
+            // Cleared on every exit from this Task, including the two early
+            // returns below. A flag that leaks true would silently disable live
+            // typing for the rest of the session.
+            defer { self.isFinalising = false }
             let raw = await transcriber.stop()
             guard session == self.sessionID else {
                 // A newer gesture started while this one was finalising.
@@ -653,6 +673,20 @@ public final class DictationCoordinator {
 /// Test seam. The race is the part that broke, so it has to be reachable from a
 /// test without booting an NSApplication and a microphone.
 public enum DictationCoordinatorTestHooks {
+    /// Whether a dictation starting right now would live-type.
+    ///
+    /// Exposed because the rule is a decision, not an implementation detail: a
+    /// dictation begun while the previous one is still landing its text must
+    /// paste on release instead, so the two sentences cannot interleave in the
+    /// same field. Asserting it through the real coordinator would need a
+    /// microphone, an analyzer and a focused text field.
+    @MainActor
+    public static func wouldLiveType(liveTextEnabled: Bool,
+                                     typerAvailable: Bool,
+                                     previousStillFinalising: Bool) -> Bool {
+        liveTextEnabled && typerAvailable && !previousStillFinalising
+    }
+
     public static func withDeadline<T: Sendable>(
         _ duration: Duration, _ operation: @escaping @Sendable () async -> T?
     ) async -> T? {

@@ -236,15 +236,28 @@ public final class InsertionUndo: InsertionUndoing, @unchecked Sendable {
         case .unsafe:
             return putBack()
         case .unknown:
-            // Accessibility would not say, which is the ordinary case in Electron
-            // and every web view — i.e. in a large share of where dictation is
-            // actually used. Falling back to the disturbance guards is the same
-            // trade `LiveTyper` already makes every time it backspaces, and
-            // refusing here would mean the feature never fires in the apps it is
-            // most wanted in. It is also the one place this can still be wrong:
-            // an app that rewrote our text by itself, with no keystroke and no
-            // click, would be invisible from here.
-            break
+            // Accessibility would not say, so Quill does not delete. Roman's call,
+            // asked and answered directly.
+            //
+            // The cost is real and worth stating: this is the ordinary answer in
+            // Electron apps, web views and most terminals, which is a large share
+            // of where he actually dictates — so in those apps ⌥⌫ now always
+            // passes through and deletes a word, exactly as it did before Quill
+            // existed. The chord only fires where the field will confirm our
+            // sentence is still sitting behind the caret.
+            //
+            // The alternative was to trust the disturbance guards — no keystroke,
+            // no click, no app switch since the insertion — and backspace anyway.
+            // Those guards are good but they cannot see an app that rewrote the
+            // text by itself: an autocorrect, an editor reformatting a paste, a
+            // composer normalising what was typed. In that case we would delete N
+            // characters of whatever is now at the caret, in a document Quill
+            // cannot read back, and the user would find out later with nothing to
+            // blame.
+            //
+            // The asymmetry decides it. Not firing costs one extra gesture.
+            // Firing wrongly costs a sentence somebody wrote themselves.
+            return putBack()
         }
 
         // Graphemes, not UTF-16 units: one backspace removes one visible

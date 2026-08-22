@@ -197,17 +197,24 @@ private let putBack = "chord(\(UndoChord.keyCode),\(UndoChord.flags.rawValue))"
 }
 
 @MainActor
-@Test func accessibilityDecliningFallsBackToTheDisturbanceGuards() {
-    // Electron apps, web views, and a large share of where dictation is actually
-    // used. Refusing here would mean the chord never fires where it is most
-    // wanted; this is the documented soft spot, pinned so a change to it is
-    // deliberate rather than accidental.
+@Test func accessibilityDecliningRefusesRatherThanTrustingTheGuards() {
+    // Roman's call, asked directly and answered: when the field will not confirm
+    // our sentence is still behind the caret, Quill does not delete.
+    //
+    // This is the ordinary answer in Electron apps, web views and most terminals,
+    // so the visible consequence is that ⌥⌫ in those apps now always deletes a
+    // word, exactly as it did before Quill existed. That is the price of never
+    // backspacing over text somebody wrote themselves in a document Quill cannot
+    // read back — the disturbance guards cannot see an app that rewrote the text
+    // on its own, and not firing costs one gesture where firing wrongly costs a
+    // sentence.
     let keys = Recorder()
     let undo = store(keys, caret: FixedCaret(reading: .unknown))
     undo.record("Hello there", pid: ourApp)
 
-    #expect(undo.undoLastInsertion())
-    #expect(keys.actions == ["backspace(11)"])
+    #expect(!undo.undoLastInsertion())
+    // The keystroke is handed back, so the app still deletes a word.
+    #expect(keys.actions == [putBack])
 }
 
 @MainActor
