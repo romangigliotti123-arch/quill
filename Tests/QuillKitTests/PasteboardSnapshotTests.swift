@@ -183,10 +183,23 @@ private func scratchPasteboard() -> NSPasteboard {
     #expect(try String(contentsOf: vocabURL, encoding: .utf8) == "{\"terms\": ",
             "overwrote a damaged vocabulary file")
 
+    // Transforms — the fourth store, and the one that survived longest because
+    // its fallback is the eight built-ins. A damaged file looked like a fresh
+    // install: the next transform run called recordUse, the id resolved against
+    // the seed, and persist() wrote the seed over every custom transform the user
+    // had written. The file is explicitly meant to be hand-editable, so one
+    // mistyped key was enough.
+    let transformsURL = dir.appendingPathComponent("transforms.json")
+    try Data("[{\"name\": ".utf8).write(to: transformsURL)
+    let transforms = TransformStore(url: transformsURL)
+    if let first = transforms.ordered.first { transforms.recordUse(first.id) }
+    #expect(try String(contentsOf: transformsURL, encoding: .utf8) == "[{\"name\": ",
+            "overwrote a damaged transforms file")
+
     // And a copy of what could not be read is kept, every time.
     let salvaged = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         .filter { $0.contains("unreadable") }
-    #expect(salvaged.count == 3, "kept \(salvaged.count) salvage copies, expected 3")
+    #expect(salvaged.count == 4, "kept \(salvaged.count) salvage copies, expected 4")
 }
 
 @Test func anAbsentFileIsStillJustAnAbsentFile() throws {

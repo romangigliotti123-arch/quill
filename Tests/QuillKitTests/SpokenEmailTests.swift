@@ -131,3 +131,43 @@ private func email(_ s: String) -> String { FastCleaner.formatSpokenEmails(in: s
     let corrector = VocabularyCorrector(vocabulary: Vocabulary(terms: ["Netlify", "Craigieburn"]))
     #expect(corrector.correct("mail noah@netlifi.com now") == "mail noah@netlifi.com now")
 }
+
+// MARK: - A noun in front of "at" is not an email address
+
+/// The commonest shape in English — NOUN + "at" + DOMAIN — was being turned into
+/// a fabricated address, because the stop-word list is determiners, pronouns and
+/// verbs and has no entry for an ordinary noun.
+///
+/// "read the docs at netlify.com" came out "read the docs@netlify.com". Two of
+/// these also glue two real words together: "the booking form at
+/// kassbarbers.com.au" became "the bookingform@kassbarbers.com.au".
+@Test func talkingAboutAWebsiteDoesNotProduceAnEmailAddress() {
+    let cleaner = FastCleaner()
+    for said in [
+        "read the docs at netlify.com",
+        "my site at romangigliotti.com",
+        "the booking form at kassbarbers.com.au",
+        "the pricing page at netlify.com",
+        "the status page at firebase.google.com",
+    ] {
+        let out = cleaner.cleanFast(said)
+        #expect(!out.contains("@"), "\(said) → \(out)")
+    }
+}
+
+/// And the addresses people actually dictate still form. Every one of these
+/// carries positive evidence: introduced by "to"/"email", a mail host, or a local
+/// part that is not an ordinary English word.
+@Test func spokenAddressesStillForm() {
+    let cleaner = FastCleaner()
+    let cases = [
+        "send it to noah at kassbarbers.com.au",
+        "email me at roman at gmail dot com",
+        "my address is romangigliotti123 at gmail dot com",
+        "forward it to accounts at netlify.com",
+    ]
+    for said in cases {
+        let out = cleaner.cleanFast(said)
+        #expect(out.contains("@"), "an address stopped forming: \(said) → \(out)")
+    }
+}

@@ -441,15 +441,35 @@ public final class TransformStore: @unchecked Sendable {
     private let url: URL?
     private let queue = DispatchQueue(label: "com.romangigliotti.quill.transforms")
     private var items: [Transform] = []
+    /// Set when transforms.json exists and will not decode. While it is set the
+    /// store never writes, so a damaged file is never overwritten.
+    private var loadFailed = false
 
     public init(url: URL = TransformStore.defaultURL) {
         self.url = url
-        if let data = try? Data(contentsOf: url) {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            items = (try? decoder.decode([Transform].self, from: data)) ?? TransformStore.seed
-        } else {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        // Three states, not two. `try? decode ?? seed` collapses "the file is not
+        // there" and "the file is damaged" into the same answer, and they call for
+        // opposite behaviour.
+        //
+        // What that cost: a partial write during a crash, a zero-byte file, or one
+        // hand-edited object missing a required key — and this file is explicitly
+        // meant to be hand-editable — silently substituted the eight built-ins.
+        // The next time any transform ran, `recordUse` found its id (it came from
+        // the seed) and `persist()` wrote the seed over the file. Every custom
+        // transform the user had written was gone, permanently, with no error.
+        switch StoreFile.read([Transform].self, from: url, decoder: decoder) {
+        case .missing:
             items = TransformStore.seed
+        case .decoded(let stored):
+            items = stored
+        case .unreadable:
+            // The seed in memory so the feature still works this session; nothing
+            // written, so the damaged file survives for the user to rescue. It has
+            // already been copied aside by `StoreFile`.
+            items = TransformStore.seed
+            loadFailed = true
         }
     }
 
@@ -531,7 +551,10 @@ public final class TransformStore: @unchecked Sendable {
     }
 
     private func persist() {
-        guard let url else { return }
+        // Never over a file we could not read. The user's data outranks the app's
+        // convenience, and a file the app refuses to touch is one a person can
+        // still open in a text editor and fix.
+        guard let url, !loadFailed else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

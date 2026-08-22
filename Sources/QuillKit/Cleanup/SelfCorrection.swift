@@ -272,10 +272,22 @@ public enum SelfCorrection {
             // matching one is weak.
             for length in stride(from: min(4, after.count), through: 1, by: -1) {
                 let head = Array(after[0 ..< length])
-                guard let start = firstIndex(of: head, in: before) else { continue }
+                // The LAST occurrence, not the first. The restart point is the
+                // most recent place those words were said, and taking the first
+                // ate every clause between them.
+                //
+                // "Send it to Noah and then send it to Sam no wait send it to
+                // Carlo." The head is [send, it, to]; its first occurrence is
+                // token 0, so the deletion ran from the very start of the
+                // utterance and produced "Send it to Carlo." — losing the entire
+                // "send it to Noah" instruction, which was never retracted.
+                guard let start = lastIndex(of: head, in: before) else { continue }
                 // One word only counts when it restarts the whole utterance —
                 // "I was going to the I mean I went to the shop". Anywhere else a
-                // single shared word is coincidence, not a restart.
+                // single shared word is coincidence, not a restart. With
+                // last-occurrence semantics this now means what it says: the
+                // word's FINAL appearance before the cue is the start of the
+                // utterance, so the restart really does restart everything.
                 guard length >= 2 || start == 0 else { continue }
                 tokens.removeSubrange(start ..< cue.range.upperBound)
                 return true
@@ -341,6 +353,19 @@ public enum SelfCorrection {
     }
 
     // MARK: - Helpers
+
+    /// Where a restart actually begins.
+    ///
+    /// Separate from `firstIndex` rather than replacing it: that one is also used
+    /// by `isAbandonment`, where first-match is correct.
+    static func lastIndex(of needle: [String], in haystack: [String]) -> Int? {
+        guard !needle.isEmpty, needle.count <= haystack.count else { return nil }
+        for start in stride(from: haystack.count - needle.count, through: 0, by: -1)
+        where Array(haystack[start ..< start + needle.count]) == needle {
+            return start
+        }
+        return nil
+    }
 
     static func firstIndex(of needle: [String], in haystack: [String]) -> Int? {
         guard !needle.isEmpty, needle.count <= haystack.count else { return nil }

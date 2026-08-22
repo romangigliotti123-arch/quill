@@ -280,7 +280,11 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
                   let domain = Self.readDomain(tokens, from: i + 1)
             else { i += 1; continue }
 
-            guard let local = Self.readLocalPart(tokens, endingBefore: i) else {
+            guard let local = Self.readLocalPart(tokens, endingBefore: i),
+                  Self.looksLikeAnAddress(local: local.text, words: local.words,
+                                          stoppedOn: local.stoppedOn,
+                                          domain: domain.text)
+            else {
                 i += 1
                 continue
             }
@@ -350,20 +354,34 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
     /// actually decides is the stop-word list, which was checked by replaying
     /// every transcript on this machine and fixed where it was wrong.
     private static func readLocalPart(_ tokens: [String], endingBefore at: Int)
-    -> (text: String, firstIndex: Int)? {
+    -> (text: String, firstIndex: Int, stoppedOn: String?, words: [String])? {
         var collected: [String] = []
         var index = at - 1
         var firstIndex = at
+        /// What ended the scan. `nil` means it ran off the start of the text.
+        /// This is the evidence the caller weighs: a local part that ends at
+        /// "to" or "email" was introduced as an address; one that ends at "the"
+        /// is a noun standing in front of an ordinary "at".
+        var stoppedOn: String?
 
         while index >= 0, collected.count < 6 {
             let raw = tokens[index]
             // A full stop, question mark or exclamation ends the sentence and so
             // ends any address inside it. A comma is only a spoken pause.
-            if raw.hasSuffix(".") || raw.hasSuffix("?") || raw.hasSuffix("!") { break }
+            if raw.hasSuffix(".") || raw.hasSuffix("?") || raw.hasSuffix("!") {
+                stoppedOn = "."
+                break
+            }
             let word = bareWord(raw)
-            if word.isEmpty { break }
-            if localPartStopWords.contains(word.lowercased()) { break }
-            guard isNameLike(word) || word.lowercased() == "dot" else { break }
+            if word.isEmpty { stoppedOn = ""; break }
+            if localPartStopWords.contains(word.lowercased()) {
+                stoppedOn = word.lowercased()
+                break
+            }
+            guard isNameLike(word) || word.lowercased() == "dot" else {
+                stoppedOn = word.lowercased()
+                break
+            }
             collected.append(word)
             firstIndex = index
             index -= 1
@@ -383,7 +401,60 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         }
         guard out.count >= 2, !out.hasSuffix("."), out.contains(where: { $0.isLetter || $0.isNumber })
         else { return nil }
-        return (out, firstIndex)
+        return (out, firstIndex, stoppedOn, collected.reversed().map { $0.lowercased() })
+    }
+
+    /// Tokens that introduce an address. A local part that ends at one of these
+    /// was announced as an address; one that ends at "the" is a noun standing in
+    /// front of an ordinary English "at".
+    private static let addressIntroducers: Set<String> = [
+        "to", "send", "sent", "sends", "sending", "email", "emailed", "mail",
+        "mailed", "invoice", "invoiced", "forward", "forwarded", "cc", "bcc",
+        "contact", "reach", "ping", "message", "messaged", "write", "wrote",
+        "address", "addresses", ".", "",
+    ]
+
+    /// Domains that are only ever mail hosts. Nobody reads documentation at
+    /// gmail.com, so the host alone is enough evidence.
+    private static let mailHosts: Set<String> = [
+        "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com",
+        "icloud.com", "me.com", "mac.com", "proton.me", "protonmail.com",
+        "live.com", "aol.com", "yandex.com", "fastmail.com", "gmx.com", "zoho.com",
+    ]
+
+    /// Whether "<local> at <domain>" is an address rather than a noun in front of
+    /// an ordinary "at".
+    ///
+    /// The step used to join whenever the words either side were shaped right,
+    /// and the stop-word list — determiners, pronouns, verbs — has no entry for
+    /// the commonest English shape there is: NOUN + "at" + DOMAIN. So
+    /// "read the docs at netlify.com" came out "read the docs@netlify.com", and
+    /// "the booking form at kassbarbers.com.au" came out
+    /// "the bookingform@kassbarbers.com.au" — two ordinary words glued together
+    /// into a fake address, in a sentence about a website.
+    ///
+    /// One piece of positive evidence is now required. Refusing costs a spoken
+    /// address the user can fix; joining wrongly puts a fabricated email address
+    /// into their document.
+    private static func looksLikeAnAddress(local: String, words: [String],
+                                          stoppedOn: String?, domain: String) -> Bool {
+        // 1. It was introduced as one — "send it to noah at gmail dot com", or it
+        //    began the sentence.
+        if addressIntroducers.contains(stoppedOn ?? "") { return true }
+        // 2. The domain is a mail host and nothing else.
+        if mailHosts.contains(domain.lowercased()) { return true }
+        // 3. The local part is not ordinary English: a digit, an internal dot, or
+        //    a word the spell checker does not know. "docs" and "form" are words;
+        //    "romangigliotti" and "nkass" are not.
+        if local.contains(where: \.isNumber) || local.dropLast().contains(".") { return true }
+        // Checked WORD BY WORD, not on the joined result. "booking form" joins to
+        // "bookingform", which no dictionary knows — so testing the joined string
+        // called every two-word noun phrase an address, which is the bug wearing a
+        // different hat. If every word the scan collected is ordinary English,
+        // this is prose about a website.
+        let spoken = words.filter { $0 != "dot" }
+        guard !spoken.isEmpty else { return false }
+        return spoken.contains { !VocabularyCorrector.isRealEnglishWord($0) }
     }
 
     /// Words that end a local part when read backwards.

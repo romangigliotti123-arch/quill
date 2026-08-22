@@ -210,3 +210,41 @@ import Testing
     }
     #expect(best < .milliseconds(2), "\(best) per call")
 }
+
+// MARK: - A restart begins where it was last said
+
+/// The restart point is the most RECENT place those words were said. Taking the
+/// first occurrence ate every clause in between — silently, on the offline path,
+/// with no way for the user to know words they said had gone.
+@Test func aRestartDeletesOnlyFromWhereItActuallyRestarted() {
+    // Two parallel instructions; only the second is retracted.
+    let twoInput = "Send it to Noah and then send it to Sam no wait send it to Carlo."
+    let two = SelfCorrection.resolve(twoInput) ?? twoInput
+    #expect(two.lowercased().contains("noah"),
+            "the un-retracted first instruction was deleted: \(two)")
+    #expect(two.lowercased().contains("carlo"))
+    #expect(!two.lowercased().contains("sam"), "the retracted clause survived: \(two)")
+
+    // The single-word shape, which reached the same bug through the `start == 0`
+    // relaxation: head [add], first occurrence 0, so the whole utterance up to
+    // the cue was deleted and "Add milk to the list" vanished.
+    //
+    // The pass now declines it instead — [add]'s LAST occurrence before the cue
+    // is not the start of the utterance, so the one-word rule correctly refuses
+    // to call it a restart. That leaves the retracted clause in, which is not
+    // ideal; it is enormously better than deleting a clause the user meant. Nil
+    // means "nothing changed", so the assertion is against the original.
+    let listInput = "Add milk to the list and add bread to the list no wait add eggs to the list."
+    let list = SelfCorrection.resolve(listInput) ?? listInput
+    #expect(list.lowercased().contains("milk"), "an un-retracted clause was deleted: \(list)")
+    #expect(list.lowercased().contains("eggs"))
+}
+
+/// The whole-utterance restart still works, which is what the one-word rule is
+/// for.
+@Test func aRestartOfTheWholeUtteranceStillDeletesAllOfIt() {
+    let outInput = "I was going to the shop I mean I went to the market."
+    let out = SelfCorrection.resolve(outInput) ?? outInput
+    #expect(!out.lowercased().contains("shop"), "the retracted opening survived: \(out)")
+    #expect(out.lowercased().contains("market"))
+}

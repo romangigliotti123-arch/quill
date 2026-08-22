@@ -292,7 +292,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Not now")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        var vocabulary = Vocabulary.load()
+        // `loadOutcome`, not `load`. This is a read-modify-write, and `load`
+        // cannot tell "no file yet" from "a file I could not read" — both hand
+        // back the shipped seed. Writing after the second one puts thirty stock
+        // terms over everything the user has added, permanently. The guard exists
+        // and every other writer already uses it; this path did not.
+        let (loaded, damaged) = Vocabulary.loadOutcome()
+        guard !damaged else {
+            let warning = NSAlert()
+            warning.messageText = "Your vocabulary file could not be read"
+            warning.informativeText = """
+                Nothing was changed. A copy has been kept next to it so you can                 open it and fix it by hand — adding these words now would write                 over everything already in there.
+                """
+            warning.addButton(withTitle: "Show me the file")
+            warning.addButton(withTitle: "Not now")
+            if warning.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.activateFileViewerSelecting([Vocabulary.defaultURL])
+            }
+            return
+        }
+        var vocabulary = loaded
         vocabulary.terms.append(contentsOf: found.map(\.term))
         vocabulary.save()
     }

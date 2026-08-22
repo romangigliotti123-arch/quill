@@ -55,13 +55,18 @@ private final class CallLog: @unchecked Sendable {
     func record() { lock.lock(); count += 1; lock.unlock() }
 }
 
+/// How long the fake model stays asleep. Named because the assertion below is
+/// measured against it rather than against a wall-clock constant — the claim is
+/// which of the two racers returned, not how fast the machine is.
+private let modelSleep = Duration.seconds(30)
+
 private struct NeverAnswers: AICompleting {
     var isConfigured = true
     var isReadyToTry = true
     let log = CallLog()
     func complete(system: String, user: String, model: String?, deadline: Duration) async throws -> String {
         log.record()
-        try await Task.sleep(for: .seconds(30))
+        try await Task.sleep(for: modelSleep)
         return "never gets here"
     }
 }
@@ -135,11 +140,17 @@ struct DeadlineTests {
     #expect(ai.log.calls == 1, "the cued transcript should have been offered to the model")
     // The model is asleep for 30 seconds and the deterministic answer takes
     // milliseconds, so what this asserts is which of the two the race returned —
-    // not how fast the machine is. Six seconds still discriminates by 5x and
-    // stops the assertion failing because a live network test was running beside
-    // it. Actual latency is measured in NIMCleanerTests, where it is the subject
-    // rather than a proxy.
-    #expect(elapsed < .seconds(6), "took \(elapsed)")
+    // not how fast the machine is.
+    //
+    // Measured against the SLEEP, not against a wall-clock constant. A six-second
+    // ceiling was tighter and worse: it failed at 10.8s on unmodified code with
+    // the machine loaded, which is the assertion reporting the state of the box.
+    // Swift's cooperative pool can be starved for many seconds when every core is
+    // busy, and nothing about that says the race picked the wrong answer. Ten
+    // seconds of headroom under a thirty-second sleep still cannot pass if the
+    // model won. Actual latency is measured in NIMCleanerTests, where it is the
+    // subject rather than a proxy.
+    #expect(elapsed < modelSleep - .seconds(10), "took \(elapsed)")
 }
 
 }
