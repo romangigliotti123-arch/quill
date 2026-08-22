@@ -74,6 +74,17 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     /// immediately before the state machine runs, read when it says to cancel.
     private var pendingKeystroke: String = ""
 
+    /// Transform chords, snapshotted off the tap thread.
+    ///
+    /// The tap must never call into `TransformStore`: `all` is a `queue.sync` and
+    /// that queue is where transforms.json gets written, so one keystroke could
+    /// end up waiting on a disk write — with the whole system's key events behind
+    /// it. This is a plain array read under a small lock, refreshed on the
+    /// store's change notification.
+    private var transformChords: [Transform] = []
+    private let chordLock = NSLock()
+    private var transformsObserver: NSObjectProtocol?
+
     /// When the bound trigger physically went down, or nil if it is up.
     ///
     /// Only `UndoChord` reads it. The gesture machine deliberately knows nothing
@@ -120,7 +131,24 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
     // MARK: - Lifecycle
 
     @discardableResult
+    /// Re-read the chords. Called at start and whenever the store says it
+    /// changed; never on the tap thread.
+    private func refreshTransformChords() {
+        let chords = TransformStore.shared.enabled.filter { $0.hotkey != nil }
+        chordLock.lock()
+        transformChords = chords
+        chordLock.unlock()
+    }
+
     public func start() -> Bool {
+        refreshTransformChords()
+        if transformsObserver == nil {
+            transformsObserver = NotificationCenter.default.addObserver(
+                forName: .quillTransformsDidChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.refreshTransformChords()
+            }
+        }
         lock.lock()
         let alreadyRunning = worker != nil
         lock.unlock()
@@ -412,6 +440,33 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             // after the event is passed through it is gone and live typing needs
             // to be able to put it back.
             pendingKeystroke = Self.text(of: event)
+            // A transform chord, before anything else looks at this key.
+            //
+            // Only in `.idle`: mid-dictation a chord means "bin this", which the
+            // machine below already handles, and reshaping the user's selection
+            // while a sentence is being typed into it would be two writes to one
+            // caret.
+            //
+            // Swallowed, which is the point — without it the chord's letter is
+            // typed into the document and nothing else happens, which is what
+            // assigning a transform hotkey did up to now: every part of the
+            // feature existed except the line that consults it.
+            if machine.state == .idle {
+                chordLock.lock()
+                let chords = transformChords
+                chordLock.unlock()
+                if let transform = TransformHotkeyRouter.transform(
+                    forKeyCode: keyCode, flags: flags, in: chords
+                ) {
+                    // The selection is about to be replaced, so the last insertion
+                    // is no longer the last thing at the caret.
+                    undo?.discard()
+                    pendingKeystroke = ""
+                    deliver { $0.hotkeyTransform(transform) }
+                    return true
+                }
+            }
+
             let heldFor = triggerDownAt.map { Self.now() - $0 }
             if let undo, UndoChord.claims(keyCode: keyCode, flags: flags,
                                           gesture: machine.state,

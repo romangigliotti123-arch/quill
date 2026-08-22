@@ -194,6 +194,7 @@ private final class FailsFirstStart: Transcriber, @unchecked Sendable {
     // fine. No insertion, no clipboard, no history row.
     let transcriber = FailsFirstStart()
     let inserter = Inserted()
+    let overlay = Watching()
     let scratch = FileManager.default.temporaryDirectory
         .appendingPathComponent("quill-recover-\(UUID().uuidString)")
     try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
@@ -201,7 +202,7 @@ private final class FailsFirstStart: Transcriber, @unchecked Sendable {
         hotkey: SilentHotkey(),
         transcriber: transcriber,
         inserter: inserter,
-        overlay: Watching(),
+        overlay: overlay,
         cleaner: FastCleaner(),
         history: HistoryStore(url: scratch.appendingPathComponent("history.json")),
         snippets: SnippetStore(inMemory: []),
@@ -210,9 +211,30 @@ private final class FailsFirstStart: Transcriber, @unchecked Sendable {
         context: { .prose }
     )
 
+    // Waited on by wall clock rather than by a fixed number of 5ms sleeps: the
+    // suite runs in parallel, and under load each of those sleeps lands nearer
+    // 65ms, which turned a generous bound into a flake that says nothing about
+    // the code.
+    func waitForStarts(_ n: Int) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(10))
+        while transcriber.starts < n, clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     // The speculation opens on key-down and its start() throws.
+    //
+    // Waiting on `starts == 1` alone is not enough and was a flake: the counter
+    // is bumped at the top of start(), and the throw, the catch and fail()'s
+    // `isSpeculating = false` all happen after it. Wait for the *failure* to have
+    // been processed, which is the state the recovery exists to recover from.
     quill.hotkeyMayBegin()
-    for _ in 0 ..< 100 where transcriber.starts < 1 {
+    await waitForStarts(1)
+    let clock = ContinuousClock()
+    let failed = clock.now.advanced(by: .seconds(10))
+    while !overlay.states.contains(where: { if case .error = $0 { return true }; return false }),
+          clock.now < failed {
         try? await Task.sleep(for: .milliseconds(5))
     }
     #expect(transcriber.starts == 1)
@@ -220,9 +242,7 @@ private final class FailsFirstStart: Transcriber, @unchecked Sendable {
     // The arm timer then confirms the gesture. Nothing is capturing, so this is
     // the moment the recovery has to fire.
     quill.hotkeyPressed()
-    for _ in 0 ..< 100 where transcriber.starts < 2 {
-        try? await Task.sleep(for: .milliseconds(5))
-    }
+    await waitForStarts(2)
     #expect(transcriber.starts == 2)
 }
 

@@ -551,6 +551,15 @@ public final class TransformStore: @unchecked Sendable {
     }
 
     private func persist() {
+        // Announced, because the event tap cannot ask.
+        //
+        // `all` is `queue.sync { items }`, and this method writes a file on that
+        // same queue — so reading the list from the tap thread would put a
+        // system-wide keystroke behind a disk write. The tap keeps its own
+        // snapshot instead and refreshes on this.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .quillTransformsDidChange, object: nil)
+        }
         // Never over a file we could not read. The user's data outranks the app's
         // convenience, and a file the app refuses to touch is one a person can
         // still open in a text editor and fix.
@@ -564,6 +573,14 @@ public final class TransformStore: @unchecked Sendable {
         )
         try? data.write(to: url, options: .atomic)
     }
+}
+
+public extension Notification.Name {
+    /// The transform list changed: one was added, edited, removed, or ran.
+    /// Posted on main. See `TransformStore.persist()` for why this exists rather
+    /// than the tap reading the store directly.
+    static let quillTransformsDidChange =
+        Notification.Name("com.romangigliotti.quill.transformsDidChange")
 }
 
 // MARK: - Hotkey routing

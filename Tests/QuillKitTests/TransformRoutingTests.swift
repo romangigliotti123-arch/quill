@@ -74,3 +74,42 @@ import Testing
         }
     }
 }
+
+// MARK: - The chord half
+
+@Test func aChordFindsItsTransformAndNothingElseDoes() {
+    // Every part of the chord path existed except the line that consults it.
+    // Assigning ⌃⌥B to "Bullet points" drew a keycap in the editor, saved a
+    // TransformHotkey to disk, and then typed a "b" into the document, because
+    // the event tap never asked TransformHotkeyRouter anything.
+    let bullets = Transform(
+        name: "Bullet points", instruction: "as a list", triggers: [],
+        hotkey: TransformHotkey(keyCode: 11, modifiers: [.maskControl, .maskAlternate]))
+    let shorter = Transform(
+        name: "Shorter", instruction: "shorter", triggers: [],
+        hotkey: TransformHotkey(keyCode: 1, modifiers: [.maskControl, .maskAlternate]))
+    let unbound = Transform(name: "Formal", instruction: "formally", triggers: [], hotkey: nil)
+    let all = [bullets, shorter, unbound]
+
+    #expect(TransformHotkeyRouter.transform(forKeyCode: 11,
+                                            flags: [.maskControl, .maskAlternate],
+                                            in: all)?.name == "Bullet points")
+    // A different chord, and a bare key, are somebody else's.
+    #expect(TransformHotkeyRouter.transform(forKeyCode: 11, flags: [.maskCommand], in: all) == nil)
+    #expect(TransformHotkeyRouter.transform(forKeyCode: 11, flags: [], in: all) == nil)
+    // A transform with no chord can never be reached by one.
+    #expect(TransformHotkeyRouter.transform(forKeyCode: 0, flags: [], in: all) == nil)
+}
+
+@Test func aDisabledTransformsChordIsNotClaimed() {
+    // Otherwise turning a transform off would still eat its key, which is worse
+    // than the transform running: the key does nothing at all and there is no
+    // way to tell why.
+    var off = Transform(
+        name: "Bullet points", instruction: "as a list", triggers: [],
+        hotkey: TransformHotkey(keyCode: 11, modifiers: [.maskControl, .maskAlternate]))
+    off.isEnabled = false
+    #expect(TransformHotkeyRouter.transform(forKeyCode: 11,
+                                            flags: [.maskControl, .maskAlternate],
+                                            in: [off]) == nil)
+}

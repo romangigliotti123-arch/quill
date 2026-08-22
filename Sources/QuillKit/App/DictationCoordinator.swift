@@ -876,6 +876,29 @@ extension DictationCoordinator: HotkeyEngineDelegate {
     public func hotkeyAborted() { abandonSpeculation() }
     public func hotkeyPressed() { beginDictation() }
     public func hotkeyReleased() { endDictation() }
+
+    /// A transform's chord. The tap has already swallowed the key.
+    public func hotkeyTransform(_ transform: Transform) {
+        guard let transforms else { return }
+        // Not on top of a dictation. The voice route runs a transform *instead*
+        // of an insertion, at a point where the coordinator owns the caret; a
+        // chord arriving while a sentence is being typed or finalised would be a
+        // second writer to the same one.
+        guard !isDictating, !isSpeculating, !isFinalising else { return }
+
+        overlay.show(.transcribing)
+        Task { [transforms, overlay] in
+            switch await transforms.engine.run(transform) {
+            case .done(let success):
+                overlay.show(.inserted(words: success.text.split(whereSeparator: \.isWhitespace).count))
+            case .failed(let reason):
+                // The engine does not touch the target until it has a result, so
+                // a refusal leaves the document exactly as it was — but the user
+                // pressed a key and has to be told nothing came of it.
+                overlay.show(.error(reason))
+            }
+        }
+    }
     public func hotkeyCancelled(userKeystroke: String) {
         cancelDictation(userTyped: userKeystroke)
     }

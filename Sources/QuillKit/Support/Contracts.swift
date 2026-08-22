@@ -26,6 +26,10 @@ public protocol HotkeyEngineDelegate: AnyObject {
     func hotkeyAborted()
     func hotkeyPressed()
     func hotkeyReleased()
+    /// A transform's chord was pressed. The event has already been swallowed, so
+    /// the key never reaches the user's document — run the transform on whatever
+    /// is selected there.
+    func hotkeyTransform(_ transform: Transform)
     /// Escape, or any keystroke that means "throw this dictation away".
     ///
     /// `userKeystroke` is the text the cancelling key actually inserted into the
@@ -41,6 +45,12 @@ public protocol HotkeyEngineDelegate: AnyObject {
     func hotkeyCancelled(userKeystroke: String)
     /// The tap died or could not be created. Carries something a human can act on.
     func hotkeyEngineUnavailable(reason: String)
+}
+
+public extension HotkeyEngineDelegate {
+    /// Default for the delegates that are not the running app. Only the
+    /// coordinator has a document to reshape.
+    func hotkeyTransform(_ transform: Transform) {}
 }
 
 public protocol HotkeyEngine: AnyObject {
