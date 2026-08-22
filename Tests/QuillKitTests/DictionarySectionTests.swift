@@ -64,9 +64,22 @@ import Testing
     #expect(vesper?.lastFired == nil)
 }
 
-@Test func aFreshInstallGetsTheFixtureRatherThanAnEmptyShell() {
-    #expect(DictionaryEntry.entries(vocabulary: .seed, records: []) == DictionaryEntry.preview)
-    // ...but real history is never overridden by the fixture, however dull it is.
+@Test func aFreshInstallGetsRealZeroesNotAFixture() {
+    // Used to fall back to `DictionaryEntry.preview` — six invented entries —
+    // whenever nothing had been dictated yet. A screen whose whole argument is
+    // "here is proof your dictionary fires" cannot open by showing proof of
+    // somebody else's dictionary firing.
+    #expect(DictionaryEntry.entries(vocabulary: .seed, records: []).isEmpty)
+
+    // A term the user added is shown with its honest zero, not hidden and not
+    // swapped for a fixture entry of the same shape.
+    let fresh = DictionaryEntry.entries(vocabulary: Vocabulary(terms: ["Vesper"]), records: [])
+    #expect(fresh.count == 1)
+    #expect(fresh[0].term == "Vesper")
+    #expect(fresh[0].hasFired == false)
+    #expect(fresh[0].mishearings.isEmpty)
+
+    // Real history is never overridden by the fixture, however dull it is.
     let entries = DictionaryEntry.entries(
         vocabulary: Vocabulary(terms: ["Netlify"]),
         records: [DictationRecord(id: UUID(), date: Date(), rawText: "the neglify build",

@@ -139,18 +139,22 @@ public extension DictionaryEntry {
     /// something between the two put it there. Aligning the two token streams
     /// then says *what it replaced*, which is the interesting half.
     ///
-    /// Falls back to `preview` only when nothing has ever been dictated — a
-    /// dictionary that renders as an empty shell on a fresh install teaches the
-    /// user nothing about what the feature is for.
+    /// Always the real data, including the honest zero.
     ///
-    /// Note what it does *not* do: once there is real history, real zeros are
-    /// shown. A screen whose whole argument is "here is proof your dictionary
-    /// fires" cannot quietly substitute a fixture on the day it stops firing.
+    /// This used to fall back to `preview` — six invented entries — whenever
+    /// nothing had been dictated yet, on the reasoning that an empty screen
+    /// teaches a new user nothing about what the feature is for. That reasoning
+    /// does not survive contact with what the screen actually says: every row
+    /// carries a claim ("repaired 9 times", "2 hours ago") about a machine that
+    /// never made that claim, and a "Sample data" chip is not a strong enough
+    /// signal to stop it reading as real the first time someone glances at it.
+    ///
+    /// The empty state the list already draws — `updateEmptyState()` in
+    /// `DictionarySectionView` — is what a new install shows instead.
     static func entries(vocabulary: Vocabulary = .load(),
                         records: [DictationRecord] = [],
                         now: Date = Date()) -> [DictionaryEntry] {
-        guard !records.isEmpty else { return preview }
-        return derive(vocabulary: vocabulary, records: records, now: now)
+        derive(vocabulary: vocabulary, records: records, now: now)
     }
 
     static func derive(vocabulary: Vocabulary,

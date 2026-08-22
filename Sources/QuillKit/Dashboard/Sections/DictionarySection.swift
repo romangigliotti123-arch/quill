@@ -33,9 +33,10 @@ public final class DictionarySectionView: NSView {
 
     private let list: DictionaryListView
     private var detail: DictionaryDetailView
-    /// Shown when the rows are the preview fixture rather than this user's own
-    /// history. Unlabelled sample data on a screen that exists to prove a number
-    /// is worse than an empty screen: it is a claim, and it is false.
+    /// No longer used to gate a sample-data chip — see `entries(vocabulary:records:)`
+    /// in DictionaryEntry.swift for why the fixture is gone. Kept as a parameter
+    /// only because `preview()` on the screenshot renderer still passes `true` to
+    /// get a stable subtitle; it draws nothing on its own now.
     private var sampleChip: DashboardChip?
     /// The add / import panel, present only while it is open.
     private var composer: DictionaryComposer?
@@ -55,8 +56,7 @@ public final class DictionarySectionView: NSView {
         // direction.
         let records = HistoryStore().all
         self.init(style: style,
-                  entries: DictionaryEntry.entries(vocabulary: .load(), records: records),
-                  isSample: records.isEmpty)
+                  entries: DictionaryEntry.entries(vocabulary: .load(), records: records))
     }
 
     public init(style: DashboardStyle, entries: [DictionaryEntry], isSample: Bool = false) {
@@ -91,11 +91,6 @@ public final class DictionarySectionView: NSView {
         addSubview(header)
         addSubview(heading)
         addSubview(blurb)
-        if isSample {
-            let chip = DashboardChip(text: "Sample data", tone: .outline, style: style)
-            addSubview(chip)
-            sampleChip = chip
-        }
 
         for tile in DictionarySectionView.metrics(for: sorted, style: style) {
             addSubview(tile)

@@ -826,10 +826,21 @@ final class SnippetsEmptyStateView: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// Three examples that show the three shapes a snippet can take — a single
+    /// line, a template with gaps to fill, and a block of prose — placeholders
+    /// for the person using THEIR OWN app to fill in with their own words.
+    ///
+    /// This used to be the author's actual week: his email address, his
+    /// deposit terms, his sign-off. Useful to exactly one person and shown to
+    /// everybody, and shown MORE often after the snippet seed itself was
+    /// emptied — every new install now lands on this screen rather than on a
+    /// pre-filled list, so a starter row containing a stranger's real inbox
+    /// address was one click away from being copied into somebody's own
+    /// snippet without them ever having typed it.
     static let suggestions: [(String, String)] = [
-        ("my email address", "romangigliotti123@gmail.com"),
-        ("deposit terms", "50% to start, the rest when it goes live. The invoice comes as a PDF the same day and is due within 7 days."),
-        ("sign off", "Cheers,\nRoman"),
+        ("my email address", "you@example.com"),
+        ("deposit terms", "50% to start, the rest on delivery. Invoice sent the same day, due within 7 days."),
+        ("sign off", "Thanks,\nYour name"),
     ]
 
     init(style: DashboardStyle) {

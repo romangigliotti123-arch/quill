@@ -49,17 +49,21 @@ public final class InsightsView: NSView {
     // MARK: - Init
 
     public convenience init(style: DashboardStyle) {
+        // Always the real history, including the honest zero.
+        //
+        // This used to substitute a thousand invented dictations, labelled
+        // "Sample data", whenever real history fell short of forty records —
+        // which is every new install, for a while. Every card on this screen
+        // already has its own answer for thin data: "not enough dictations
+        // yet", "nothing dictated in the last 30 days", "—" where a ratio would
+        // otherwise divide by nothing. That degradation is what should be on
+        // screen for a new user — not somebody else's invented ten months,
+        // however clearly it was labelled. A number a person cannot check
+        // reads as a claim about them regardless of the chip beside it.
+        //
         // Measurements are not dictations. See DictationRecord.isMeasurement.
         let history = HistoryStore().all.filter { !$0.isMeasurement }
-        let vocabulary = Vocabulary.load()
-        // Below the floor the percentiles are noise and the heatmap is empty —
-        // and an empty statistics screen is the one state where showing nothing
-        // is worse than showing a labelled sample. The label is not optional.
-        let usingSample = history.count < InsightsFixture.minimumRealRecords
-        self.init(records: usingSample ? InsightsFixture.sample : history,
-                  vocabulary: vocabulary,
-                  isSample: usingSample,
-                  style: style)
+        self.init(records: history, vocabulary: Vocabulary.load(), style: style)
     }
 
     public init(records: [DictationRecord],

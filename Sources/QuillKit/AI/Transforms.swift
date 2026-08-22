@@ -736,7 +736,7 @@ public extension TransformStore {
                 // subject line pasted into a Slack message or a reply box is
                 // invented scaffolding in the wrong place.
                 instruction: """
-                    Rewrite the text as a short email body: one greeting line, the body, and a sign-off of "Cheers,\nRoman".
+                    Rewrite the text as a short email body: one greeting line, the body, and a sign-off line ("Thanks," or "Cheers,") followed by "[Your name]" on its own line.
                     No subject line, no headers, no "Subject:".
                     Keep the body to what the text actually says — do not invent context, deadlines, prices or names.
                     If the recipient is not named in the text, open with "Hey —". Return only the email.
