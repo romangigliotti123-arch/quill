@@ -7,6 +7,16 @@ import AppKit
 /// heard, how it writes, where it goes), and reordering it to look different
 /// would cost every switcher their muscle memory for nothing.
 public enum DashboardSection: String, CaseIterable, Sendable {
+
+    /// What the window opens on.
+    ///
+    /// Insights, not Dictation. Opening the dashboard is almost never "show me
+    /// the thing I just said" — that already went into the document, which is
+    /// where the user is looking. It is "how is this going", and Insights is the
+    /// screen that answers it. Dictation is one click away and is where you go
+    /// deliberately, to find something specific.
+    public static let opensOn: DashboardSection = .insights
+
     case dictation
     case notetaker
     case insights
@@ -152,7 +162,7 @@ public final class SidebarView: NSView {
 
     public override var isFlipped: Bool { true }
 
-    public init(style: DashboardStyle, selection: DashboardSection = .dictation) {
+    public init(style: DashboardStyle, selection: DashboardSection = DashboardSection.opensOn) {
         self.style = style
         self.selection = selection
         rule = DashboardRule(color: style.hairline)

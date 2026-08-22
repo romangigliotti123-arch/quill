@@ -59,7 +59,7 @@ import Testing
     let root = DashboardRootView(style: .light)
     root.frame = NSRect(origin: .zero, size: DashboardMetrics.windowSize)
     root.layoutSubtreeIfNeeded()
-    #expect(root.selection == .dictation)
+    #expect(root.selection == DashboardSection.opensOn)
 
     root.sidebar.select(.snippets)
     #expect(root.selection == .snippets)

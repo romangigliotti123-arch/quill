@@ -51,7 +51,7 @@ public final class DashboardRootView: NSView, SidebarDelegate {
     public override var isFlipped: Bool { true }
 
     public init(style: DashboardStyle,
-                selection: DashboardSection = .dictation,
+                selection: DashboardSection = DashboardSection.opensOn,
                 provider: DashboardSectionProvider? = nil) {
         self.style = style
         self.provider = provider
@@ -413,7 +413,7 @@ public final class DashboardWindowController: NSWindowController, NSWindowDelega
     public let rootView: DashboardRootView
 
     public init(provider: DashboardSectionProvider? = DashboardSectionRegistry.shared,
-                selection: DashboardSection = .dictation) {
+                selection: DashboardSection = DashboardSection.opensOn) {
         let style = DashboardStyle.resolve(nil)
         rootView = DashboardRootView(style: style, selection: selection, provider: provider)
 
@@ -466,6 +466,18 @@ public final class DashboardWindowController: NSWindowController, NSWindowDelega
         // no longer exists.
         let wasAlreadyOpen = window.isVisible
         if !wasAlreadyOpen {
+            // Back to Insights on every fresh open.
+            //
+            // The controller is kept alive between opens so the window does not
+            // rebuild from nothing each time, which also means it reappears on
+            // whatever tab it was closed on. "Open Quill" is not "resume what I
+            // was doing" — the thing the user was doing is in their document, and
+            // they came here to see how it is going. Deliberate navigation to
+            // another tab still survives switching away and back, because that
+            // leaves the window visible and never reaches this branch.
+            if rootView.selection != DashboardSection.opensOn {
+                rootView.showSection(DashboardSection.opensOn, animated: false)
+            }
             if DashboardWindowController.openWindows == 0 {
                 DashboardWindowController.savedMainMenu = NSApp.mainMenu
                 // A .regular app with no main menu shows an empty menu bar —

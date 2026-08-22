@@ -130,7 +130,19 @@ private func clean(_ s: String) -> String { FastCleaner.applyCorrections(to: s) 
 // that turns "word.Next" into "word. Next" was treating a file extension as a
 // sentence break, and sentence casing then capitalised the fragment.
 @Test func doesNotSplitADottedName() {
-    let cleaner = FastCleaner()
+    // The vocabulary is handed in rather than read off this Mac.
+    //
+    // This test passed for months because "Three.js" happened to be in Roman's
+    // own Dictionary, and it went red the moment that file was reset — not
+    // because the cleanup changed, but because the machine did. A suite whose
+    // answer depends on the user's data is one that is green here and red on
+    // every fresh clone, which is the first thing anyone from GitHub runs.
+    //
+    // What the test is actually about is the line below it: a file extension is
+    // not a sentence break. The capitalisation is the Dictionary's job, so the
+    // Dictionary is stated.
+    let cleaner = FastCleaner(vocabulary: VocabularyCorrector(
+        vocabulary: Vocabulary(terms: ["Three.js"])))
     #expect(cleaner.cleanFast("the node.js version bump went through")
             == "The node.js version bump went through")
     #expect(cleaner.cleanFast("a three.js scene loads fine")
