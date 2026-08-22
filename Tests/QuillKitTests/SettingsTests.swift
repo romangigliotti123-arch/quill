@@ -289,3 +289,38 @@ func pasteOnlySettings() -> QuillSettings {
     }
     #expect(settings.isCapturingHotkey, "an idle recorder's deinit cancelled a live capture")
 }
+
+// MARK: - The ⌥⌫ switch
+
+@Test func theUndoChordIsOnByDefaultAndSurvivesARoundTrip() {
+    let scratch = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-undochord-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: scratch) }
+
+    let settings = QuillSettings(url: scratch)
+    #expect(settings.undoChord)
+
+    settings.setUndoChord(false)
+    #expect(!settings.undoChord)
+    #expect(!QuillSettings(url: scratch).undoChord)
+}
+
+@Test func aSettingsFileWrittenBeforeTheSwitchExistedKeepsTheChord() {
+    // Every file on disk predates this key. Decoding them to `false` would turn
+    // the feature off for the one person using the app, silently, on upgrade.
+    let scratch = FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-oldsettings-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: scratch) }
+    try? #"{"holdKeyCode":61,"toggleKeyCode":61,"liveText":true}"#
+        .write(to: scratch, atomically: true, encoding: .utf8)
+
+    #expect(QuillSettings(url: scratch).undoChord)
+}
+
+@Test func aProviderThatDoesNotCareAboutTheChordStillAllowsIt() {
+    // The default on the protocol. Every test double conforms to it, and a
+    // double that had to opt in would silently disable the chord in whichever
+    // suite forgot.
+    #expect(QuillSettings(url: FileManager.default.temporaryDirectory
+        .appendingPathComponent("quill-\(UUID().uuidString).json")).undoChord)
+}

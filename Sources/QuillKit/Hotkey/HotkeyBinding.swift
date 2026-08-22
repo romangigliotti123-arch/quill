@@ -154,6 +154,15 @@ public protocol HotkeyBindingProviding: AnyObject, Sendable {
     /// True while a settings screen is recording a new binding, during which the
     /// engine must ignore every key — otherwise assigning a key also fires it.
     var isCapturingHotkey: Bool { get }
+    /// Whether ⌥⌫ may be claimed at all. Read on the tap thread alongside the
+    /// bindings, for the same reason they are: a setting that only takes effect
+    /// on the next launch is a preference file, not a setting.
+    var undoChord: Bool { get }
+}
+
+public extension HotkeyBindingProviding {
+    /// Default for the test doubles, which care about keys rather than chords.
+    var undoChord: Bool { true }
 }
 
 /// Fixed bindings, for tests and for anything that must not touch the disk.

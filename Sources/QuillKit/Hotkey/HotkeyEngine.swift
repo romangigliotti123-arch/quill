@@ -493,7 +493,11 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
                     + "wanted=\(String(UndoChord.flags.rawValue, radix: 16)) gesture=\(machine.state) "
                     + "heldFor=\(held) heardSpeech=\(spoken) armed=\(undo?.isArmed ?? false)")
             }
-            if let undo, UndoChord.claims(keyCode: keyCode, flags: flags,
+            // Asked before anything else about this key, so that with the switch
+            // off ⌥⌫ is not merely refused but never examined: no swallow, no
+            // put-back, no chance of a race deciding it. The keystroke is the
+            // system's again, exactly as it was before Quill existed.
+            if let undo, bindings.undoChord, UndoChord.claims(keyCode: keyCode, flags: flags,
                                           gesture: machine.state,
                                           triggerHeldFor: heldFor,
                                           heardSpeech: spoken,

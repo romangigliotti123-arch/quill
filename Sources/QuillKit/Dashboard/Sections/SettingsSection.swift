@@ -135,6 +135,12 @@ public final class SettingsSectionView: NSView {
                                               color: style.inkTertiary, lines: 2, lineHeight: 16)
         numberNote = numbersNote
 
+        let undo = DashboardSwitch(isOn: settings.undoChord, style: style)
+        undo.onToggle = { [weak self] on in self?.settings.setUndoChord(on) }
+        let undoNote = DashboardType.label(
+            "⌥⌫ deletes the last thing Quill inserted. Off, it deletes the previous word, as it does everywhere else.",
+            font: DashboardType.caption, color: style.inkTertiary, lines: 2, lineHeight: 16)
+
         let context = DashboardSwitch(isOn: settings.contextRecovery, style: style)
         context.onToggle = { [weak self] on in self?.settings.setContextRecovery(on) }
         // Two lines. The comment that used to sit here said one, "because the row
@@ -151,6 +157,7 @@ public final class SettingsSectionView: NSView {
             .init(label: "Hold to talk", detail: nil, control: hold),
             .init(label: "Push to talk", detail: note, control: push),
             .init(label: "Show text as you speak", detail: nil, control: live),
+            .init(label: "Take back what was just inserted", detail: undoNote, control: undo),
             .init(label: "Numbers", detail: numbersNote, control: numbers),
             .init(label: "Work out a word from context", detail: contextNote, control: context),
         ])

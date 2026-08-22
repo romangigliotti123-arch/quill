@@ -130,12 +130,21 @@ public final class HelpSectionView: NSView {
                   control: HelpKeycap(settings.toggleSharesHoldKey
                                         ? "Tap \(hold)" : "Tap \(settings.toggle.displayName)",
                                       style: style)),
-            .init(label: "Take back what was just inserted", detail: nil,
-                  control: HelpKeycap("⌥⌫", style: style)),
             .init(label: "Throw the dictation away", detail: nil,
                   control: HelpKeycap("Escape", style: style)),
         ]
-        let shortcuts = SettingsGroup(title: "Keys", style: style, rows: shortcutRows)
+        // Only when it is on. A keys list that promises a chord the app is not
+        // claiming is worse than not listing it: the user presses it, a word
+        // disappears, and the page they went to for an explanation is the one
+        // that told them it would do something else.
+        var rowsWithUndo = shortcutRows
+        if settings.undoChord {
+            rowsWithUndo.insert(
+                .init(label: "Take back what was just inserted", detail: nil,
+                      control: HelpKeycap("⌥⌫", style: style)),
+                at: rowsWithUndo.count - 1)
+        }
+        let shortcuts = SettingsGroup(title: "Keys", style: style, rows: rowsWithUndo)
         content.addSubview(shortcuts)
         groups.append(shortcuts)
 

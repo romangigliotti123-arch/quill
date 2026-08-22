@@ -49,6 +49,16 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         /// Type the words into the focused app as they are recognised, instead of
         /// pasting the finished sentence on key release.
         public var liveText: Bool
+        /// Let ⌥⌫ take back the sentence Quill just inserted, instead of doing
+        /// what it does everywhere else on macOS.
+        ///
+        /// A switch because it overrides a system-wide binding. Everyone has
+        /// "delete the previous word" in their fingers, and an override of it
+        /// that someone did not ask for is worse than a missing feature: the
+        /// keystroke stops doing the thing they expect and there is nothing on
+        /// screen explaining why. Off, ⌥⌫ is never swallowed and never even
+        /// examined.
+        public var undoChord: Bool
         /// How a spoken number is written down. See `NumberStyle`.
         public var numberStyle: NumberStyle
         /// Let the model read the sentence, propose a fix of its own, and have
@@ -83,12 +93,14 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                     toggleKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
                     inputDeviceUID: String? = nil,
                     liveText: Bool = true,
+                    undoChord: Bool = true,
                     numberStyle: NumberStyle = .spellOutSmall,
                     contextRecovery: Bool = true) {
             self.holdKeyCode = holdKeyCode
             self.toggleKeyCode = toggleKeyCode
             self.inputDeviceUID = inputDeviceUID
             self.liveText = liveText
+            self.undoChord = undoChord
             self.numberStyle = numberStyle
             self.contextRecovery = contextRecovery
         }
@@ -100,6 +112,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
             toggleKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .toggleKeyCode) ?? fallback.toggleKeyCode
             inputDeviceUID = try c.decodeIfPresent(String.self, forKey: .inputDeviceUID)
             liveText = try c.decodeIfPresent(Bool.self, forKey: .liveText) ?? fallback.liveText
+            undoChord = try c.decodeIfPresent(Bool.self, forKey: .undoChord) ?? fallback.undoChord
             // Every settings file written before this key existed decodes to the
             // default, which is the behaviour those files already had plus the
             // ordinary writing rule. An unknown value from a newer build does the
@@ -170,6 +183,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public var toggle: HotkeyBinding { HotkeyBinding(keyCode: withLock { values.toggleKeyCode }) }
     public var inputDeviceUID: String? { withLock { values.inputDeviceUID } }
     public var liveText: Bool { withLock { values.liveText } }
+    public var undoChord: Bool { withLock { values.undoChord } }
     public var numberStyle: Values.NumberStyle { withLock { values.numberStyle } }
     public var contextRecovery: Bool { withLock { values.contextRecovery } }
 
@@ -210,6 +224,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public func setToggle(_ binding: HotkeyBinding) { update { $0.toggleKeyCode = binding.keyCode } }
     public func setInputDeviceUID(_ uid: String?) { update { $0.inputDeviceUID = uid } }
     public func setLiveText(_ on: Bool) { update { $0.liveText = on } }
+    public func setUndoChord(_ on: Bool) { update { $0.undoChord = on } }
     public func setNumberStyle(_ style: Values.NumberStyle) { update { $0.numberStyle = style } }
     public func setContextRecovery(_ on: Bool) { update { $0.contextRecovery = on } }
 
