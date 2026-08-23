@@ -1,0 +1,39 @@
+{
+  "name": "quill-desktop",
+  "productName": "Quill",
+  "version": "1.0.0",
+  "description": "Hold a key, speak, let go \u2014 the words land where your caret already is. Windows, Linux and macOS.",
+  "license": "MIT",
+  "author": "Roman Gigliotti",
+  "main": "dist/main/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron . --dev",
+    "test": "npm run build:tests && node --test dist-tests/*.test.js",
+    "build:tests": "node scripts/build.mjs --tests",
+    "typecheck": "tsc --noEmit",
+    "words": "node scripts/make_wordlist.mjs",
+    "pack": "npm run build && npm run icon && electron-builder --dir",
+    "dist": "npm run build && npm run icon && electron-builder -mwl",
+    "dist:win": "npm run build && npm run icon && electron-builder --win",
+    "dist:linux": "npm run build && npm run icon && electron-builder --linux",
+    "dist:mac": "npm run build && npm run icon && electron-builder --mac",
+    "icon": "node scripts/make_icon.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
+  },
+  "optionalDependencies": {
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  }
+}

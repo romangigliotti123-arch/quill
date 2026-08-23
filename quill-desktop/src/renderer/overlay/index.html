@@ -1,0 +1,44 @@
+<meta charset="utf-8">
+<title>Quill</title>
+<link rel="stylesheet" href="./overlay.css">
+<body>
+  <!--
+    The HUD. One pill that morphs between four states rather than four
+    different windows, so the thing on screen reads as one object changing
+    mode — which is what makes it feel like an instrument rather than a stack
+    of notifications.
+
+    Deliberately unclickable (`setIgnoreMouseEvents` in the main process). The
+    whole app is "hold a key, talk, text lands where you already were"; a HUD
+    that can take focus moves the insertion point somewhere else and the
+    dictation goes into the wrong window. Cancel is therefore a key, and the
+    listening state names it rather than drawing a button.
+  -->
+  <div id="pill" class="pill" data-state="hidden">
+    <div class="content" id="listening">
+      <div class="wave" id="wave"></div>
+      <span class="cap">esc</span>
+    </div>
+    <div class="content" id="transcribing">
+      <div class="dots"><i></i><i></i><i></i></div>
+      <span class="label">Transcribing</span>
+    </div>
+    <div class="content" id="inserted">
+      <svg class="tick" viewBox="0 0 18 18" aria-hidden="true">
+        <path d="M3.2 9.4 L7.6 13.3 L15 5.0" fill="none" stroke="currentColor"
+              stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="label" id="insertedLabel">1 word</span>
+    </div>
+    <div class="content" id="error">
+      <svg class="warn" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 1.6 L15 14 L1 14 Z" fill="none" stroke="currentColor"
+              stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M8 6 L8 10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        <circle cx="8" cy="11.9" r="0.9" fill="currentColor"/>
+      </svg>
+      <span class="label" id="errorLabel"></span>
+    </div>
+  </div>
+  <script src="./overlay.js"></script>
+</body>
