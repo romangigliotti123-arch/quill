@@ -16,23 +16,12 @@ let package = Package(
     ],
     products: [
         .executable(name: "Quill", targets: ["Quill"]),
+        .executable(name: "QuillMCP", targets: ["QuillMCP"]),
         .library(name: "QuillKit", targets: ["QuillKit"]),
-    ],
-    dependencies: [
-        // The one external dependency in an otherwise dependency-free app —
-        // see the account section in AccountStore.swift for why this is
-        // opt-in rather than load-bearing for anything the app does without
-        // it. Pinned to a major version rather than exact, same as every
-        // other SPM dependency anyone ships.
-        .package(url: "https://github.com/firebase/firebase-ios-sdk", from: "11.0.0"),
     ],
     targets: [
         .target(
             name: "QuillKit",
-            dependencies: [
-                .product(name: "FirebaseAuth", package: "firebase-ios-sdk"),
-                .product(name: "FirebaseFirestore", package: "firebase-ios-sdk"),
-            ],
             path: "Sources/QuillKit",
             resources: [.copy("Resources/GoogleService-Info.plist")],
             swiftSettings: [.swiftLanguageMode(.v5)]
@@ -49,6 +38,15 @@ let package = Package(
             name: "LiveTypeProbe",
             dependencies: ["QuillKit"],
             path: "Sources/LiveTypeProbe",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // Claude Desktop's MCP connection to Quill — a real stdio JSON-RPC
+        // server, not a description of one. See its own file for the shape
+        // and the boundary (voice/style data only, never email).
+        .executableTarget(
+            name: "QuillMCP",
+            dependencies: ["QuillKit"],
+            path: "Sources/QuillMCP",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(

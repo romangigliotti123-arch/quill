@@ -181,6 +181,12 @@ public final class DashboardRootView: NSView, SidebarDelegate {
             guard let self else { return }
             MainActor.assumeIsolated { self.showSection(self.sidebar.selection) }
         }
+        NotificationCenter.default.addObserver(
+            forName: .quillNavigateToSection, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let target = note.object as? DashboardSection else { return }
+            MainActor.assumeIsolated { self.sidebar.select(target) }
+        }
     }
 
     // Layers keep the colours they were handed, and `draw(_:)` here resolves the

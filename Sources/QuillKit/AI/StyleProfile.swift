@@ -150,6 +150,64 @@ public struct StyleProfile: Codable, Sendable, Equatable {
         self.lastLearned = nil
     }
 
+    // MARK: - Combining two Macs' evidence, for SyncEngine
+
+    /// Everything either Mac has observed, in one profile. Never fewer votes,
+    /// never fewer phrasings, never a smaller correction count than either
+    /// side already held on its own — the rule Roman asked for explicitly:
+    /// signing into the same account on a second Mac must never look like
+    /// losing what that Mac already knew.
+    ///
+    /// `preset`, `appTones` and `isLearningEnabled` are choices, not
+    /// evidence — there is nothing to sum. Whichever side has the more
+    /// recent `lastLearned` wins them, on the theory that the Mac someone
+    /// has been actively dictating on lately is the one whose settings they
+    /// meant last.
+    func merged(with other: Self) -> Self {
+        var result = self
+        let otherIsNewer = (other.lastLearned ?? .distantPast) > (lastLearned ?? .distantPast)
+        if otherIsNewer {
+            result.preset = other.preset
+            result.appTones = other.appTones
+            result.isLearningEnabled = other.isLearningEnabled
+        }
+        result.lastLearned = [lastLearned, other.lastLearned].compactMap { $0 }.max()
+
+        result.spelling = spelling.merged(with: other.spelling)
+        result.contractions = contractions.merged(with: other.contractions)
+        result.formality = formality.merged(with: other.formality)
+        result.oxfordComma = oxfordComma.merged(with: other.oxfordComma)
+        result.exclamations = exclamations.merged(with: other.exclamations)
+        result.sentenceLength = sentenceLength.merged(with: other.sentenceLength)
+
+        var byID = Dictionary(uniqueKeysWithValues: phrasings.map { ($0.id, $0) })
+        for theirs in other.phrasings {
+            if let ours = byID[theirs.id] {
+                var merged = ours
+                merged.count += theirs.count
+                merged.lastObserved = [ours.lastObserved, theirs.lastObserved].compactMap { $0 }.max()
+                byID[theirs.id] = merged
+            } else {
+                byID[theirs.id] = theirs
+            }
+        }
+        // Highest-evidence first, then most recent — the same ordering
+        // `maximumPhrasings` exists to protect: what survives a trim should
+        // be what has actually been said more than once, not whatever
+        // happened to be listed first.
+        result.phrasings = byID.values
+            .sorted { $0.count == $1.count
+                ? ($0.lastObserved ?? .distantPast) > ($1.lastObserved ?? .distantPast)
+                : $0.count > $1.count }
+            .prefix(Self.maximumPhrasings)
+            .map { $0 }
+
+        result.correctionCount = correctionCount + other.correctionCount
+        result.modelAccepted = modelAccepted + other.modelAccepted
+        result.modelReverted = modelReverted + other.modelReverted
+        return result
+    }
+
     // MARK: - Tone
 
     /// The voice to use for a given destination app.
@@ -648,6 +706,27 @@ public struct StyleTrait<Value: StyleTraitValue>: Codable, Sendable, Equatable {
         votes[key] = min(Self.voteCeiling, (votes[key] ?? 0) + 1)
         lastObserved = date
     }
+
+    /// Combines the evidence from two Macs into one trait, for `SyncEngine`.
+    ///
+    /// Votes add, per value, capped at the same ceiling a single Mac's own
+    /// corrections already respect — six votes of agreement is six votes of
+    /// agreement, whichever machine they were said on. The later
+    /// `lastObserved` wins, since it is the more recent fact about how this
+    /// person writes now.
+    ///
+    /// `votes` is `private(set)` on purpose — see the type's own doc comment,
+    /// it is meant to read as an explanation of a real belief, not a value any
+    /// caller can set to anything. This lives here rather than in
+    /// `SyncEngine.swift` for exactly that reason.
+    func merged(with other: Self) -> Self {
+        var result = self
+        for (key, otherCount) in other.votes {
+            result.votes[key] = min(Self.voteCeiling, (result.votes[key] ?? 0) + otherCount)
+        }
+        result.lastObserved = [lastObserved, other.lastObserved].compactMap { $0 }.max()
+        return result
+    }
 }
 
 // MARK: - Running mean
@@ -685,6 +764,22 @@ public struct RunningMean: Codable, Sendable, Equatable {
         }
         total += sample
         count += 1
+    }
+
+    /// Combines two Macs' means into one, for `SyncEngine`.
+    ///
+    /// `sampleCeiling` bounds how far `add` lets ONE Mac's own window slide,
+    /// so a habit from a year ago cannot outvote last week. It does not apply
+    /// here: both sides are already within it, so their sum is at most
+    /// double it, which is still an honest weighted average of real evidence
+    /// — capping it here would scale `count` without scaling `total` to
+    /// match, which is the average silently going wrong rather than merely
+    /// being generous with history.
+    func merged(with other: Self) -> Self {
+        var result = self
+        result.total = total + other.total
+        result.count = count + other.count
+        return result
     }
 }
 

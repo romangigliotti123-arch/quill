@@ -68,6 +68,14 @@ fi
 BIN_PATH="$(DEVELOPER_DIR="$CHOSEN" swift build -c "$CONFIG" --product "$APP_NAME" --scratch-path "$SCRATCH" --show-bin-path)/$APP_NAME"
 [[ -x "$BIN_PATH" ]] || { echo "!! No binary at $BIN_PATH" >&2; exit 1; }
 
+# QuillMCP ships inside the bundle so the connection instructions on the
+# Account tab can point at a real path — "build it yourself from source" is
+# not a setup step anyone doing this from Claude Desktop should have to take.
+echo "==> swift build -c $CONFIG   (QuillMCP, same toolchain: $CHOSEN)"
+DEVELOPER_DIR="$CHOSEN" swift build -c "$CONFIG" --product QuillMCP --scratch-path "$SCRATCH"
+MCP_BIN_PATH="$(DEVELOPER_DIR="$CHOSEN" swift build -c "$CONFIG" --product QuillMCP --scratch-path "$SCRATCH" --show-bin-path)/QuillMCP"
+[[ -x "$MCP_BIN_PATH" ]] || { echo "!! No binary at $MCP_BIN_PATH" >&2; exit 1; }
+
 # The bundle is assembled OUTSIDE ~/Documents on purpose. iCloud Drive stamps
 # com.apple.fileprovider.fpfs#P and com.apple.FinderInfo onto everything it
 # syncs, `xattr -cr` cannot remove the file-provider one, and codesign then
@@ -83,6 +91,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
 cp "$BIN_PATH" "$CONTENTS/MacOS/$APP_NAME"
+cp "$MCP_BIN_PATH" "$CONTENTS/MacOS/QuillMCP"
 cp "$ROOT/Packaging/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 [[ -f "$ROOT/Resources/AppIcon.icns" ]] && cp "$ROOT/Resources/AppIcon.icns" "$CONTENTS/Resources/"

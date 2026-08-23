@@ -211,7 +211,7 @@ if ProcessInfo.processInfo.environment["QUILL_ACCOUNT_TEST"] == "1" {
             guard await waitFor({ AccountStore.shared.current?.email == email }, as: "signed up and reflected") else {
                 print("[quill/account-test] FAIL"); done.signal(); return
             }
-            try AccountStore.shared.signOut()
+            AccountStore.shared.signOut()
             guard await waitFor({ AccountStore.shared.current == nil }, as: "signed out and reflected") else {
                 print("[quill/account-test] FAIL"); done.signal(); return
             }
@@ -224,6 +224,81 @@ if ProcessInfo.processInfo.environment["QUILL_ACCOUNT_TEST"] == "1" {
             let ns = error as NSError
             print("[quill/account-test] FAIL: \(error)")
             print("[quill/account-test] domain=\(ns.domain) code=\(ns.code) userInfo=\(ns.userInfo)")
+        }
+        done.signal()
+    }
+    while done.wait(timeout: .now()) == .timedOut {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    exit(0)
+}
+
+// QUILL_SYNC_TEST=1 proves the real two-Mac scenario: sign into the same
+// account from two different `QUILL_DATA_DIR`s and confirm each ends up with
+// what the *other* one seeded, through the real Firestore project — not a
+// mock of it. `HistoryStore.defaultURL` and friends are `static let`s that
+// latch onto whatever `QUILL_DATA_DIR` was set when this process started, so
+// "two devices" here means two separate invocations of this binary, each
+// with its own data directory — the same way two real Macs would differ.
+//
+// One invocation seeds a marker unique to itself, syncs, and prints what its
+// OWN local files hold afterward. The orchestrating shell (see the sync-test
+// runbook) launches it twice with different directories/markers and greps
+// both markers out of each side's printed output.
+if ProcessInfo.processInfo.environment["QUILL_SYNC_TEST"] == "1" {
+    let done = DispatchSemaphore(value: 0)
+    Task { @MainActor in
+        let env = ProcessInfo.processInfo.environment
+        guard let email = env["QUILL_SYNC_TEST_EMAIL"], let password = env["QUILL_SYNC_TEST_PASSWORD"] else {
+            print("[quill/sync-test] FAIL: need QUILL_SYNC_TEST_EMAIL/PASSWORD"); exit(1)
+        }
+        let mode = env["QUILL_SYNC_TEST_MODE"] ?? "signin"
+        let marker = env["QUILL_SYNC_TEST_MARKER"]
+
+        func waitFor(_ predicate: @escaping () -> Bool, as label: String) async -> Bool {
+            for _ in 0 ..< 100 where !predicate() { try? await Task.sleep(for: .milliseconds(50)) }
+            let ok = predicate()
+            print("[quill/sync-test] \(label): \(ok ? "yes" : "TIMED OUT")")
+            return ok
+        }
+
+        do {
+            if mode == "signup" {
+                try await AccountStore.shared.signUp(email: email, password: password)
+            } else {
+                try await AccountStore.shared.signIn(email: email, password: password)
+            }
+            guard await waitFor({ AccountStore.shared.current?.email == email }, as: "signed in") else {
+                print("[quill/sync-test] FAIL"); done.signal(); return
+            }
+
+            if let marker {
+                _ = VocabularyBook().add("SyncMarker-\(marker)")
+                _ = SnippetStore().upsert(Snippet(phrase: "syncmarker\(marker)",
+                                                  replacement: "seeded by \(marker)"))
+                print("[quill/sync-test] seeded marker \(marker)")
+            }
+
+            // `SyncEngine.shared`'s own init fires a background sync the instant
+            // it is first touched, if already signed in — same as it does at real
+            // app launch. That auto-triggered sync and this explicit call can
+            // race for the same in-flight guard, so this retries past a
+            // rejection rather than reporting the harness's own race as a
+            // product failure.
+            var synced = false
+            for _ in 0 ..< 5 where !synced {
+                synced = await SyncEngine.shared.syncNow()
+                if !synced { try? await Task.sleep(for: .milliseconds(300)) }
+            }
+            print("[quill/sync-test] syncNow: \(synced ? "ok" : "FAILED")")
+
+            let vocab = Vocabulary.load()
+            let snippets = SnippetStore().all
+            print("[quill/sync-test] local vocabulary after sync: \(vocab.terms.sorted())")
+            print("[quill/sync-test] local snippet phrases after sync: \(snippets.map(\.phrase).sorted())")
+            print("[quill/sync-test] \(synced ? "PASS" : "FAIL")")
+        } catch {
+            print("[quill/sync-test] FAIL: \(error)")
         }
         done.signal()
     }

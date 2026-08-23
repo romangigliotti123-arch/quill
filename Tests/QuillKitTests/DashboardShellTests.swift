@@ -15,10 +15,10 @@ import Testing
     // to be made twice, once in the app and once here, which is the point of
     // pinning an ordering nobody can derive from the code.
     #expect(DashboardSection.primary == [
-        .insights, .dictation, .dictionary, .snippets,
-        .style, .transforms,
+        .insights, .dictation, .notes, .dictionary, .snippets,
+        .style, .transforms, .mcp,
     ])
-    #expect(DashboardSection.footer == [.settings, .help])
+    #expect(DashboardSection.footer == [.account, .settings, .help])
     #expect(DashboardSection.allCases.count == DashboardSection.primary.count + DashboardSection.footer.count)
 }
 

@@ -80,13 +80,15 @@ public final class OnboardingWindowController: NSWindowController {
 final class OnboardingRootView: NSView {
 
     enum Step: Int, CaseIterable {
-        case welcome, permissions, key, ready
+        case welcome, permissions, key, account, mcpIntro, ready
 
         var title: String {
             switch self {
             case .welcome:     return "Quill types what you say"
             case .permissions: return "Three permissions"
             case .key:         return "Cleanup, if you want it"
+            case .account:     return "An account, if you want one"
+            case .mcpIntro:    return "Claude can write like you now"
             case .ready:       return "That's it"
             }
         }
@@ -106,6 +108,10 @@ final class OnboardingRootView: NSView {
     private var step: Step = .welcome { didSet { rebuild() } }
     private var body: NSView?
     private var permissionPoll: Timer?
+    /// Set once, if the account step ends in a genuinely new account rather
+    /// than a sign-in or no account at all — see `AccountCard.onCreatedAccount`.
+    /// Decides whether `.mcpIntro` is shown or skipped, in both directions.
+    private var didCreateAccountThisSession = false
 
     override var isFlipped: Bool { true }
 
@@ -156,11 +162,24 @@ final class OnboardingRootView: NSView {
     deinit { permissionPoll?.invalidate() }
 
     private func goBack() {
+        // Mirrors the skip in `goNext()` below: `.mcpIntro` was never shown
+        // going forward, so it must not appear going backward either.
+        if step == .ready, !didCreateAccountThisSession {
+            step = .account
+            return
+        }
         guard let previous = Step(rawValue: step.rawValue - 1) else { return }
         step = previous
     }
 
     private func goNext() {
+        // The MCP intro is Roman's ask exactly: "as soon as they create an
+        // account" — not on sign-in, and not for someone who chose to
+        // continue without one. Nothing to explain, so nothing is shown.
+        if step == .account, !didCreateAccountThisSession {
+            step = .ready
+            return
+        }
         guard let following = Step(rawValue: step.rawValue + 1) else {
             finish()
             return
@@ -198,13 +217,16 @@ final class OnboardingRootView: NSView {
         case .welcome:     view = welcomeBody()
         case .permissions: view = permissionsBody()
         case .key:         view = keyBody()
+        case .account:     view = accountBody()
+        case .mcpIntro:    view = mcpIntroBody()
         case .ready:       view = readyBody()
         }
         addSubview(view)
         body = view
 
         back.isHidden = step == .welcome
-        skip.isHidden = step != .key
+        skip.isHidden = step != .key && step != .account
+        skip.title = step == .account ? "Continue without an account" : "Skip"
         next.title = step == .ready ? "Start using Quill" : "Continue"
         dots.count = Step.allCases.count
         dots.index = step.rawValue
@@ -224,6 +246,11 @@ final class OnboardingRootView: NSView {
         case .key:
             return "Everything above works with no account and no network. A key adds one "
                 + "thing: a model pass that fixes what you said mid-sentence."
+        case .account:
+            return "Also entirely optional. An account carries your data to another Mac and "
+                + "unlocks the MCP connection — everything else here works exactly the same without one."
+        case .mcpIntro:
+            return "One thing just unlocked, worth a moment before you go."
         case .ready:
             return "Quill lives in the menu bar. Open it any time for your history, "
                 + "your Dictionary and everything else."
@@ -265,6 +292,33 @@ final class OnboardingRootView: NSView {
 
     private lazy var keyStep = OnboardingKeyStep(style: style)
 
+    private func accountBody() -> NSView { accountStep }
+
+    private lazy var accountStep: OnboardingAccountStep = {
+        let step = OnboardingAccountStep(style: style)
+        step.card.onCreatedAccount = { [weak self] in
+            self?.didCreateAccountThisSession = true
+        }
+        return step
+    }()
+
+    private func mcpIntroBody() -> NSView {
+        let container = OnboardingStack(spacing: 14)
+        container.add(OnboardingPoint(style: style, symbol: "person.crop.circle.badge.checkmark",
+                                      title: "Claude can write like you",
+                                      detail: "Connect Quill's MCP server in Claude Desktop and it can read your writing "
+                                          + "style and real dictations to draft in your voice."))
+        container.add(OnboardingPoint(style: style, symbol: "lock.shield",
+                                      title: "Quill never touches your email",
+                                      detail: "It only ever hands over how you write. Whatever Claude does with "
+                                          + "that — drafting a reply, an email, anything else — is access you grant Claude separately."))
+        container.add(OnboardingPoint(style: style, symbol: "checkmark.circle",
+                                      title: "Set it up any time",
+                                      detail: "Find the connection details on the Account tab whenever you're ready — "
+                                          + "nothing here needs doing right now."))
+        return container
+    }
+
     private func readyBody() -> NSView {
         let container = OnboardingStack(spacing: 14)
         let hold = QuillSettings.shared.hold.displayName
@@ -274,6 +328,9 @@ final class OnboardingRootView: NSView {
         container.add(OnboardingPoint(style: style, symbol: "arrow.uturn.backward",
                                       title: "⌥⌫ takes it back",
                                       detail: "Deletes the last thing Quill inserted. Off by a switch in Settings."))
+        container.add(OnboardingPoint(style: style, symbol: "return",
+                                      title: "Tap again to send",
+                                      detail: "Tap \(hold) again right after letting go, and Quill sends Return once it's finished typing."))
         container.add(OnboardingPoint(style: style, symbol: "questionmark.circle",
                                       title: "If the key does nothing",
                                       detail: "It is almost always Accessibility. The Help tab says what to check."))
@@ -471,5 +528,36 @@ final class OnboardingPermissionRow: NSView, OnboardingSizing {
                            height: bounds.height - nameHeight - 3)
         action.frame = NSRect(x: bounds.width - action.intrinsicWidth, y: 0,
                               width: action.intrinsicWidth, height: 28)
+    }
+}
+
+/// The account step: the real sign-in/sign-up card from the Account tab,
+/// plus what it unlocks. The same `AccountCard` Settings used to show — one
+/// form, not a second one built to look similar.
+final class OnboardingAccountStep: NSView, OnboardingSizing {
+
+    let card: AccountCard
+
+    override var isFlipped: Bool { true }
+
+    init(style: DashboardStyle) {
+        card = AccountCard(style: style)
+        // No second line explaining what an account unlocks — the blurb
+        // above this step already says it, and the window is not tall
+        // enough to fit the sign-in form AND a repeat of the same sentence.
+        super.init(frame: .zero)
+        addSubview(card)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func fittingHeight(width: CGFloat) -> CGFloat {
+        card.fittedHeight(width: width)
+    }
+
+    override func layout() {
+        super.layout()
+        card.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
     }
 }

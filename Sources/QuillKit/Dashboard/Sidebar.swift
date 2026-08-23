@@ -18,22 +18,28 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     public static let opensOn: DashboardSection = .insights
 
     case dictation
+    case notes
     case insights
     case dictionary
     case snippets
     case style
     case transforms
+    case mcp
+    case account
     case settings
     case help
 
     public var title: String {
         switch self {
         case .dictation: return "Dictation"
+        case .notes: return "Notes"
         case .insights: return "Insights"
         case .dictionary: return "Dictionary"
         case .snippets: return "Snippets"
         case .style: return "Style"
         case .transforms: return "Transforms"
+        case .mcp: return "MCP"
+        case .account: return "Account"
         case .settings: return "Settings"
         case .help: return "Help"
         }
@@ -42,6 +48,7 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     public var symbolName: String {
         switch self {
         case .dictation: return "waveform"
+        case .notes: return "note.text"
         case .insights: return "chart.bar.xaxis"
         case .dictionary: return "character.book.closed"
         case .snippets: return "scissors"
@@ -49,6 +56,8 @@ public enum DashboardSection: String, CaseIterable, Sendable {
         // icon — Flow gets away with it because theirs is the only one.
         case .style: return "paintbrush.pointed"
         case .transforms: return "wand.and.sparkles"
+        case .mcp: return "point.3.connected.trianglepath.dotted"
+        case .account: return "person.crop.circle"
         case .settings: return "gearshape"
         case .help: return "questionmark.circle"
         }
@@ -69,12 +78,12 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     /// thing again. Style and Transforms are tuning — real value, but only once
     /// the basics are right, so they go last.
     public static let primary: [DashboardSection] = [
-        .insights, .dictation, .dictionary, .snippets,
-        .style, .transforms,
+        .insights, .dictation, .notes, .dictionary, .snippets,
+        .style, .transforms, .mcp,
     ]
 
     /// Everything below it.
-    public static let footer: [DashboardSection] = [.settings, .help]
+    public static let footer: [DashboardSection] = [.account, .settings, .help]
 
     public var isFooter: Bool { DashboardSection.footer.contains(self) }
 
@@ -85,11 +94,14 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     public var primaryAction: (title: String, symbol: String) {
         switch self {
         case .dictation: return ("Start dictating", "waveform")
+        case .notes: return ("New note", "plus")
         case .insights: return ("Export report", "square.and.arrow.up")
         case .dictionary: return ("Add word", "plus")
         case .snippets: return ("New snippet", "plus")
         case .style: return ("New style", "plus")
         case .transforms: return ("New transform", "plus")
+        case .mcp: return ("Copy config", "doc.on.doc")
+        case .account: return ("Manage account", "person.crop.circle")
         case .settings: return ("Run diagnostics", "stethoscope")
         case .help: return ("Run diagnostics", "stethoscope")
         }
@@ -111,11 +123,14 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     public var blurb: String {
         switch self {
         case .dictation: return "Everything you have dictated, newest first — the raw transcript kept beside what was inserted."
+        case .notes: return "A place to talk into that isn't any particular app — a list, an idea, a draft that doesn't have a home yet."
         case .insights: return "Speed, accuracy and the words Quill had to fix — measured, not estimated."
         case .dictionary: return "Names, jargon and spellings the recogniser has no reason to know. These bias what it hears, not what it prints."
         case .snippets: return "Say a trigger, insert a block of text. Signatures, addresses, boilerplate you retype daily."
         case .style: return "Teach Quill how you write in each app — punctuation, casing, how much it is allowed to tidy."
         case .transforms: return "Rewrite what you just said with one shortcut: shorten it, make it a list, drop the filler."
+        case .mcp: return "Let Claude write in your voice — connect Quill's MCP server in Claude Desktop."
+        case .account: return "Sign in to carry your data to another Mac — what syncs, what stays here, and which devices are connected."
         case .settings: return "Hotkey, microphone, models and permissions."
         case .help: return "Diagnostics, shortcuts and how to get Quill unstuck."
         }
@@ -170,6 +185,20 @@ public final class SidebarView: NSView {
         addSubview(rule)
 
         rows[selection]?.isSelected = true
+
+        // The one row gated behind sign-in — MCP — reads that state and
+        // dims itself directly rather than being told from outside, so
+        // sign-in/out anywhere in the app updates the rail without the
+        // sidebar needing a reference to whatever triggered it.
+        accountObserverID = AccountStore.shared.observe { [weak self] account in
+            self?.rows[.mcp]?.isDimmed = account == nil
+        }
+    }
+
+    private var accountObserverID: UUID?
+
+    deinit {
+        if let accountObserverID { AccountStore.shared.stopObserving(accountObserverID) }
     }
 
     @available(*, unavailable)
@@ -264,8 +293,22 @@ public final class SidebarRowView: NSView {
 
     public let section: DashboardSection
     public var style: DashboardStyle { didSet { rebuild() } }
-    public var isSelected: Bool = false { didSet { rebuild() } }
+    public var isSelected: Bool = false {
+        didSet {
+            rebuild()
+            applyDimming()
+        }
+    }
     public var onClick: (() -> Void)?
+    /// "Greyed out" for a section gated behind sign-in — MCP, while signed
+    /// out. Still fully clickable: dimming is what says "this needs
+    /// something first" at a glance, not a disabled control. Ignored while
+    /// selected, so opening the gated page itself does not also look faded.
+    public var isDimmed: Bool = false { didSet { applyDimming() } }
+
+    private func applyDimming() {
+        alphaValue = (isDimmed && !isSelected) ? 0.5 : 1.0
+    }
 
     private var isHovered = false {
         didSet {
