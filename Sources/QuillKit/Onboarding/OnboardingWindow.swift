@@ -25,18 +25,29 @@ public final class OnboardingWindowController: NSWindowController {
     private static var shared: OnboardingWindowController?
 
     /// Shown at launch on a fresh install, and from Help ▸ Show setup again.
+    ///
+    /// Activate FIRST, order the window front second — never the other way
+    /// round. Three crash reports on this Mac are this method: AppKit throws an
+    /// uncatchable Objective-C exception out of `-[NSWindow _doOrderWindow:]`
+    /// when a window is asked to become key while the accessory app that owns
+    /// it is not yet the frontmost application, and the app only becomes
+    /// frontmost once `activate` has actually taken effect. This used to call
+    /// `showWindow` — which orders the window — and only THEN activate, which
+    /// is the order that produces exactly that state for the one moment
+    /// between the two calls. `DashboardWindowController.show` already gets
+    /// this right; this now does what it does, for the same reason.
     @discardableResult
     public static func present() -> OnboardingWindowController {
         if let shared, shared.window?.isVisible == true {
-            shared.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            shared.window?.makeKeyAndOrderFront(nil)
             return shared
         }
         let controller = OnboardingWindowController()
         shared = controller
-        controller.showWindow(nil)
         controller.window?.center()
         NSApp.activate(ignoringOtherApps: true)
+        controller.showWindow(nil)
         return controller
     }
 

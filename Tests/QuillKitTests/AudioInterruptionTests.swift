@@ -348,3 +348,55 @@ private final class SlowToFinish: Transcriber, @unchecked Sendable {
     #expect(between.contains("inputFormat(forBus: 0)"),
             "the format must be re-checked against the node immediately before the install")
 }
+
+@Test func onboardingActivatesBeforeItOrdersItsWindowFront() {
+    // A second one of these. Three more crash reports on this Mac are AppKit
+    // throwing out of `-[NSWindow _doOrderWindow:]` inside
+    // `OnboardingWindowController.present()` — an uncatchable Objective-C
+    // exception, same as the audio one above, for the same reason: Swift
+    // cannot catch it, so it is not an error the app can handle, it is
+    // `abort()`.
+    //
+    // The state that produces it is a window asked to become key while the
+    // accessory app that owns it is not yet the frontmost application. This
+    // method used to call `showWindow` — which orders the window — and only
+    // afterward call `activate`, which is the one ordering that guarantees
+    // that state exists for a moment. `DashboardWindowController.show` already
+    // gets this right elsewhere in the app; this pins that `present()` now
+    // matches it, in both branches.
+    let source = try! String(
+        contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/QuillKit/Onboarding/OnboardingWindow.swift"),
+        encoding: .utf8)
+
+    guard let bodyStart = source.range(of: "public static func present() -> OnboardingWindowController {")?.upperBound,
+          let bodyEnd = source.range(of: "\n    }", range: bodyStart..<source.endIndex)?.lowerBound
+    else {
+        Issue.record("OnboardingWindowController.present() no longer has the shape this pins")
+        return
+    }
+    let body = source[bodyStart..<bodyEnd]
+
+    // Two branches — the panel already exists, and a fresh one is built — and
+    // `activate` must come first in both, or the fix only covers whichever
+    // branch happened to be checked by hand.
+    guard let activateAt = body.range(of: "NSApp.activate(ignoringOtherApps: true)")?.lowerBound,
+          let firstOrderAt = body.range(of: "makeKeyAndOrderFront(nil)")?.lowerBound
+    else {
+        Issue.record("expected both an activate call and a makeKeyAndOrderFront call")
+        return
+    }
+    #expect(activateAt < firstOrderAt,
+            "activate must run before the existing window is ordered front")
+
+    guard let secondActivateAt = body.range(of: "NSApp.activate", range: firstOrderAt..<body.endIndex)?.lowerBound,
+          let showWindowAt = body.range(of: "showWindow(nil)")?.lowerBound
+    else {
+        Issue.record("expected a second activate call before showWindow in the fresh-controller branch")
+        return
+    }
+    #expect(secondActivateAt < showWindowAt,
+            "activate must run before showWindow orders the new window front")
+}
