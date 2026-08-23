@@ -28,12 +28,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Non-interactive: generates a fresh self-signed identity and imports
-      # it into the runner's own login keychain. Nothing to persist between
-      # runs — each release build only needs to be internally consistent
-      # with itself, not with a developer's previous local build.
+      # Scripts/make_cert.sh imports into the runner's own login keychain
+      # with `-A` (all apps, no per-use prompt) — correct for a developer's
+      # own interactive session, where that already works. It is NOT enough
+      # in a CI runner's non-interactive launchd session: without an
+      # explicit partition-list grant, `codesign` waits on a keychain-access
+      # prompt that can never be answered and the job hangs with no error,
+      # confirmed by a real run that sat in the Build step for 10+ minutes
+      # when the same build finishes locally in well under a minute. A
+      # dedicated keychain, made and unlocked with a password only this job
+      # ever knows, sidesteps needing the login keychain's real password —
+      # which nothing here has — while still granting codesign explicit,
+      # non-interactive access via set-key-partition-list.
       - name: Create a signing identity
-        run: Scripts/make_cert.sh
+        run: |
+          set -euo pipefail
+          IDENTITY="Quill Self-Signed"
+          KEYCHAIN="ci-signing.keychain-db"
+          PASSWORD="$(openssl rand -hex 16)"
+
+          security create-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings "$KEYCHAIN"
+          security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+
+          TMP="$(mktemp -d)"
+          # printf, not a heredoc: a heredoc's closing delimiter has to sit at
+          # column zero, which YAML's own indentation of this block would break.
+          printf '%s\n' \
+            '[req]' 'distinguished_name = dn' 'x509_extensions = v3' 'prompt = no' \
+            '[dn]' 'CN = Quill Self-Signed' \
+            '[v3]' 'basicConstraints = critical, CA:false' \
+            'keyUsage = critical, digitalSignature' \
+            'extendedKeyUsage = critical, codeSigning' > "$TMP/cfg"
+          openssl req -x509 -newkey rsa:2048 -keyout "$TMP/k.key" -out "$TMP/k.crt" \
+              -days 3650 -nodes -config "$TMP/cfg" >/dev/null 2>&1
+          openssl pkcs12 -export -legacy -inkey "$TMP/k.key" -in "$TMP/k.crt" \
+              -out "$TMP/k.p12" -passout pass:quill -name "$IDENTITY" >/dev/null 2>&1
+
+          security import "$TMP/k.p12" -k "$KEYCHAIN" -P quill -A -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN"
+          rm -rf "$TMP"
 
       - name: Build
         run: Scripts/build.sh --release
