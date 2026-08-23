@@ -146,16 +146,25 @@ jobs:
     needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      # generate_release_notes fills in the commit list; the tag message
-      # (`git tag -a vX.Y.Z -m "..."`) is what actually carries the human
-      # summary of what changed, and shows up above the generated list.
+      # softprops/action-gh-release does not read the annotated tag message
+      # on its own — confirmed by the very first real release, where
+      # generate_release_notes alone produced only the auto commit list and
+      # silently dropped the whole `git tag -a vX.Y.Z -m "..."` summary.
+      # body_path is what actually gets it in.
+      - name: Extract the tag's message
+        run: git tag -l --format='%(contents)' "${{ github.ref_name }}" > tag-body.md
+
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
+          body_path: tag-body.md
           generate_release_notes: true
           fail_on_unmatched_files: true
