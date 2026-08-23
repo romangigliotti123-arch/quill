@@ -124,8 +124,7 @@ import Testing
     // A section that exists but is not registered renders as a blank pane in the
     // app while still looking finished in its own preview PNG.
     let registry = DashboardSectionRegistry.shared
-    let unbuilt: Set<DashboardSection> = [.notetaker]
-    for section in DashboardSection.allCases where !unbuilt.contains(section) {
+    for section in DashboardSection.allCases {
         #expect(registry.dashboardView(for: section, style: .dark) != nil,
                 "\(section.rawValue) has no view registered")
     }

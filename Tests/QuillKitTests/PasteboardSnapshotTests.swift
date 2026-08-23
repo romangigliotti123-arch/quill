@@ -151,20 +151,12 @@ private func scratchPasteboard() -> NSPasteboard {
     // been fixed for it in isolation, which is exactly how the other three
     // survived: a file that exists but will not decode was read as an empty
     // collection, and the next edit atomically wrote [] over the top. One partial
-    // write during a crash and every note, snippet and dictionary word is gone,
+    // write during a crash and every snippet and dictionary word is gone,
     // silently, at the moment the user next touched anything.
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("quill-store-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: dir) }
-
-    // Notes
-    let notesURL = dir.appendingPathComponent("notes.json")
-    try Data("{ this is not json".utf8).write(to: notesURL)
-    let notes = NoteStore(url: notesURL)
-    notes.upsert(Note(title: "new", body: "written after the damage"))
-    let notesOnDisk = try String(contentsOf: notesURL, encoding: .utf8)
-    #expect(notesOnDisk == "{ this is not json", "overwrote a damaged notes file")
 
     // Snippets
     let snippetsURL = dir.appendingPathComponent("snippets.json")
@@ -208,7 +200,7 @@ private func scratchPasteboard() -> NSPasteboard {
     // And a copy of what could not be read is kept, every time.
     let salvaged = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         .filter { $0.contains("unreadable") }
-    #expect(salvaged.count == 5, "kept \(salvaged.count) salvage copies, expected 5")
+    #expect(salvaged.count == 4, "kept \(salvaged.count) salvage copies, expected 4")
 }
 
 @Test func anAbsentFileIsStillJustAnAbsentFile() throws {
@@ -224,11 +216,6 @@ private func scratchPasteboard() -> NSPasteboard {
     // adding something already in it is a no-op and would prove nothing.
     #expect(book.add("Wollongong"))
     #expect(book.terms.contains("Wollongong"))
-
-    let notesURL = dir.appendingPathComponent("notes.json")
-    let notes = NoteStore(url: notesURL)
-    notes.upsert(Note(title: "first", body: "on a fresh install"))
-    #expect(FileManager.default.fileExists(atPath: notesURL.path))
 }
 
 // MARK: - Restoring past a clipboard manager

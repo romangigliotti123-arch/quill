@@ -34,9 +34,7 @@ public final class DashboardSectionRegistry: DashboardSectionProvider {
         // The convenience init reads the history store; use it.
         register(.dictionary) { DictionarySectionView(style: $0) }
         register(.snippets) { SnippetsSectionProvider().dashboardView(for: .snippets, style: $0) }
-        register(.scratchpad) { ScratchpadSectionView(style: $0, notes: NoteStore.shared.all) }
         register(.style) { StyleSectionView(style: $0, profile: StyleStore.shared.profile) }
-        register(.notetaker) { NotetakerSectionView(style: $0) }
         register(.settings) { SettingsSectionView(style: $0) }
         register(.transforms) { TransformsSectionView(style: $0) }
         register(.help) { HelpSectionView(style: $0) }

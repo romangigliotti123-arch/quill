@@ -18,26 +18,22 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     public static let opensOn: DashboardSection = .insights
 
     case dictation
-    case notetaker
     case insights
     case dictionary
     case snippets
     case style
     case transforms
-    case scratchpad
     case settings
     case help
 
     public var title: String {
         switch self {
         case .dictation: return "Dictation"
-        case .notetaker: return "Notetaker"
         case .insights: return "Insights"
         case .dictionary: return "Dictionary"
         case .snippets: return "Snippets"
         case .style: return "Style"
         case .transforms: return "Transforms"
-        case .scratchpad: return "Scratchpad"
         case .settings: return "Settings"
         case .help: return "Help"
         }
@@ -46,7 +42,6 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     public var symbolName: String {
         switch self {
         case .dictation: return "waveform"
-        case .notetaker: return "record.circle"
         case .insights: return "chart.bar.xaxis"
         case .dictionary: return "character.book.closed"
         case .snippets: return "scissors"
@@ -54,7 +49,6 @@ public enum DashboardSection: String, CaseIterable, Sendable {
         // icon — Flow gets away with it because theirs is the only one.
         case .style: return "paintbrush.pointed"
         case .transforms: return "wand.and.sparkles"
-        case .scratchpad: return "square.and.pencil"
         case .settings: return "gearshape"
         case .help: return "questionmark.circle"
         }
@@ -73,11 +67,10 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     /// Then the two that make the app better at its job the more you use them:
     /// Dictionary teaches it your words, Snippets saves you typing the same
     /// thing again. Style and Transforms are tuning — real value, but only once
-    /// the basics are right. Notetaker and Scratchpad are the two that a person
-    /// can go a month without opening, so they go last.
+    /// the basics are right, so they go last.
     public static let primary: [DashboardSection] = [
         .insights, .dictation, .dictionary, .snippets,
-        .style, .transforms, .notetaker, .scratchpad,
+        .style, .transforms,
     ]
 
     /// Everything below it.
@@ -92,13 +85,11 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     public var primaryAction: (title: String, symbol: String) {
         switch self {
         case .dictation: return ("Start dictating", "waveform")
-        case .notetaker: return ("New recording", "record.circle")
         case .insights: return ("Export report", "square.and.arrow.up")
         case .dictionary: return ("Add word", "plus")
         case .snippets: return ("New snippet", "plus")
         case .style: return ("New style", "plus")
         case .transforms: return ("New transform", "plus")
-        case .scratchpad: return ("New note", "square.and.pencil")
         case .settings: return ("Run diagnostics", "stethoscope")
         case .help: return ("Run diagnostics", "stethoscope")
         }
@@ -120,13 +111,11 @@ public enum DashboardSection: String, CaseIterable, Sendable {
     public var blurb: String {
         switch self {
         case .dictation: return "Everything you have dictated, newest first — the raw transcript kept beside what was inserted."
-        case .notetaker: return "Capture a meeting end to end, on device, and keep the transcript with the notes it produced."
         case .insights: return "Speed, accuracy and the words Quill had to fix — measured, not estimated."
         case .dictionary: return "Names, jargon and spellings the recogniser has no reason to know. These bias what it hears, not what it prints."
         case .snippets: return "Say a trigger, insert a block of text. Signatures, addresses, boilerplate you retype daily."
         case .style: return "Teach Quill how you write in each app — punctuation, casing, how much it is allowed to tidy."
         case .transforms: return "Rewrite what you just said with one shortcut: shorten it, make it a list, drop the filler."
-        case .scratchpad: return "Somewhere to dictate that is not a text field. Thoughts you want to come back to."
         case .settings: return "Hotkey, microphone, models and permissions."
         case .help: return "Diagnostics, shortcuts and how to get Quill unstuck."
         }
@@ -196,7 +185,7 @@ public final class SidebarView: NSView {
     }
 
     /// The pill crosses the gap between the primary group and the footer when
-    /// selection jumps from Scratchpad to Settings — which is a long way and,
+    /// selection jumps from Transforms to Settings — which is a long way and,
     /// travelled at the same speed as a one-row hop, looks like a bug. Distance
     /// buys a little more time, capped so it never becomes something to wait for.
     private func movePill(animated: Bool) {

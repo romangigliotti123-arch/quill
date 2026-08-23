@@ -9,16 +9,14 @@ import Testing
 @Test @MainActor func sidebarOrderMatchesTheAgreedInformationArchitecture() {
     // Reordered by value to the person using it rather than by the order things
     // were built. Insights leads because it is the only screen that answers "is
-    // this actually helping me", and it is the one you open on purpose. Notetaker
-    // and Scratchpad go last because a person can go a month without opening
-    // either.
+    // this actually helping me", and it is the one you open on purpose.
     //
     // This test earns its place here: the change was deliberate and it still had
     // to be made twice, once in the app and once here, which is the point of
     // pinning an ordering nobody can derive from the code.
     #expect(DashboardSection.primary == [
         .insights, .dictation, .dictionary, .snippets,
-        .style, .transforms, .notetaker, .scratchpad,
+        .style, .transforms,
     ])
     #expect(DashboardSection.footer == [.settings, .help])
     #expect(DashboardSection.allCases.count == DashboardSection.primary.count + DashboardSection.footer.count)

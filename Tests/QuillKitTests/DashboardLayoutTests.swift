@@ -42,7 +42,6 @@ import Testing
         SidebarRowView.self,
         InsightsSegmented.self,
         StyleToneRow.self,
-        ScratchpadRow.self,
         TransformRowView.self,
         DashboardSwitch.self,
         HoverControl.self,
@@ -115,7 +114,6 @@ import Testing
         DictationRowView.self,
         DictionaryTermRow.self,
         SidebarRowView.self,
-        ScratchpadRow.self,
         TransformRowView.self,
         StyleToneRow.self,
     ]
@@ -317,8 +315,6 @@ import Testing
 /// The Dictionary showed as many whole rows as fitted and set `isHidden = true`
 /// on the rest — with 142 terms, 135 of them could not be reached by any means,
 /// on the one screen whose entire argument is "here is the evidence". The
-/// Scratchpad had the same shape: no scroll view, so the eighth note onward was
-/// laid out past the bottom of the section and never seen.
 @Test @MainActor func everyLongListCanReachItsLastRow() {
     let frame = DashboardMetrics.sectionFrame(
         in: DashboardMetrics.panelFrame(in: DashboardMetrics.minWindowSize))
@@ -344,16 +340,6 @@ import Testing
     // Every row is in the document, not hidden.
     #expect(document.subviews.filter { $0 is DictionaryTermRow }.count == entries.count)
     #expect(document.subviews.allSatisfy { !$0.isHidden })
-
-    let notes = (0..<30).map { Note(title: "Note \($0)", body: "body \($0)") }
-    let scratchpad = ScratchpadSectionView(style: .dark, notes: notes)
-    scratchpad.frame = NSRect(origin: .zero, size: frame.size)
-    scratchpad.layoutSubtreeIfNeeded()
-
-    let noteList = try! #require(scrollers(in: scratchpad).first, "the note list does not scroll")
-    let noteDocument = try! #require(noteList.documentView)
-    #expect(noteDocument.frame.height > noteList.frame.height,
-            "30 notes fitted without scrolling")
 }
 
 /// The column carrying the evidence must not be the one that collapses.

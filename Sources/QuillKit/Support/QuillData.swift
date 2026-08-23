@@ -45,7 +45,6 @@ public enum QuillData {
             "vocabulary.json",  // the Dictionary
             "transforms.json",  // saved transforms and their chords
             "snippets.json",
-            "notes.json",       // the Scratchpad
             "my-voice-for-ai.md", // the exported "write like me" document
             "nim-key.txt",      // the API key
         ].map { directory.appendingPathComponent($0) }
