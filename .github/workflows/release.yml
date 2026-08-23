@@ -59,7 +59,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "26"
+      # onnxruntime-node ships in the dependency tree only because
+      # @huggingface/transformers lists every backend as optional and this
+      # app never uses the Node one — the renderer runs the browser/WASM
+      # build (electron-builder.yml excludes it from the packaged app
+      # outright). Its postinstall otherwise tries to download binaries this
+      # app will never load, and that download can time out on a CI runner.
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
       - run: npm run dist:win
       - uses: actions/upload-artifact@v4
         with:
@@ -79,6 +87,8 @@ jobs:
         with:
           node-version: "26"
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
       - run: npm run dist:linux
       - uses: actions/upload-artifact@v4
         with:
