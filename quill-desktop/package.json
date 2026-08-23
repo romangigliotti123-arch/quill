@@ -4,7 +4,11 @@
   "version": "1.0.0",
   "description": "Hold a key, speak, let go \u2014 the words land where your caret already is. Windows, Linux and macOS.",
   "license": "MIT",
-  "author": "Roman Gigliotti",
+  "author": {
+    "name": "Roman Gigliotti",
+    "email": "romangigliotti123@gmail.com"
+  },
+  "homepage": "https://github.com/romangigliotti123-arch/quill",
   "main": "dist/main/main.js",
   "type": "commonjs",
   "scripts": {
