@@ -120,10 +120,12 @@ jobs:
       - uses: actions/checkout@v4
       # uiohook-napi is a native module wrapping libuiohook, which needs
       # X11's own headers to compile — not present on the bare runner image.
-      # Confirmed by a real failure: "X11/keysym.h: No such file or
-      # directory" from libuiohook/src/x11/input_helper.c.
+      # This exact set, not a broader guess: uiohook-napi's binding.gyp
+      # defines USE_XRANDR, USE_EVDEV and USE_XT for OS=="linux" and links
+      # -lX11 -lXrandr -lXtst -lXt — neither USE_XINERAMA, USE_XF86MISC nor
+      # USE_XKB_COMMON is set, so their headers are never even reached.
       - name: Install libuiohook's build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxkbfile-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxrandr-dev libxt-dev libxkbfile-dev
       - uses: actions/setup-node@v4
         with:
           node-version: "26"
