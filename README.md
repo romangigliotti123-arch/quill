@@ -29,6 +29,10 @@ developer" or similar. This is expected, not a sign anything is wrong — right-
 the app ▸ **Open** ▸ **Open** again in the dialog that follows, once. macOS
 remembers the choice after that.
 
+Windows SmartScreen will warn the same way on the Windows build, for the same
+reason — nothing is signed there either. [`quill-desktop/README.md`](quill-desktop/README.md)
+has the details.
+
 ## What it does
 
 - **Push to talk.** Hold right Option and speak. Double-tap it for hands-free,

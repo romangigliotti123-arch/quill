@@ -1,0 +1,108 @@
+name: Release
+
+# Builds the two downloads on the platform each one actually needs.
+#
+# The macOS app and quill-desktop's Windows/Linux build cannot be produced
+# from one machine: quill-desktop depends on uiohook-napi, a native module,
+# and node-gyp refuses to cross-compile a native module from source for any
+# OS other than the one it is running on. So this is three jobs on three
+# runners, not one job doing everything — macOS builds the Swift app, Windows
+# and Linux each build quill-desktop on their own OS, and a fourth job
+# collects whatever came out and attaches it to one release.
+#
+# Triggered by pushing a tag (`vX.Y.Z`), or by hand from the Actions tab for
+# a rebuild without cutting a new version.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Non-interactive: generates a fresh self-signed identity and imports
+      # it into the runner's own login keychain. Nothing to persist between
+      # runs — each release build only needs to be internally consistent
+      # with itself, not with a developer's previous local build.
+      - name: Create a signing identity
+        run: Scripts/make_cert.sh
+
+      - name: Build
+        run: Scripts/build.sh --release
+
+      - name: Zip the app
+        run: |
+          cd "$HOME/Library/Application Support/Quill/build"
+          ditto -c -k --sequesterRsrc --keepParent Quill.app "$GITHUB_WORKSPACE/Quill-macOS.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-macos
+          path: Quill-macOS.zip
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: quill-desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+      - run: npm ci
+      - run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows
+          path: |
+            quill-desktop/release/*.exe
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: quill-desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+      - run: npm ci
+      - run: npm run dist:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-linux
+          path: |
+            quill-desktop/release/*.AppImage
+            quill-desktop/release/*.deb
+            quill-desktop/release/*.rpm
+          if-no-files-found: error
+
+  release:
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # generate_release_notes fills in the commit list; the tag message
+      # (`git tag -a vX.Y.Z -m "..."`) is what actually carries the human
+      # summary of what changed, and shows up above the generated list.
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
