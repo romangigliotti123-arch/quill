@@ -111,4 +111,9 @@ public extension Notification.Name {
     /// the user presses a button, nothing happens, and there is nothing on
     /// screen to say whether it refused, is slow, or is broken.
     static let quillOverlayMessage = Notification.Name("com.romangigliotti.quill.overlayMessage")
+    /// A section asking the sidebar to switch to another one — the MCP
+    /// screen's signed-out lock card, "Go to Account", posts this rather
+    /// than holding a reference to the sidebar it was never given.
+    /// `object` is the `DashboardSection` to select.
+    static let quillNavigateToSection = Notification.Name("com.romangigliotti.quill.navigateToSection")
 }

@@ -12,6 +12,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// workspace observer, and letting it go would silently stop ⌥⌫ noticing
     /// that the caret has moved.
     private var undo: InsertionUndo?
+    /// Held for the app's lifetime, same reasoning as `undo` above: it owns a
+    /// panel and three notification observers, and letting it go silently
+    /// stops the always-on bar from following settings changes.
+    private var persistentOverlay: PersistentOverlayController?
 
     /// The live record, reachable by the rehearsal hook in main.swift. Nothing in
     /// the app reads it; it exists so the undo path can be driven against a real
@@ -89,6 +93,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         self.coordinator = coordinator
         coordinator.start()
 
+        // The always-on bottom bar: a click starts or stops a dictation
+        // through the exact same coordinator the held key does, so the two
+        // triggers can never disagree about what state a dictation is in.
+        let persistentOverlay = PersistentOverlayController()
+        persistentOverlay.onToggle = { [weak coordinator] in
+            guard let coordinator else { return }
+            if coordinator.isCurrentlyDictating {
+                coordinator.hotkeyReleased()
+            } else {
+                coordinator.hotkeyPressed()
+            }
+        }
+        persistentOverlay.onNewNote = { [weak self] in self?.startQuickNote() }
+        self.persistentOverlay = persistentOverlay
+
         // A second launch hands over to this instance instead of starting a rival.
         DistributedNotificationCenter.default().addObserver(
             forName: .init("com.romangigliotti.quill.showWindow"), object: nil, queue: .main
@@ -110,6 +129,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // So: poll only while something is actually missing, take one snapshot
         // per pass, and rebuild only when the answer changed.
         startPermissionPollIfNeeded()
+
+        // Touched, not called: `SyncEngine.shared` registers its account
+        // observer the moment it is first read, which is what lets sync start
+        // the instant the app launches — already signed in from a prior
+        // session — rather than waiting for someone to open Settings.
+        _ = SyncEngine.shared
 
         // Re-check when the user comes back from System Settings, which is where
         // they went to change it. This is also what restarts the poll after it
@@ -287,6 +312,41 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openDashboard() {
         if dashboard == nil { dashboard = DashboardWindowController() }
         dashboard?.present()
+    }
+
+    /// The overlay bar's "New Note" segment. Creates the note directly in
+    /// the store, leaves its id for `NotesSectionView` to pick up on next
+    /// build (see `NotesQuickCapture`), opens the dashboard to Notes, and
+    /// starts recording into it the same way the bar's main segment starts
+    /// any other dictation — a second click on that same segment (now
+    /// showing the live-mic dot) stops it, exactly as it always does.
+    private func startQuickNote() {
+        let created = NoteStore.shared.upsert(Note())
+        NotesQuickCapture.leave(created.id)
+        if dashboard == nil { dashboard = DashboardWindowController() }
+        dashboard?.present()
+        // `sidebar.select`, not `rootView.showSection` directly — the latter
+        // only swaps the content view. It is normally reached from the
+        // sidebar's own click handler, which has already moved the
+        // selection pill and highlighted the row before calling it; calling
+        // it on its own from here left Notes on screen with Insights still
+        // showing as selected.
+        //
+        // `select` no-ops if Notes is already the open tab, which is right
+        // for a click but wrong here — the pending note still needs picking
+        // up, so that one case rebuilds the section directly instead.
+        if dashboard?.rootView.selection == .notes {
+            dashboard?.rootView.showSection(.notes, animated: false)
+        } else {
+            dashboard?.rootView.sidebar.select(.notes)
+        }
+        // The window has to actually become key and the body's first
+        // responder has to actually land before a synthetic dictation
+        // start means anything — `present()` and `showSection()` are both
+        // effectively instant, but AppKit's own window-ordering is not.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.coordinator?.hotkeyPressed()
+        }
     }
 
     /// Puts the last thing you dictated back on the clipboard.

@@ -45,8 +45,11 @@ public enum QuillData {
             "vocabulary.json",  // the Dictionary
             "transforms.json",  // saved transforms and their chords
             "snippets.json",
+            "notes.json",
             "my-voice-for-ai.md", // the exported "write like me" document
             "nim-key.txt",      // the API key
+            "account.json",     // the signed-in session, if there is one
+            "device.json",      // this Mac's id, for the Devices list on Account
         ].map { directory.appendingPathComponent($0) }
     }
 

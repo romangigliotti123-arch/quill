@@ -21,6 +21,30 @@ enum OverlayMetrics {
     static let bottomGap: CGFloat = 72
 }
 
+/// Every number the persistent bar draws with — see `PersistentOverlayHostView`.
+///
+/// `edgeGap` is deliberately smaller than `OverlayMetrics.bottomGap`: when a
+/// click on this bar starts a dictation, the rich listening HUD appears
+/// above it at its own usual height, and the two need enough clearance not
+/// to touch. 14pt puts this bar's top edge a few points under that HUD's
+/// lowest, at the bar's tallest (hovered) height.
+enum PersistentOverlayMetrics {
+    static let height: CGFloat = 36
+    static let collapsedWidth: CGFloat = 36
+    static let expandedWidth: CGFloat = 132
+    /// The second segment, shown only when Settings' "New Note button" is
+    /// on — icon plus a shorter label than "Dictate" needs.
+    static let secondSegmentWidth: CGFloat = 92
+    static let maxExpandedWidth: CGFloat = expandedWidth + secondSegmentWidth
+    /// Sized for the widest state the pill can ever reach, whether or not
+    /// the note button is currently on — the panel is fixed for its whole
+    /// life (see `OverlayMetrics.panelSize`'s own comment for why), and
+    /// this setting can be flipped at runtime without the panel being
+    /// rebuilt to fit.
+    static let panelSize = NSSize(width: maxExpandedWidth + 32, height: height + 32)
+    static let edgeGap: CGFloat = 14
+}
+
 /// Colours resolved eagerly rather than through dynamic `NSColor`s, because
 /// almost everything here is a `CGColor` on a `CALayer` and layers do not
 /// re-resolve on an appearance change — they keep the colour they were handed.
