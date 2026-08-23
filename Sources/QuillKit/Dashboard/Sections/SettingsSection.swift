@@ -63,7 +63,11 @@ public final class SettingsSectionView: NSView {
         header = DashboardSectionHeader(title: "Settings", style: style)
         content.addSubview(header)
 
-        groups = [dictationGroup(), overlayGroup(), inputGroup(), permissionsGroup(), dataGroup(), aboutGroup()]
+        // Order matters here, not just membership: DashboardColumns.pack lays
+        // groups out in this order, always into whichever column is currently
+        // shorter — so the order is what decides how evenly the two columns'
+        // bottoms land, not just which group ends up in which column.
+        groups = [dictationGroup(), dataGroup(), overlayGroup(), inputGroup(), permissionsGroup(), aboutGroup()]
         groups.forEach(content.addSubview)
         refreshPushNote()
         watchForGrants()
@@ -159,6 +163,21 @@ public final class SettingsSectionView: NSView {
             "Release, then tap again right away — Quill sends Return once it's actually finished, not before.",
             font: DashboardType.caption, color: style.inkTertiary, lines: 2, lineHeight: 16)
 
+        // One row rather than its own section — a whole header for one row
+        // read as more clutter than the setting was worth, and it belongs
+        // here anyway: it is what "cleanup" means once the deterministic
+        // pass above stops being able to help.
+        var changeRef: NSView?
+        let change = actionButton("Change…") { [weak self] in
+            guard let self, let changeRef else { return }
+            self.showAIKeyPopover(anchoredTo: changeRef)
+        }
+        changeRef = change
+        let aiNote = DashboardType.label("", font: DashboardType.caption, color: style.inkTertiary,
+                                         lines: 2, lineHeight: 16)
+        aiKeyNote = aiNote
+        refreshAIKeyNote()
+
         return SettingsGroup(title: "Dictation", style: style, rows: [
             .init(label: "Hold to talk", detail: nil, control: hold),
             .init(label: "Push to talk", detail: note, control: push),
@@ -166,8 +185,59 @@ public final class SettingsSectionView: NSView {
             .init(label: "Take back what was just inserted", detail: undoNote, control: undo),
             .init(label: "Numbers", detail: numbersNote, control: numbers),
             .init(label: "Work out a word from context", detail: contextNote, control: context),
+            .init(label: "AI cleanup key", detail: aiNote, control: change),
             .init(label: "Tap again to send", detail: finishThenEnterNote, control: finishThenEnter),
         ])
+    }
+
+    private var aiKeyNote: NSTextField?
+    private var aiKeyPopover: NSPopover?
+
+    private func refreshAIKeyNote() {
+        guard let aiKeyNote else { return }
+        let text: String
+        if let key = NIMKey.load() {
+            text = "Set (\(NIMKey.fingerprint(key))) — spoken corrections are applied."
+        } else {
+            text = "Not set — cleanup runs on-device only, nothing leaves this Mac."
+        }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = 16
+        paragraph.maximumLineHeight = 16
+        paragraph.lineBreakMode = .byWordWrapping
+        aiKeyNote.attributedStringValue = NSAttributedString(
+            string: text,
+            attributes: [.font: DashboardType.caption,
+                         .foregroundColor: style.inkTertiary,
+                         .paragraphStyle: paragraph])
+        relayout()
+    }
+
+    /// The exact same field, Check and Remove `OnboardingKeyStep` shows during
+    /// setup, in a popover instead of the whole onboarding window — changing a
+    /// key later should not mean walking back through account choice and
+    /// permissions to get to it.
+    private func showAIKeyPopover(anchoredTo view: NSView) {
+        let width: CGFloat = 340
+        let inset: CGFloat = 16
+        let step = OnboardingKeyStep(style: style)
+        let stepWidth = width - inset * 2
+        let stepHeight = step.fittingHeight(width: stepWidth)
+        step.frame = NSRect(x: inset, y: inset, width: stepWidth, height: stepHeight)
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: stepHeight + inset * 2))
+        container.addSubview(step)
+
+        let controller = NSViewController()
+        controller.view = container
+
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        popover.delegate = self
+        popover.contentSize = container.frame.size
+        aiKeyPopover = popover
+        popover.show(relativeTo: view.bounds, of: view, preferredEdge: .maxY)
     }
 
     private var overlayPositionPicker: DashboardMenuButton?
@@ -551,6 +621,13 @@ public final class SettingsSectionView: NSView {
         // bottom of an unflipped clip view.
         content.frame = NSRect(x: 0, y: 0, width: bounds.width,
                                height: max(bounds.height, y + DashboardSpace.md))
+    }
+}
+
+extension SettingsSectionView: NSPopoverDelegate {
+    public func popoverDidClose(_ notification: Notification) {
+        aiKeyPopover = nil
+        refreshAIKeyNote()
     }
 }
 
