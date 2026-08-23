@@ -9,30 +9,6 @@ import AppKit
 // entire feature; everything else here is just enough chrome to create one,
 // find it again, and delete it.
 
-/// A one-shot signal between "start a new note from outside the Notes
-/// screen" — the overlay bar's second segment, eventually its own hotkey —
-/// and the screen itself. The dashboard's registry builds a fresh
-/// `NotesSectionView` every time the tab is selected, so there is no live
-/// instance anywhere else to call a method on; whoever wants a quick note
-/// creates it directly in `NoteStore`, leaves its id here, and the next
-/// `NotesSectionView` that gets built reads it once, opens straight into
-/// it with the body focused, and clears the flag.
-enum NotesQuickCapture {
-    private static let lock = NSLock()
-    private static var pendingNoteID: UUID?
-
-    static func leave(_ id: UUID) {
-        lock.lock(); defer { lock.unlock() }
-        pendingNoteID = id
-    }
-
-    static func consume() -> UUID? {
-        lock.lock(); defer { lock.unlock() }
-        defer { pendingNoteID = nil }
-        return pendingNoteID
-    }
-}
-
 /// One row in the list: title, when it was last touched, delete.
 final class NoteRowView: NSView {
 
@@ -262,14 +238,6 @@ public final class NotesSectionView: NSView {
         newButton.onClick = { [weak self] in self?.createNote() }
 
         reload()
-        // The overlay bar's "New Note" segment (and, eventually, its own
-        // hotkey) already created the note and left its id here before this
-        // view was even built — see `NotesQuickCapture`. Open straight into
-        // it, body focused, ready to talk.
-        if let pending = NotesQuickCapture.consume() {
-            shouldFocusTitleOnOpen = false
-            open(pending)
-        }
     }
 
     @available(*, unavailable)

@@ -476,6 +476,7 @@ public final class DictationCoordinator {
             if isLive { liveTyper.retract(generation: liveGeneration) }
             isLive = false
             overlay.hide()
+            NotificationCenter.default.post(name: .quillDictationSettled, object: nil)
             Task { [transcriber] in await transcriber.cancel() }
             return
         }
@@ -499,6 +500,7 @@ public final class DictationCoordinator {
             defer {
                 self.isFinalising = false
                 self.fireDeferredReturnIfPending()
+                NotificationCenter.default.post(name: .quillDictationSettled, object: nil)
             }
             let raw = await transcriber.stop()
             guard epoch == self.insertionEpoch else {
@@ -849,6 +851,7 @@ public final class DictationCoordinator {
         // would eat it and leave one of ours in its place.
         if isLive { liveTyper.retract(restoring: userTyped, generation: liveGeneration) }
         isLive = false
+        NotificationCenter.default.post(name: .quillDictationSettled, object: nil)
         Task { [transcriber, overlay] in
             await transcriber.cancel()
             overlay.hide()
@@ -884,6 +887,7 @@ public final class DictationCoordinator {
         isSpeculating = false
         if isLive { liveTyper.retract(generation: liveGeneration) }
         isLive = false
+        NotificationCenter.default.post(name: .quillDictationSettled, object: nil)
         overlay.show(.error(message))
     }
 
@@ -1075,4 +1079,12 @@ public extension Notification.Name {
     /// ends, from any trigger — held key, transform command, or the
     /// persistent overlay button.
     static let quillDictationStateChanged = Notification.Name("com.romangigliotti.quill.dictationStateChanged")
+    /// Posted once a dictation cycle is truly over — nothing more will be
+    /// typed, whether it ended by landing, by being cancelled, or by failing
+    /// to start. Distinct from `quillDictationStateChanged`: that flips the
+    /// instant the key comes up, well before an insertion that is still being
+    /// cleaned up and typed has actually finished landing. Something that
+    /// needs to know when the words are truly done arriving — the quick-note
+    /// capture bubble reading back what it just caught — needs this one.
+    static let quillDictationSettled = Notification.Name("com.romangigliotti.quill.dictationSettled")
 }

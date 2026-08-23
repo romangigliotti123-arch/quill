@@ -16,6 +16,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// panel and three notification observers, and letting it go silently
     /// stops the always-on bar from following settings changes.
     private var persistentOverlay: PersistentOverlayController?
+    /// Held for the same reason: it owns the quick-note bubble's own panel.
+    private var quickNoteBubble: QuickNoteBubbleController?
 
     /// The live record, reachable by the rehearsal hook in main.swift. Nothing in
     /// the app reads it; it exists so the undo path can be driven against a real
@@ -107,6 +109,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         persistentOverlay.onNewNote = { [weak self] in self?.startQuickNote() }
         self.persistentOverlay = persistentOverlay
+        quickNoteBubble = QuickNoteBubbleController()
 
         // A second launch hands over to this instance instead of starting a rival.
         DistributedNotificationCenter.default().addObserver(
@@ -314,39 +317,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         dashboard?.present()
     }
 
-    /// The overlay bar's "New Note" segment. Creates the note directly in
-    /// the store, leaves its id for `NotesSectionView` to pick up on next
-    /// build (see `NotesQuickCapture`), opens the dashboard to Notes, and
-    /// starts recording into it the same way the bar's main segment starts
-    /// any other dictation — a second click on that same segment (now
-    /// showing the live-mic dot) stops it, exactly as it always does.
+    /// The overlay bar's "New Note" segment. No window opens: a small bubble
+    /// appears right above the bar and starts recording into it immediately,
+    /// the same way the bar's main segment starts any other dictation — a
+    /// second click on that same segment (now showing the live-mic dot)
+    /// stops it, exactly as it always does.
+    @MainActor
     private func startQuickNote() {
-        let created = NoteStore.shared.upsert(Note())
-        NotesQuickCapture.leave(created.id)
-        if dashboard == nil { dashboard = DashboardWindowController() }
-        dashboard?.present()
-        // `sidebar.select`, not `rootView.showSection` directly — the latter
-        // only swaps the content view. It is normally reached from the
-        // sidebar's own click handler, which has already moved the
-        // selection pill and highlighted the row before calling it; calling
-        // it on its own from here left Notes on screen with Insights still
-        // showing as selected.
-        //
-        // `select` no-ops if Notes is already the open tab, which is right
-        // for a click but wrong here — the pending note still needs picking
-        // up, so that one case rebuilds the section directly instead.
-        if dashboard?.rootView.selection == .notes {
-            dashboard?.rootView.showSection(.notes, animated: false)
-        } else {
-            dashboard?.rootView.sidebar.select(.notes)
-        }
-        // The window has to actually become key and the body's first
-        // responder has to actually land before a synthetic dictation
-        // start means anything — `present()` and `showSection()` are both
-        // effectively instant, but AppKit's own window-ordering is not.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.coordinator?.hotkeyPressed()
-        }
+        guard let coordinator else { return }
+        quickNoteBubble?.begin(near: persistentOverlay?.currentFrame, coordinator: coordinator)
     }
 
     /// Puts the last thing you dictated back on the clipboard.

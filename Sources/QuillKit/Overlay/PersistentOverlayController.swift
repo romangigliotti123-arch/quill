@@ -31,6 +31,11 @@ public final class PersistentOverlayController {
 
     var panelForTesting: NSPanel? { panel }
 
+    /// Where the bar actually is on screen right now, for anything that needs
+    /// to put itself relative to it — the quick-note bubble, so far. `nil`
+    /// only if the bar has never been shown at all.
+    public var currentFrame: NSRect? { panel?.frame }
+
     public init() {
         host.onClick = { [weak self] in self?.onToggle?() }
         host.onNewNote = { [weak self] in self?.onNewNote?() }

@@ -196,6 +196,13 @@ final class SnippetsTextArea: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// `window?.makeFirstResponder(self)` does nothing — this view never
+    /// overrides `acceptsFirstResponder`, so the real `NSTextView` inside is
+    /// what actually has to be handed first-responder status.
+    func focus() {
+        window?.makeFirstResponder(textView)
+    }
+
     /// Line height has to be set on the storage, not the view — a text view
     /// given only a font packs paragraphs at the font's default leading, which
     /// is tighter than every other block of prose in the window.

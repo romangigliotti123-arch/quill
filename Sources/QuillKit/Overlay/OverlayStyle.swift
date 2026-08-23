@@ -43,6 +43,10 @@ enum PersistentOverlayMetrics {
     /// rebuilt to fit.
     static let panelSize = NSSize(width: maxExpandedWidth + 32, height: height + 32)
     static let edgeGap: CGFloat = 14
+    /// The quick-note bubble: wide and tall enough for a few real sentences
+    /// without feeling like a second window.
+    static let noteBubbleSize = NSSize(width: 320, height: 160)
+    static let noteBubbleGap: CGFloat = 10
 }
 
 /// Colours resolved eagerly rather than through dynamic `NSColor`s, because
