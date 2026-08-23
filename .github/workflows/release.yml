@@ -118,6 +118,12 @@ jobs:
         working-directory: quill-desktop
     steps:
       - uses: actions/checkout@v4
+      # uiohook-napi is a native module wrapping libuiohook, which needs
+      # X11's own headers to compile — not present on the bare runner image.
+      # Confirmed by a real failure: "X11/keysym.h: No such file or
+      # directory" from libuiohook/src/x11/input_helper.c.
+      - name: Install libuiohook's build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxkbfile-dev libxkbcommon-dev
       - uses: actions/setup-node@v4
         with:
           node-version: "26"
