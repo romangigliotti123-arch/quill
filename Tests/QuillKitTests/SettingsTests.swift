@@ -148,6 +148,29 @@ private func temporarySettingsURL() -> URL {
     #expect(!second.toggleSharesHoldKey)
 }
 
+@Test func markConfiguredWritesTheFileEvenWithNothingChanged() {
+    // The regression: onboarding used to force a write by setting a value back
+    // to its own current value, which `update`'s own change-detection quietly
+    // swallows — so someone who accepted every default finished setup and
+    // settings.json still did not exist. isFirstRun is keyed on that file, so
+    // onboarding came back on every single launch, forever, for anyone who
+    // never touched a setting.
+    let url = temporarySettingsURL()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    #expect(!FileManager.default.fileExists(atPath: url.path))
+    let settings = QuillSettings(url: url)
+    #expect(!FileManager.default.fileExists(atPath: url.path), "construction alone must not write")
+
+    settings.markConfigured()
+    #expect(FileManager.default.fileExists(atPath: url.path))
+
+    // And it round-trips as the untouched defaults, not as some marker value.
+    let reloaded = QuillSettings(url: url)
+    #expect(reloaded.hold.keyCode == HotkeyBinding.rightOption.keyCode)
+    #expect(reloaded.historyRetention == QuillSettings.Values().historyRetention)
+}
+
 @Test func aCorruptSettingsFileFallsBackToDefaultsRatherThanFailing() {
     let url = temporarySettingsURL()
     defer { try? FileManager.default.removeItem(at: url) }

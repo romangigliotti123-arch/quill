@@ -291,6 +291,27 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         NotificationCenter.default.post(name: .quillSettingsChanged, object: nil)
     }
 
+    /// Write the current values to disk regardless of whether anything in them
+    /// changed.
+    ///
+    /// `OnboardingWindowController.isFirstRun` is "settings.json does not
+    /// exist" — deliberately, so an erase brings setup back with no fourth flag
+    /// to fall out of sync. That makes finishing onboarding responsible for
+    /// creating the file even when the person accepted every default and
+    /// changed nothing, which is the common case.
+    ///
+    /// It used to do that by writing a setting back to its own current value —
+    /// `setHistoryRetention(historyRetention)` — which `update` above silently
+    /// swallows: `copy != values` is false when nothing moved, so `save` is
+    /// never called. The result was a settings file that could never be
+    /// created by finishing setup normally, only by changing something inside
+    /// it — so onboarding reappeared on every single launch for anyone who
+    /// took the defaults, forever, with nothing on screen explaining why.
+    public func markConfigured() {
+        let snapshot = withLock { values }
+        save(snapshot)
+    }
+
     public func setHold(_ binding: HotkeyBinding) { update { $0.holdKeyCode = binding.keyCode } }
     public func setToggle(_ binding: HotkeyBinding) { update { $0.toggleKeyCode = binding.keyCode } }
     public func setInputDeviceUID(_ uid: String?) { update { $0.inputDeviceUID = uid } }

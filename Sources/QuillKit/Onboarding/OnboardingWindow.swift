@@ -163,7 +163,7 @@ final class OnboardingRootView: NSView {
     /// reappears on every launch until the user happens to change a setting. The
     /// file is the record that the question was asked.
     private func finish() {
-        QuillSettings.shared.setHistoryRetention(QuillSettings.shared.historyRetention)
+        QuillSettings.shared.markConfigured()
         onFinish?()
     }
 
