@@ -5,3 +5,4 @@ release/
 build/icon.png
 *.log
 .DS_Store
+.devdata/
