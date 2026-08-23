@@ -212,7 +212,11 @@ private func record(daysAgo: Int,
     #expect(zip(a, a.dropFirst()).allSatisfy { $0.date >= $1.date })
     #expect(a.allSatisfy { $0.date <= now })
 
-    let m = InsightsMetrics.compute(records: a, range: .month, now: now)
+    // Explicit vocabulary: compute() defaults to Vocabulary.load(), which reads
+    // the real data directory, so this assertion used to pass or fail depending
+    // on what the developer happened to have in their own Dictionary.
+    let m = InsightsMetrics.compute(records: a, vocabulary: InsightsFixture.vocabulary,
+                                    range: .month, now: now)
     #expect(m.totalWords > 0)
     #expect(m.medianWPM > 60 && m.medianWPM < 260)
     #expect(m.endToEndP50 > 0 && m.endToEndP50 < m.endToEndP90)

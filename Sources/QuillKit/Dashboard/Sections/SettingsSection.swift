@@ -197,9 +197,9 @@ public final class SettingsSectionView: NSView {
         guard let aiKeyNote else { return }
         let text: String
         if let key = NIMKey.load() {
-            text = "Set (\(NIMKey.fingerprint(key))) — spoken corrections are applied."
+            text = "Set (\(NIMKey.fingerprint(key))) — Shorter, Summarise, More casual and Email are available."
         } else {
-            text = "Not set — cleanup runs on-device only, nothing leaves this Mac."
+            text = "Not set — everything runs on this Mac. Four transforms that need a model stay unavailable."
         }
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = 16

@@ -80,13 +80,12 @@ public final class OnboardingWindowController: NSWindowController {
 final class OnboardingRootView: NSView {
 
     enum Step: Int, CaseIterable {
-        case welcome, permissions, key, account, mcpIntro, ready
+        case welcome, permissions, account, mcpIntro, ready
 
         var title: String {
             switch self {
             case .welcome:     return "Quill types what you say"
             case .permissions: return "Three permissions"
-            case .key:         return "Cleanup, if you want it"
             case .account:     return "An account, if you want one"
             case .mcpIntro:    return "Claude can write like you now"
             case .ready:       return "That's it"
@@ -216,7 +215,6 @@ final class OnboardingRootView: NSView {
         switch step {
         case .welcome:     view = welcomeBody()
         case .permissions: view = permissionsBody()
-        case .key:         view = keyBody()
         case .account:     view = accountBody()
         case .mcpIntro:    view = mcpIntroBody()
         case .ready:       view = readyBody()
@@ -225,8 +223,8 @@ final class OnboardingRootView: NSView {
         body = view
 
         back.isHidden = step == .welcome
-        skip.isHidden = step != .key && step != .account
-        skip.title = step == .account ? "Continue without an account" : "Skip"
+        skip.isHidden = step != .account
+        skip.title = "Continue without an account"
         next.title = step == .ready ? "Start using Quill" : "Continue"
         dots.count = Step.allCases.count
         dots.index = step.rawValue
@@ -239,13 +237,11 @@ final class OnboardingRootView: NSView {
         switch step {
         case .welcome:
             return "Hold a key, speak, let go. The words land wherever your caret is. "
-                + "Speech recognition runs on this Mac — no audio ever leaves it."
+                + "Speech recognition runs on this Mac — no audio ever leaves it, and there is "
+                + "nothing to download or sign in to."
         case .permissions:
             return "Quill needs all three. Each one fails silently when it is missing, "
                 + "which is why it asks now rather than the first time you hold the key."
-        case .key:
-            return "Everything above works with no account and no network. A key adds one "
-                + "thing: a model pass that fixes what you said mid-sentence."
         case .account:
             return "Also entirely optional. An account carries your data to another Mac and "
                 + "unlocks the MCP connection — everything else here works exactly the same without one."
@@ -288,9 +284,7 @@ final class OnboardingRootView: NSView {
         }
     }
 
-    private func keyBody() -> NSView { keyStep }
 
-    private lazy var keyStep = OnboardingKeyStep(style: style)
 
     private func accountBody() -> NSView { accountStep }
 

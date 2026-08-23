@@ -265,7 +265,7 @@ final class TransformRowView: NSView {
         // beside a switch. The rule the rest of this window follows applies here
         // too: the part that carries meaning keeps its width and the prose gives
         // way, so the word that can be misread is the one that cannot be cut.
-        let prefix = transform.worksOffline ? "offline  ·  " : ""
+        let prefix = transform.worksOffline ? "offline  ·  " : "needs an AI key  ·  "
         meta = DashboardType.label(prefix + invocation,
                                    font: DashboardType.caption, color: style.inkTertiary)
         toggle = DashboardSwitch(isOn: transform.isEnabled, style: style)

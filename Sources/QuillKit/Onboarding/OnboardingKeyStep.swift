@@ -1,14 +1,20 @@
 import AppKit
 
-/// The optional step, and the one most likely to be got wrong by a stranger.
+/// The AI key panel: Settings ▸ Dictation ▸ AI cleanup key, and the prompt shown
+/// when a transform that needs a model is run without one.
 ///
-/// Two things have to be true at once here and they pull against each other: the
-/// key genuinely is optional — transcription is on-device and everything visible
-/// works without it — and the step still has to be clear enough that someone who
-/// wants the model pass can finish it without leaving for the README. So the
-/// skip is a real button rather than a small link, and the field is checked
-/// against the actual endpoint rather than accepted on the strength of looking
-/// like a key.
+/// This used to be a step in first-run onboarding and is not any more. It asked
+/// the most work of anyone — leave the app, sign up at build.nvidia.com, generate
+/// a key, come back and paste it — at the moment they had least reason to care,
+/// standing next to three permissions that genuinely are required, which made an
+/// optional thing read as mandatory. Worse, its own copy credited the key with
+/// spoken self-correction, which `SelfCorrection.resolve` does offline and has a
+/// test proving it, so skipping the step looked like giving up a feature you
+/// still had. It now appears where the user is already trying to do the thing it
+/// unlocks.
+///
+/// The field is checked against the real endpoint rather than accepted on the
+/// strength of looking like a key.
 final class OnboardingKeyStep: NSView, OnboardingSizing {
 
     private let style: DashboardStyle
@@ -29,10 +35,11 @@ final class OnboardingKeyStep: NSView, OnboardingSizing {
         remove = DashboardButton(title: "Remove", kind: .ghost, style: style)
         getOne = DashboardButton(title: "Get a free key", kind: .ghost, style: style)
         what = DashboardType.label(
-            "Without a key: every word you say, punctuated and formatted, using your Dictionary. "
-                + "With one: spoken corrections are applied — say “send it to Noah, no wait, Carlo” "
-                + "and only Carlo is typed. Nothing is ever uploaded except the sentence being cleaned.",
-            font: DashboardType.body, color: style.inkSecondary, lines: 4, lineHeight: 18)
+            "Taking something back already works without a key — say “send it to Noah, no wait, "
+                + "Carlo” and only Carlo is typed, offline. A key adds the tangled cases the rules "
+                + "won’t guess at, and four transforms that need a model: Shorter, Summarise, "
+                + "More casual and Email. Only the sentence being worked on is ever sent.",
+            font: DashboardType.body, color: style.inkSecondary, lines: 5, lineHeight: 18)
         status = DashboardType.label("", font: DashboardType.caption,
                                      color: style.inkTertiary, lines: 2, lineHeight: 16)
         super.init(frame: .zero)
@@ -115,7 +122,7 @@ final class OnboardingKeyStep: NSView, OnboardingSizing {
                 NIMKey.save(typed)
                 self.field.text = ""
                 self.remove.isHidden = false
-                outcome = "Working, and saved (\(NIMKey.fingerprint(typed))). Cleanup is on."
+                outcome = "Working, and saved (\(NIMKey.fingerprint(typed))). Shorter, Summarise, More casual and Email are on."
                 colour = self.style.accentInk
             } catch let error as NIMError {
                 outcome = Self.explain(error)

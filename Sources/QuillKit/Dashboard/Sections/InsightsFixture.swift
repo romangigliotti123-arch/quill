@@ -16,6 +16,19 @@ public enum InsightsFixture {
     /// Below this the charts are shapeless and the percentiles are noise.
     public static let minimumRealRecords = 40
 
+    /// The Dictionary this corpus was written against.
+    ///
+    /// The sentences below contain deliberate mishearings — "crag e burn",
+    /// "quil", "rose hill" — whose repairs are what the "What Quill fixed" card
+    /// counts. Without the matching terms that count is zero and the card is
+    /// empty, so the fixture has to carry its own vocabulary rather than borrow
+    /// whatever happens to be in the real data directory: that made the number
+    /// depend on who was looking at it, and made a test of this fixture pass on
+    /// one Mac and fail on a clean one.
+    public static let vocabulary = Vocabulary(terms: [
+        "Craigieburn", "Quill", "Rosehill", "Netlify", "Fraunces",
+    ])
+
     /// Built once. The dashboard rebuilds every section view on a theme switch
     /// and on every sidebar click, and regenerating three thousand records plus
     /// their diffs on each of those is a visible stall for data that cannot

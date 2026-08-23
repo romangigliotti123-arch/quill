@@ -276,7 +276,8 @@ public final class TransformEngine {
                  + "version of this one. Your text has not been changed."
         }
         guard hadCompleter else {
-            return "\"\(transform.name)\" needs the AI layer, and no API key is configured. "
+            return "\"\(transform.name)\" needs an AI key, and there isn't one set. It's free — "
+                 + "build.nvidia.com, then Settings ▸ Dictation ▸ AI cleanup key. "
                  + "Your text has not been changed."
         }
         return "\"\(transform.name)\" needs the network and there is none — "
