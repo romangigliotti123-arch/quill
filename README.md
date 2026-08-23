@@ -9,9 +9,14 @@ and Linux — so it works on a plane and your voice never leaves the machine.
 
 <!-- A screenshot belongs here. -->
 
+**Website: [quill-dictation.netlify.app](https://quill-dictation.netlify.app)** — downloads for
+all three platforms, with the setup steps for each.
+
 ## Get it
 
-Every download is on **[Releases](../../releases/latest)**. macOS is the
+The [website](https://quill-dictation.netlify.app) picks the right build for whatever you are
+reading it on and shows the first-launch steps for that platform. Or take the files straight
+from **[Releases](../../releases/latest)**. macOS is the
 native Swift app in this repo; Windows and Linux both come from
 [`quill-desktop/`](quill-desktop), a full Electron rebuild of the same app —
 same cleanup passes, same vocabulary guards, same command router, same
