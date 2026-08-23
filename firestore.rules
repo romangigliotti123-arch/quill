@@ -1,0 +1,15 @@
+rules_version = '2';
+
+// One collection, one document per signed-in account, and nobody can read or
+// write a document that is not their own — not "authenticated users", their
+// own uid and nothing else. Quill's account is optional and, per its own
+// design, holds nothing sensitive: an email and a creation date. The rule is
+// this strict anyway, because "it's not sensitive today" is not a promise
+// about every field a later version adds.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

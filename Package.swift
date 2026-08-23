@@ -18,10 +18,23 @@ let package = Package(
         .executable(name: "Quill", targets: ["Quill"]),
         .library(name: "QuillKit", targets: ["QuillKit"]),
     ],
+    dependencies: [
+        // The one external dependency in an otherwise dependency-free app —
+        // see the account section in AccountStore.swift for why this is
+        // opt-in rather than load-bearing for anything the app does without
+        // it. Pinned to a major version rather than exact, same as every
+        // other SPM dependency anyone ships.
+        .package(url: "https://github.com/firebase/firebase-ios-sdk", from: "11.0.0"),
+    ],
     targets: [
         .target(
             name: "QuillKit",
+            dependencies: [
+                .product(name: "FirebaseAuth", package: "firebase-ios-sdk"),
+                .product(name: "FirebaseFirestore", package: "firebase-ios-sdk"),
+            ],
             path: "Sources/QuillKit",
+            resources: [.copy("Resources/GoogleService-Info.plist")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(

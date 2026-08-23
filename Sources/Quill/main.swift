@@ -184,6 +184,55 @@ if ProcessInfo.processInfo.environment["QUILL_VOICE_EXPORT_PREVIEW"] == "1" {
     exit(0)
 }
 
+// QUILL_ACCOUNT_TEST=1 exercises the real AccountStore against the real
+// Firebase project — sign up, confirm the Firestore document, sign in again,
+// sign out — the one path a screenshot cannot check, because there is nothing
+// to look at until it has already failed. Prints a fresh email each run so it
+// never collides with the account before it.
+if ProcessInfo.processInfo.environment["QUILL_ACCOUNT_TEST"] == "1" {
+    let done = DispatchSemaphore(value: 0)
+    Task { @MainActor in
+        let email = "quill-account-test-\(Int(Date().timeIntervalSince1970))@example.com"
+        let password = "correct-horse-battery-staple"
+
+        // `current` updates through Firebase's own auth-state listener, which
+        // fires a moment after signUp/signIn/signOut actually complete — not
+        // synchronously with them. Polled rather than assumed instantaneous.
+        func waitFor(_ predicate: @escaping () -> Bool, as label: String) async -> Bool {
+            for _ in 0 ..< 100 where !predicate() { try? await Task.sleep(for: .milliseconds(50)) }
+            let ok = predicate()
+            print("[quill/account-test] \(label): \(ok ? "yes" : "TIMED OUT")")
+            return ok
+        }
+
+        print("[quill/account-test] signing up \(email)")
+        do {
+            try await AccountStore.shared.signUp(email: email, password: password)
+            guard await waitFor({ AccountStore.shared.current?.email == email }, as: "signed up and reflected") else {
+                print("[quill/account-test] FAIL"); done.signal(); return
+            }
+            try AccountStore.shared.signOut()
+            guard await waitFor({ AccountStore.shared.current == nil }, as: "signed out and reflected") else {
+                print("[quill/account-test] FAIL"); done.signal(); return
+            }
+            try await AccountStore.shared.signIn(email: email, password: password)
+            guard await waitFor({ AccountStore.shared.current?.email == email }, as: "signed back in and reflected") else {
+                print("[quill/account-test] FAIL"); done.signal(); return
+            }
+            print("[quill/account-test] PASS")
+        } catch {
+            let ns = error as NSError
+            print("[quill/account-test] FAIL: \(error)")
+            print("[quill/account-test] domain=\(ns.domain) code=\(ns.code) userInfo=\(ns.userInfo)")
+        }
+        done.signal()
+    }
+    while done.wait(timeout: .now()) == .timedOut {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    exit(0)
+}
+
 // Transcription harness: QUILL_TRANSCRIBE_FILE=/path/to.wav runs the real
 // transcription path against a file and prints what it measured. Needs no
 // microphone and no TCC grant, which is what makes "the engine works, and here

@@ -87,6 +87,22 @@ cp "$ROOT/Packaging/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 [[ -f "$ROOT/Resources/AppIcon.icns" ]] && cp "$ROOT/Resources/AppIcon.icns" "$CONTENTS/Resources/"
 
+# Every `.bundle` SwiftPM built alongside the binary — QuillKit's own
+# (GoogleService-Info.plist) and, since Firebase, a dozen more that its own
+# dependency tree carries (grpc, abseil, leveldb, nanopb...). `Bundle.module`
+# looks relative to the running binary's location, which after this script
+# reassembles a plain `swift build` product into an .app is
+# Contents/Resources — nowhere else. Skipped silently for as long as this
+# stayed true only of QuillKit's own resource, because nothing had reached
+# for `Bundle.module` yet; the first thing that did crashed at launch with
+# "unable to find bundle named Quill_QuillKit" and no clue that the fix was
+# here rather than in the code that asked for it.
+shopt -s nullglob
+for bundle in "$(dirname "$BIN_PATH")"/*.bundle; do
+    cp -R "$bundle" "$CONTENTS/Resources/"
+done
+shopt -u nullglob
+
 SIGN_ID="-"
 if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
     SIGN_ID="$IDENTITY"

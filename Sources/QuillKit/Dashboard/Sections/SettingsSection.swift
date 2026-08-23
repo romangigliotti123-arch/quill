@@ -27,12 +27,17 @@ public final class SettingsSectionView: NSView {
     private var holdRecorder: KeyRecorderControl?
     private var pushRecorder: KeyRecorderControl?
     private var pushNote: NSTextField?
+    /// Full width, below the packed groups — the same shape Style uses for
+    /// Tone, and for the same reason: this is a form, not a button-sized row,
+    /// and `SettingsGroup`'s row model is built for the latter.
+    private let accountCard: AccountCard
 
     public override var isFlipped: Bool { true }
 
     public init(style: DashboardStyle, settings: QuillSettings = .shared) {
         self.style = style
         self.settings = settings
+        accountCard = AccountCard(style: style)
         super.init(frame: .zero)
         wantsLayer = true
         build()
@@ -65,6 +70,7 @@ public final class SettingsSectionView: NSView {
 
         groups = [dictationGroup(), inputGroup(), permissionsGroup(), dataGroup(), aboutGroup()]
         groups.forEach(content.addSubview)
+        content.addSubview(accountCard)
         refreshPushNote()
         watchForGrants()
     }
@@ -495,7 +501,12 @@ public final class SettingsSectionView: NSView {
         for (group, place) in zip(groups, places) {
             group.frame = NSRect(x: place.x, y: place.y, width: place.width, height: place.height)
         }
-        let y = top + used
+        var y = top + used
+
+        y += DashboardSpace.lg
+        let accountHeight = accountCard.fittedHeight(width: width)
+        accountCard.frame = NSRect(x: x, y: y, width: width, height: accountHeight)
+        y += accountHeight
 
         // The document is as tall as its contents or the viewport, whichever is
         // more — shorter than the viewport and the whole thing sticks to the
