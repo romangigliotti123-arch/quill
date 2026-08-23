@@ -60,6 +60,12 @@ final class OverlayHostView: NSView {
     private var link: CADisplayLink?
     private var lastTimestamp: CFTimeInterval = 0
 
+    /// Called with the real, unclamped gap between display-link callbacks, in
+    /// seconds — after the physics have used the clamped version. Set only by
+    /// `OverlayFrameStressTest`, which is the only caller that needs to know
+    /// what the link actually did rather than what the springs were told.
+    var frameObserver: ((CFTimeInterval) -> Void)?
+
     private var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
@@ -241,11 +247,13 @@ final class OverlayHostView: NSView {
 
     @objc private func step(_ sender: CADisplayLink) {
         let now = CACurrentMediaTime()
+        let real = now - lastTimestamp
         // Clamped so a stall (space switch, app launch) replays as one slow
         // frame instead of teleporting every spring past its target.
-        let dt = CGFloat(min(max(now - lastTimestamp, 0), 1.0 / 30.0))
+        let dt = CGFloat(min(max(real, 0), 1.0 / 30.0))
         lastTimestamp = now
         advance(dt: dt)
+        frameObserver?(real)
     }
 
     /// Split out from the display link so an offscreen render can step the very

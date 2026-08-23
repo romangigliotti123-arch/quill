@@ -29,6 +29,12 @@ public final class OverlayController: OverlayPresenting {
     /// to a window, and a window is not a return value.
     var panelForTesting: NSPanel? { panel }
 
+    /// The real display link's real per-frame gap, for `OverlayFrameStressTest`.
+    var frameObserverForTesting: ((CFTimeInterval) -> Void)? {
+        get { host.frameObserver }
+        set { host.frameObserver = newValue }
+    }
+
     public init() {
         host.onDismissed = { [weak self] in
             guard let self else { return }

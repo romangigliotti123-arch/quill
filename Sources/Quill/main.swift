@@ -255,6 +255,13 @@ if let dir = ProcessInfo.processInfo.environment["QUILL_OVERLAY_SHOTS"] {
     exit(0)
 }
 
+// QUILL_OVERLAY_STRESS=<seconds> runs the real HUD against the real audio-tap
+// cadence and reports its actual frame timing. See OverlayFrameStressTest.
+if ProcessInfo.processInfo.environment["QUILL_OVERLAY_STRESS"] != nil {
+    MainActor.assumeIsolated { _ = OverlayFrameStressTest.runIfRequested() }
+    exit(0)
+}
+
 // One Quill at a time.
 //
 // Two copies can exist — the build output and the installed one — and macOS will
