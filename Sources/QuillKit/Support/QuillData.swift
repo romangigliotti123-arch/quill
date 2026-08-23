@@ -30,6 +30,14 @@ public enum QuillData {
 
     /// Everything a person would mean by "my data": what I said, what I taught
     /// it, how I set it up, and the credential.
+    ///
+    /// Deliberately NOT `style.json` — the learned writing profile. It takes
+    /// real time and real dictations to build back up, "Erase everything" and
+    /// "Uninstall" are both one click past a confirmation someone can click
+    /// through without reading, and losing months of learned voice to either
+    /// is a worse day than losing it should ever cost. It has its own button,
+    /// on the Style screen, that asks about nothing else — see
+    /// `StyleStore.reset()`.
     public static var files: [URL] {
         [
             "history.json",     // every dictation
@@ -38,7 +46,6 @@ public enum QuillData {
             "transforms.json",  // saved transforms and their chords
             "snippets.json",
             "notes.json",       // the Scratchpad
-            "style.json",       // the learned writing profile
             "my-voice-for-ai.md", // the exported "write like me" document
             "nim-key.txt",      // the API key
         ].map { directory.appendingPathComponent($0) }

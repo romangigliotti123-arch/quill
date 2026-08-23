@@ -128,6 +128,41 @@ final class SectionKeyValueRow: NSView {
     }
 }
 
+/// A label on the left, a button on the right — `SectionKeyValueRow`'s shape
+/// with an action in the value slot instead of text.
+final class SectionButtonRow: NSView {
+
+    private let name: NSTextField
+    let button: DashboardButton
+
+    static let height: CGFloat = 34
+
+    override var isFlipped: Bool { true }
+
+    init(_ label: String, buttonTitle: String, style: DashboardStyle) {
+        name = DashboardType.label(label, font: DashboardType.callout, color: style.inkSecondary)
+        button = DashboardButton(title: buttonTitle, kind: .secondary, style: style)
+        super.init(frame: .zero)
+        addSubview(name)
+        addSubview(button)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        let buttonWidth = button.intrinsicWidth
+        button.frame = NSRect(x: bounds.width - buttonWidth,
+                              y: ((bounds.height - 28) / 2).rounded(),
+                              width: buttonWidth, height: 28)
+        let nameSize = name.fittingSize
+        name.frame = NSRect(x: 0, y: ((bounds.height - nameSize.height) / 2).rounded(),
+                            width: min(nameSize.width, bounds.width - buttonWidth - DashboardSpace.sm),
+                            height: nameSize.height)
+    }
+}
+
 /// A bulleted line that wraps. Used where a card is prose rather than data.
 final class SectionBulletRow: NSView {
 
@@ -697,6 +732,14 @@ public final class StyleSectionView: NSView {
             traits.add(row) { _ in SectionKeyValueRow.height }
         }
 
+        // Its own row, its own confirmation, reachable from nowhere else. See
+        // the comment on QuillData.files for why "Erase everything" and
+        // "Uninstall" both leave this alone.
+        let deleteRow = SectionButtonRow("Delete what's been learned",
+                                         buttonTitle: "Delete…", style: style)
+        deleteRow.button.onClick = { [weak self] in self?.confirmDeleteStyle() }
+        traits.add(deleteRow) { _ in SectionButtonRow.height }
+
         let trustBody = DashboardType.label(
             judged == 0
               ? "Nothing to judge yet. This fills in as you accept or undo Quill's cleanup."
@@ -727,6 +770,29 @@ public final class StyleSectionView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Two questions, not one — the same shape `confirmErase` and
+    /// `confirmUninstall` already use, for the same reason: refusable by
+    /// someone who clicked it by accident, irreversible only for someone who
+    /// meant it. What differs is the blast radius: this is the one button in
+    /// the app that can only ever cost the learned voice, never a dictation,
+    /// a snippet, a transform, or the app itself.
+    private func confirmDeleteStyle() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete what Quill has learned about how you write?"
+        alert.informativeText = "Spelling, tone, sentence length, the tone preset — all of it, back to "
+            + "nothing learned. Your dictations, Dictionary and everything else stay exactly as they are. "
+            + "There is no undo."
+        alert.addButton(withTitle: "Cancel")
+        let delete = alert.addButton(withTitle: "Delete")
+        delete.hasDestructiveAction = true
+        alert.window.defaultButtonCell = alert.buttons.first?.cell as? NSButtonCell
+
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        StyleStore.shared.reset()
+        NotificationCenter.default.post(name: .quillDashboardNeedsReload, object: nil)
+    }
 
     public override func layout() {
         super.layout()

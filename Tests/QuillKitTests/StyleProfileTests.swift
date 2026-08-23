@@ -376,3 +376,52 @@ private func temporaryStoreURL() -> URL {
     #expect(appended.count <= StyleProfile.maximumPromptCharacters + 40,
             "the appended rules ran to \(appended.count) characters")
 }
+
+// MARK: - Deleting the learned style, on its own
+
+@Test func resetDeletesTheFileAndReturnsToFreshDefault() {
+    let url = temporaryStoreURL()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let store = StyleStore(url: url)
+    store.update {
+        $0.preset = .technical
+        for _ in 0 ..< 5 { $0.spelling.record(.british, at: Date()) }
+    }
+    #expect(FileManager.default.fileExists(atPath: url.path), "the update above should have persisted")
+    #expect(store.profile.settled(store.profile.spelling) != nil)
+
+    store.reset()
+    #expect(!FileManager.default.fileExists(atPath: url.path), "the file should be gone, not just overwritten")
+    #expect(store.profile == .freshDefault)
+    #expect(store.profile.settled(store.profile.spelling) == nil)
+}
+
+@Test func resetSurvivesAndClearsAPreviouslyDamagedFile() {
+    // `loadFailed` blocks every other write in this class — on purpose,
+    // elsewhere, so a broken file is never overwritten by accident. Delete is
+    // the one action that should win regardless: there is no "keep the
+    // damaged copy around" version of a button whose entire job is removal.
+    let url = temporaryStoreURL()
+    defer { try? FileManager.default.removeItem(at: url) }
+    try? "not json".write(to: url, atomically: true, encoding: .utf8)
+
+    let store = StyleStore(url: url)
+    store.reset()
+    #expect(!FileManager.default.fileExists(atPath: url.path))
+    #expect(store.profile == .freshDefault)
+
+    // And it is usable again afterward — reset must clear loadFailed, or
+    // every write from here on would silently no-op forever.
+    store.update { $0.preset = .casual }
+    #expect(FileManager.default.fileExists(atPath: url.path))
+}
+
+@Test func anInMemoryStoreSurvivesResetWithNothingToDelete() {
+    // The preview/screenshot renderer's store has no url at all; reset must
+    // not force-unwrap its way to a crash on the one path that has nothing on
+    // disk to remove.
+    let store = StyleStore(inMemory: StyleProfile(preset: .technical))
+    store.reset()
+    #expect(store.profile == .freshDefault)
+}

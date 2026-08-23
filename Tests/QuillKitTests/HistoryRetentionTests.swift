@@ -196,11 +196,23 @@ private final class UnsafeSendableBox: @unchecked Sendable {
     // count against; these two are diagnostic output *about* an erase and have
     // no such count to show.
     let incidental: Set<String> = ["erase-dry-run.txt", "erased.txt"]
-    let missing = written.subtracting(listed).subtracting(incidental)
+    // style.json is the one deliberate exception, not an oversight: it is
+    // written (StyleStore.defaultURL) and intentionally NOT on the erase
+    // list, so that "Erase everything" and "Uninstall" cannot take the
+    // learned writing profile with them. See the comment on QuillData.files
+    // and StyleStore.reset(), the button that removes it on its own.
+    let deliberatelyExcluded: Set<String> = ["style.json"]
+    let missing = written.subtracting(listed).subtracting(incidental).subtracting(deliberatelyExcluded)
     #expect(missing.isEmpty, "not on the erase list: \(missing.sorted().joined(separator: ", "))")
     // And nothing listed that the app never writes, which would be a stale entry
     // pointing at someone else's file.
     #expect(listed.subtracting(written).isEmpty)
+}
+
+@Test func eraseAndUninstallCannotTakeTheLearnedStyleWithThem() {
+    // The positive half of the exception above: not just "the scan allows
+    // this", but "this is actually true of the list a real erase reads".
+    #expect(!QuillData.files.map(\.lastPathComponent).contains("style.json"))
 }
 
 @Test func eraseRemovesEverythingIncludingTheKeyAndTheSalvageCopies() {

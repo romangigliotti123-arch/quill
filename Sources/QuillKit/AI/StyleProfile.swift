@@ -899,6 +899,20 @@ public final class StyleStore: @unchecked Sendable {
         update { $0.recordModelOutcome(accepted: accepted) }
     }
 
+    /// The Style screen's own "Delete my style" — independent of, and not
+    /// reachable from, "Erase everything" or "Uninstall". See the comment on
+    /// `QuillData.files` for why style.json is deliberately excluded from
+    /// both: this is the one place it can be removed, and it asks about
+    /// nothing else when it does.
+    public func reset() {
+        queue.sync {
+            current = .freshDefault
+            loadFailed = false
+            guard let url else { return }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     public func setPreset(_ preset: StylePreset) {
         update { $0.preset = preset }
     }
