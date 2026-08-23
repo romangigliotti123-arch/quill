@@ -1,8 +1,0 @@
-node_modules/
-dist/
-dist-tests/
-release/
-build/icon.png
-*.log
-.DS_Store
-.devdata/

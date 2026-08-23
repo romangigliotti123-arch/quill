@@ -4,8 +4,11 @@ Dictation that runs on your machine.
 
 Hold a key, speak, let go — the words land wherever your caret already is. No
 window to open first, no account required, no upload. Speech recognition runs
-on-device — Apple's own Speech framework on macOS, Whisper locally on Windows
-and Linux — so it works on a plane and your voice never leaves the machine.
+on-device, using Apple's own Speech framework, so it works on a plane and your
+audio never leaves the machine.
+
+macOS only. Quill used to ship `quill-desktop`, an Electron rebuild for Windows
+and Linux; those builds have been dropped and the code removed.
 
 <!-- A screenshot belongs here. -->
 
@@ -14,13 +17,9 @@ all three platforms, with the setup steps for each.
 
 ## Get it
 
-The [website](https://quill-dictation.netlify.app) picks the right build for whatever you are
-reading it on and shows the first-launch steps for that platform. Or take the files straight
-from **[Releases](../../releases/latest)**. macOS is the
-native Swift app in this repo; Windows and Linux both come from
-[`quill-desktop/`](quill-desktop), a full Electron rebuild of the same app —
-same cleanup passes, same vocabulary guards, same command router, same
-measured thresholds, ported rather than reimagined.
+The [website](https://quill-dictation.netlify.app) has the download and the
+first-launch steps. Or take the file straight from
+**[Releases](../../releases/latest)**.
 
 ### macOS (Apple silicon, macOS 26+)
 
@@ -33,40 +32,11 @@ developer" or similar. Expected, not a sign anything is wrong: right-click
 the app ▸ **Open** ▸ **Open** again in the dialog that follows, once. macOS
 remembers the choice after that.
 
-### Windows
+### First launch
 
-Download either `Quill.Setup.1.0.0.exe` (installs normally, adds a Start
-Menu entry) or `Quill-1.0.0-portable.exe` (runs from wherever it sits, no
-install). Run it.
-
-Nothing is signed, so Windows SmartScreen will warn the same way Gatekeeper
-does on macOS — click **More info** ▸ **Run anyway**. Once, same as macOS.
-
-### Linux
-
-Three package types on the Releases page — pick by distro, `x86_64` or
-`arm64` to match your machine:
-
-- **AppImage** (works almost anywhere): `chmod +x Quill-1.0.0.AppImage`,
-  then run it directly.
-- **Debian / Ubuntu**: `sudo dpkg -i quill-desktop_1.0.0_amd64.deb`
-- **Fedora / RHEL**: `sudo rpm -i quill-desktop-1.0.0.x86_64.rpm`
-
-Two things worth knowing before the first launch:
-
-- **Wayland** needs the global dictation key to read raw keyboard input,
-  which means being in the `input` group: `sudo usermod -aG input $USER`,
-  then log out and back in, once. X11 needs nothing extra.
-- **The tray icon** needs `libayatana-appindicator3` (GNOME also wants its
-  AppIndicator extension) — packaged as a *recommends*, not a *depends*, so
-  Quill still runs and dictates without it; you just lose the tray.
-
-### First launch, any platform
-
-The Windows and Linux build downloads the Whisper speech model the first
-time you dictate — tens of megabytes, once, unless you pick a bigger model
-in Settings later. That is the only thing that ever touches the network on
-its own; nothing else does unless you add an AI cleanup key yourself.
+Nothing is downloaded and nothing is fetched. The speech model is already part
+of macOS. Quill touches the network only if you add an AI cleanup key or sign
+in for sync — both optional, both off until you do.
 
 ## What it does
 
@@ -98,16 +68,7 @@ its own; nothing else does unless you add an AI cleanup key yourself.
   access, if any, is something you grant Claude yourself. Everything above
   works exactly the same with no account at all.
 
-The list above is the macOS app. `quill-desktop` carries the core across —
-transcription, cleanup, vocabulary, snippets, transforms, undo, style — but
-trails on the newest additions: no overlay, Notes, "finish, then Enter", the
-transform modifier gesture, or accounts/MCP yet. Its own README says exactly
-what has landed.
-
-## Building from source (macOS)
-
-For Windows and Linux, see [`quill-desktop/README.md`](quill-desktop/README.md)
-instead — different toolchain, different repo layout, its own instructions.
+## Building from source
 
 macOS 26 or later, on Apple silicon. Speech recognition uses `SpeechAnalyzer`,
 which does not exist before 26.
@@ -184,8 +145,7 @@ QUILL_SKIP_LIVE_TESTS=1 Scripts/test.sh
 ```
 
 700+ tests, about ten seconds. Drop the variable to include the tests that call
-the real model endpoint (needs a key). `quill-desktop/` has its own suite —
-see its own README.
+the real model endpoint (needs a key).
 
 ## Repo layout
 
@@ -197,9 +157,6 @@ Tests/                the macOS suite
 Scripts/              build, sign, test
 rig/                  the accuracy harness used to benchmark against Wispr Flow
 docs/                 working notes kept for history, not documentation
-quill-desktop/        the Windows/Linux Electron rebuild — its own repo layout,
-                       its own README, folded in here so there is one place to
-                       find either download
 ```
 
 ## Release notes
@@ -209,4 +166,4 @@ alongside every change that ships.
 
 ## Licence
 
-MIT for both the macOS app and `quill-desktop`. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

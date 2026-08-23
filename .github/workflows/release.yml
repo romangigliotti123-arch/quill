@@ -1,14 +1,10 @@
 name: Release
 
-# Builds the two downloads on the platform each one actually needs.
+# Builds the macOS app and attaches it to a release.
 #
-# The macOS app and quill-desktop's Windows/Linux build cannot be produced
-# from one machine: quill-desktop depends on uiohook-napi, a native module,
-# and node-gyp refuses to cross-compile a native module from source for any
-# OS other than the one it is running on. So this is three jobs on three
-# runners, not one job doing everything — macOS builds the Swift app, Windows
-# and Linux each build quill-desktop on their own OS, and a fourth job
-# collects whatever came out and attaches it to one release.
+# This was three jobs on three runners while quill-desktop existed — its native
+# module could not be cross-compiled, so Windows and Linux each had to build on
+# their own OS. Those builds are gone and so are those jobs.
 #
 # Triggered by pushing a tag (`vX.Y.Z`), or by hand from the Actions tab for
 # a rebuild without cutting a new version.
@@ -84,66 +80,8 @@ jobs:
           path: Quill-macOS.zip
           if-no-files-found: error
 
-  windows:
-    runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: quill-desktop
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "26"
-      # onnxruntime-node ships in the dependency tree only because
-      # @huggingface/transformers lists every backend as optional and this
-      # app never uses the Node one — the renderer runs the browser/WASM
-      # build (electron-builder.yml excludes it from the packaged app
-      # outright). Its postinstall otherwise tries to download binaries this
-      # app will never load, and that download can time out on a CI runner.
-      - run: npm ci
-        env:
-          ONNXRUNTIME_NODE_INSTALL: skip
-      - run: npm run dist:win
-      - uses: actions/upload-artifact@v4
-        with:
-          name: quill-windows
-          path: |
-            quill-desktop/release/*.exe
-          if-no-files-found: error
-
-  linux:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: quill-desktop
-    steps:
-      - uses: actions/checkout@v4
-      # uiohook-napi is a native module wrapping libuiohook, which needs
-      # X11's own headers to compile — not present on the bare runner image.
-      # This exact set, not a broader guess: uiohook-napi's binding.gyp
-      # defines USE_XRANDR, USE_EVDEV and USE_XT for OS=="linux" and links
-      # -lX11 -lXrandr -lXtst -lXt — neither USE_XINERAMA, USE_XF86MISC nor
-      # USE_XKB_COMMON is set, so their headers are never even reached.
-      - name: Install libuiohook's build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxrandr-dev libxt-dev libxkbfile-dev
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "26"
-      - run: npm ci
-        env:
-          ONNXRUNTIME_NODE_INSTALL: skip
-      - run: npm run dist:linux
-      - uses: actions/upload-artifact@v4
-        with:
-          name: quill-linux
-          path: |
-            quill-desktop/release/*.AppImage
-            quill-desktop/release/*.deb
-            quill-desktop/release/*.rpm
-          if-no-files-found: error
-
   release:
-    needs: [macos, windows, linux]
+    needs: [macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
