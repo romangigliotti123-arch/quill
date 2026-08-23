@@ -63,7 +63,7 @@ public final class SettingsSectionView: NSView {
         header = DashboardSectionHeader(title: "Settings", style: style)
         content.addSubview(header)
 
-        groups = [dictationGroup(), inputGroup(), permissionsGroup(), dataGroup()]
+        groups = [dictationGroup(), inputGroup(), permissionsGroup(), dataGroup(), aboutGroup()]
         groups.forEach(content.addSubview)
         refreshPushNote()
         watchForGrants()
@@ -275,6 +275,75 @@ public final class SettingsSectionView: NSView {
             .init(label: "Keep dictations for", detail: keepNote, control: keep),
             .init(label: "Erase everything", detail: eraseNote, control: erase),
         ])
+    }
+
+    /// One row, deliberately its own group and the last one on the screen.
+    ///
+    /// "Erase everything" above empties Quill and leaves it installed, which is
+    /// the right shape for someone who wants a clean slate. This is the other
+    /// question — someone who is done with the app entirely — and it does not
+    /// belong under "Files" pretending to be one more file operation. Grouping
+    /// alone should tell you this one takes the app itself, before you have read
+    /// a word of the label.
+    private func aboutGroup() -> SettingsGroup {
+        let uninstall = actionButton("Uninstall…") { [weak self] in self?.confirmUninstall() }
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let uninstallNote = DashboardType.label(
+            "Erases everything Quill knows, moves Quill.app to the Trash, and quits. Version \(version).",
+            font: DashboardType.caption, color: style.inkTertiary, lines: 2, lineHeight: 16)
+
+        return SettingsGroup(title: "About", style: style, rows: [
+            .init(label: "Uninstall Quill", detail: uninstallNote, control: uninstall),
+        ])
+    }
+
+    /// Same two-question shape as `confirmErase`, one step more final: this one
+    /// also takes the application file itself. The bundle is confirmed removable
+    /// BEFORE anything is erased — a failed uninstall must never leave someone
+    /// with a wiped, still-installed app, which is worse than the state they
+    /// started in.
+    private func confirmUninstall() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Uninstall Quill?"
+        alert.informativeText = """
+            This erases every dictation, your Dictionary, transforms, notes, settings and API key, then moves Quill.app to the Trash and quits.
+
+            This cannot be undone from inside Quill. Recovering it means recovering Quill.app from the Trash yourself, and your data will already be gone.
+            """
+        alert.addButton(withTitle: "Cancel")
+        let uninstall = alert.addButton(withTitle: "Uninstall and quit")
+        uninstall.hasDestructiveAction = true
+        alert.window.defaultButtonCell = alert.buttons.first?.cell as? NSButtonCell
+
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+
+        // The bundle first. If macOS refuses to move it — read-only volume,
+        // System Integrity Protection on an unexpected install path — stop here
+        // with the data still intact rather than erasing everything and leaving
+        // a hollowed-out app that still runs.
+        let bundleURL = Bundle.main.bundleURL
+        do {
+            try FileManager.default.trashItem(at: bundleURL, resultingItemURL: nil)
+        } catch {
+            let failure = NSAlert()
+            failure.alertStyle = .critical
+            failure.messageText = "Couldn't remove Quill.app"
+            failure.informativeText = """
+                \(error.localizedDescription)
+
+                Nothing was erased. Quit Quill and drag \(bundleURL.lastPathComponent) to the Trash yourself, or run:
+
+                rm -rf "\(bundleURL.path)"
+                """
+            failure.runModal()
+            return
+        }
+
+        let removed = QuillData.erase()
+        NSLog("[quill] uninstalling: moved %@ to Trash, erased %d file(s): %@",
+              bundleURL.lastPathComponent, removed.count, removed.joined(separator: ", "))
+        NSApp.terminate(nil)
     }
 
     /// Two questions, not one, and the first one names what it is about to take.
