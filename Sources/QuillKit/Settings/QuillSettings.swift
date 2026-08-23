@@ -26,13 +26,16 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     /// indicate either had happened. A run that mutates the user's configuration
     /// is one interrupted run away from losing it.
     ///
-    /// `QUILL_SETTINGS_FILE` points the whole app at a scratch file instead.
+    /// `QUILL_SETTINGS_FILE` narrows further, to an exact file rather than a directory —
+    /// kept for a caller that wants a one-off path shape. Everything else,
+    /// including plain `QUILL_DATA_DIR`, is `QuillData.directory`: the same
+    /// source `QuillData.erase()` reads, so the two can never disagree about
+    /// which file is real.
     public static let defaultURL: URL = {
         if let override = ProcessInfo.processInfo.environment["QUILL_SETTINGS_FILE"], !override.isEmpty {
             return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
         }
-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Quill/settings.json")
+        return QuillData.directory.appendingPathComponent("settings.json")
     }()
 
     /// The persisted shape. Every field is optional-tolerant on decode so a

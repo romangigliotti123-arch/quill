@@ -55,6 +55,13 @@ public enum QuillData {
             return name.contains(".unreadable-")
                 || name.hasSuffix(".log")
                 || name == "caret-probe.txt"
+                // The two receipts QUILL_ERASE_NOW / QUILL_ERASE_DRY_RUN leave
+                // behind for a harness to read back. Diagnostic output about an
+                // erase, not data an erase is required to remove on its own —
+                // but a stray one left over from a debug run should still go
+                // when everything else does.
+                || name == "erase-dry-run.txt"
+                || name == "erased.txt"
         }
     }
 

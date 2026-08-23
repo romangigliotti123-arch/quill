@@ -820,10 +820,11 @@ public enum StyleGuard {
 /// better one used once.
 public final class StyleStore: @unchecked Sendable {
 
-    public static let defaultURL: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Quill/style.json")
-    }()
+    /// Routed through `QuillData.directory`, which is where `QUILL_DATA_DIR`
+    /// actually takes effect — a test or a screenshot run that sets only that
+    /// variable now isolates this store too, and `QuillData.erase()` can never
+    /// point at a different file than the one this class is actually using.
+    public static let defaultURL: URL = QuillData.directory.appendingPathComponent("style.json")
 
     /// The instance the dictation path reads.
     public static let shared = StyleStore()

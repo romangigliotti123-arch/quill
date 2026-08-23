@@ -23,12 +23,15 @@ public struct Vocabulary: Codable, Sendable, Equatable {
     /// word he meant, which is how "build a bed" became "Builda Bed". A change to
     /// this list has to be measured in both directions before it ships, and that
     /// is impossible if the only list the app can read is the live one.
+    /// `QUILL_VOCABULARY_FILE` narrows further, to an exact file rather than a
+    /// directory. Everything else, including plain `QUILL_DATA_DIR`, is
+    /// `QuillData.directory` — the same source `QuillData.erase()` reads, so the
+    /// two can never disagree about which file is real.
     public static let defaultURL: URL = {
         if let override = ProcessInfo.processInfo.environment["QUILL_VOCABULARY_FILE"], !override.isEmpty {
             return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
         }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Quill/vocabulary.json")
+        return QuillData.directory.appendingPathComponent("vocabulary.json")
     }()
 
     /// Nothing. A new install has an empty Dictionary.

@@ -95,12 +95,16 @@ public final class HistoryStore: @unchecked Sendable {
     /// 684 of the 696 records on this Mac are eval clips fed through a loopback,
     /// not things Roman said. See `DictationRecord.isMeasurement` for what that
     /// cost on the statistics screen.
+    /// `QUILL_HISTORY_FILE` narrows further, to an exact file rather than a directory —
+    /// kept for a caller that wants a one-off path shape. Everything else,
+    /// including plain `QUILL_DATA_DIR`, is `QuillData.directory`: the same
+    /// source `QuillData.erase()` reads, so the two can never disagree about
+    /// which file is real.
     public static let defaultURL: URL = {
         if let override = ProcessInfo.processInfo.environment["QUILL_HISTORY_FILE"], !override.isEmpty {
             return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
         }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Quill/history.json")
+        return QuillData.directory.appendingPathComponent("history.json")
     }()
 
     private let url: URL

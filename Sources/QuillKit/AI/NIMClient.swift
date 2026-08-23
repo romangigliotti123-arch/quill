@@ -19,10 +19,10 @@ public enum NIMKey {
 
     public static let environmentVariable = "QUILL_NIM_API_KEY"
 
-    public static let defaultFileURL: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Quill/nim-key.txt")
-    }()
+    /// Routed through `QuillData.directory`, same as every other store — a run
+    /// with only `QUILL_DATA_DIR` set now isolates the credential file too,
+    /// rather than reading and possibly overwriting the real one.
+    public static let defaultFileURL: URL = QuillData.directory.appendingPathComponent("nim-key.txt")
 
     public static func load(
         environment: [String: String] = ProcessInfo.processInfo.environment,

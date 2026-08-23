@@ -87,10 +87,11 @@ public struct Snippet: Codable, Sendable, Equatable, Identifiable {
 /// a test never touches the real file.
 public final class SnippetStore: @unchecked Sendable {
 
-    public static let defaultURL: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Quill/snippets.json")
-    }()
+    /// Routed through `QuillData.directory`, which is where `QUILL_DATA_DIR`
+    /// actually takes effect — a test or a screenshot run that sets only that
+    /// variable now isolates this store too, and `QuillData.erase()` can never
+    /// point at a different file than the one this class is actually using.
+    public static let defaultURL: URL = QuillData.directory.appendingPathComponent("snippets.json")
 
     /// The instance the dictation path uses.
     public static let shared = SnippetStore()

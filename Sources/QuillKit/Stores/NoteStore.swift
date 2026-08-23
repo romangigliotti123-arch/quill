@@ -34,10 +34,11 @@ public struct Note: Codable, Sendable, Equatable, Identifiable {
 }
 
 public final class NoteStore: @unchecked Sendable {
-    public static let defaultURL: URL = {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Quill/notes.json")
-    }()
+    /// Routed through `QuillData.directory`, which is where `QUILL_DATA_DIR`
+    /// actually takes effect — a test or a screenshot run that sets only that
+    /// variable now isolates this store too, and `QuillData.erase()` can never
+    /// point at a different file than the one this class is actually using.
+    public static let defaultURL: URL = QuillData.directory.appendingPathComponent("notes.json")
 
     private let url: URL
     private let lock = NSLock()

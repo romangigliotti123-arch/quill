@@ -149,8 +149,11 @@ private final class UnsafeSendableBox: @unchecked Sendable {
 @Test func everyFileTheAppWritesIsOnTheEraseList() {
     // The promise "erase all my data" is kept by a list, and a list written from
     // memory is one that quietly breaks the next time somebody adds a store. So
-    // the source is the authority: every `appendingPathComponent("Quill/…")` in
-    // Sources must appear in QuillData.files.
+    // the source is the authority: every file path built either the old way —
+    // `appendingPathComponent("Quill/…")`, straight off Application Support —
+    // or the current way — `QuillData.directory.appendingPathComponent("…")`,
+    // which is what every store was moved to so `QUILL_DATA_DIR` alone actually
+    // isolates it — must appear in QuillData.files.
     //
     // Failing here means a new store was added and its file would have survived
     // an erase — a transcript, a dictionary or a credential left behind by a
@@ -163,24 +166,37 @@ private final class UnsafeSendableBox: @unchecked Sendable {
 
     var written = Set<String>()
     let enumerator = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+    // Two shapes: the old direct one, and the current one routed through
+    // QuillData.directory. Whichever is present, the text right after the open
+    // quote is the filename.
+    let markers = [#"appendingPathComponent("Quill/"#, #"QuillData.directory.appendingPathComponent(""#]
     while let url = enumerator?.nextObject() as? URL {
         guard url.pathExtension == "swift",
               let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-        var search = text[...]
-        while let start = search.range(of: #"appendingPathComponent("Quill/"#) {
-            let rest = search[start.upperBound...]
-            if let end = rest.firstIndex(of: "\"") {
-                let name = String(rest[..<end])
-                // Real filenames only. The pattern also appears inside the doc
-                // comment that explains this very test, written as "Quill/…".
-                if name.contains("."), !name.contains("…") { written.insert(name) }
+        for marker in markers {
+            var search = text[...]
+            while let start = search.range(of: marker) {
+                let rest = search[start.upperBound...]
+                if let end = rest.firstIndex(of: "\"") {
+                    let name = String(rest[..<end])
+                    // Real filenames only. The pattern also appears inside the
+                    // doc comment that explains this very test, written as
+                    // "Quill/…".
+                    if name.contains("."), !name.contains("…") { written.insert(name) }
+                }
+                search = rest
             }
-            search = rest
         }
     }
 
     let listed = Set(QuillData.files.map(\.lastPathComponent))
-    let missing = written.subtracting(listed)
+    // Debug-harness receipts, not user data — already covered by
+    // `QuillData.incidentalFiles`, which is what actually removes them.
+    // `QuillData.files` is a fixed list built for `summary()` to name a byte
+    // count against; these two are diagnostic output *about* an erase and have
+    // no such count to show.
+    let incidental: Set<String> = ["erase-dry-run.txt", "erased.txt"]
+    let missing = written.subtracting(listed).subtracting(incidental)
     #expect(missing.isEmpty, "not on the erase list: \(missing.sorted().joined(separator: ", "))")
     // And nothing listed that the app never writes, which would be a stale entry
     // pointing at someone else's file.
