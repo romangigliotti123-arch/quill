@@ -171,6 +171,19 @@ if let path = ProcessInfo.processInfo.environment["QUILL_CLEAN_FILE"] {
     exit(0)
 }
 
+// QUILL_VOICE_EXPORT_PREVIEW=1 runs the exact write the Style screen's "Copy
+// for AI" button runs — real history, real profile, real destination — and
+// prints where it landed plus the first few lines, so the button's actual
+// output is checkable without clicking anything.
+if ProcessInfo.processInfo.environment["QUILL_VOICE_EXPORT_PREVIEW"] == "1" {
+    let result = VoiceExport.write(profile: StyleStore.shared.profile, records: HistoryStore().all)
+    guard let result else { print("write failed"); exit(1) }
+    print("wrote \(result.url.path)")
+    print("--- first 40 lines ---")
+    result.text.split(separator: "\n", omittingEmptySubsequences: false).prefix(40).forEach { print($0) }
+    exit(0)
+}
+
 // Transcription harness: QUILL_TRANSCRIBE_FILE=/path/to.wav runs the real
 // transcription path against a file and prints what it measured. Needs no
 // microphone and no TCC grant, which is what makes "the engine works, and here

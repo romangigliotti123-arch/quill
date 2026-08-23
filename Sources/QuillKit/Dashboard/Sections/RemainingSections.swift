@@ -617,11 +617,19 @@ public final class StyleSectionView: NSView {
     private let trust: SectionCard
     private let presets: SectionCard
     private let chips: [StyleToneRow]
+    private let exportButton: DashboardButton
 
     public override var isFlipped: Bool { true }
 
     public init(style: DashboardStyle, profile: StyleProfile) {
-        header = DashboardSectionHeader(title: "Style", style: style)
+        // "Copy for AI" rather than "Export": the verb people already have for
+        // handing something to a chat window is paste, and a button that ends
+        // in the pasteboard should say so rather than making them go find a
+        // file first. It writes the file too — see the click handler — for
+        // whichever tool wants an attachment instead of pasted text.
+        exportButton = DashboardButton(title: "Copy for AI", symbol: "doc.on.doc",
+                                       kind: .secondary, style: style)
+        header = DashboardSectionHeader(title: "Style", trailing: [exportButton], style: style)
 
         // Traits, with their evidence. A learned setting shown without its support
         // count is indistinguishable from a guess, and this is a feature people
@@ -669,6 +677,19 @@ public final class StyleSectionView: NSView {
 
         super.init(frame: .zero)
         addSubview(header)
+
+        // Read fresh at click time rather than closed over the `profile`
+        // parameter above: the button can sit on screen for a long time, and
+        // the whole point of Style is that it keeps learning while it does.
+        exportButton.onClick = {
+            guard let (url, text) = VoiceExport.write(profile: StyleStore.shared.profile,
+                                                       records: HistoryStore().all)
+            else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
 
         for (name, value) in rows {
             let row = SectionKeyValueRow(name, value, style: style,
