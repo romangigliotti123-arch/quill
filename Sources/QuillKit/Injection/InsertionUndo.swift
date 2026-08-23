@@ -314,8 +314,17 @@ public final class InsertionUndo: InsertionUndoing, @unchecked Sendable {
     /// would leave the swallowed keystroke nowhere.
     public func requestUndo() {
         DispatchQueue.main.async {
-            MainActor.assumeIsolated { self.undoLastInsertion() }
+            self.requestUndoOnMain()
         }
+    }
+
+    /// Split out of `requestUndo()` — the closure-in-closure form above
+    /// (`DispatchQueue.main.async { MainActor.assumeIsolated { ... } }`) crashes
+    /// this Swift 6.3.3 toolchain's diagnostics pass outright
+    /// ("failed to produce diagnostic for expression"). One level of nesting
+    /// compiles clean; the behavior is identical.
+    private func requestUndoOnMain() {
+        MainActor.assumeIsolated { _ = self.undoLastInsertion() }
     }
 
     /// The whole decision, on main, where AppKit and Accessibility live.

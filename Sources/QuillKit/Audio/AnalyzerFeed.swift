@@ -26,16 +26,25 @@ enum AnalyzerFeed {
         captureFormat: AVAudioFormat,
         analyzerFormat: AVAudioFormat?
     ) async throws -> AnalyzerFeeding {
+        #if compiler(>=6.4)
         if #available(macOS 27, *) {
             return ModernAnalyzerFeed(try await AnalyzerInputConverter.converter(compatibleWith: modules))
         }
+        #endif
         guard let analyzerFormat else { throw TranscriptionError.noCompatibleAudioFormat }
         return LegacyAnalyzerFeed(from: captureFormat, to: analyzerFormat)
     }
 }
 
+#if compiler(>=6.4)
 /// macOS 27's `AnalyzerInputConverter`: it owns the resampling, the format
 /// negotiation and the chunking that the fallback below has to do by hand.
+///
+/// Gated on the compiler, not just `@available`: `AnalyzerInputConverter` has
+/// to be *declared* in the SDK being compiled against, which only ships with
+/// the Swift 6.4 toolchain — a machine that has updated its OS to macOS 27
+/// ahead of Xcode has that type nowhere for `@available` alone to find. Once
+/// Xcode catches up, this compiles back in on its own; nothing to revert.
 @available(macOS 27, *)
 private final class ModernAnalyzerFeed: AnalyzerFeeding {
     private let converter: AnalyzerInputConverter
@@ -55,6 +64,7 @@ private final class ModernAnalyzerFeed: AnalyzerFeeding {
         return try converter.flush()
     }
 }
+#endif
 
 /// macOS 26 fallback: a single stateful `AVAudioConverter` doing sample-rate and
 /// channel conversion.
