@@ -9,7 +9,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -27,8 +27,11 @@ await build({
   bundle: true,
   logLevel: 'warning',
 });
-const { drawMark } = await import(join(root, 'dist', 'build-tools', 'mark.mjs'));
-const { encodePNG } = await import(join(root, 'dist', 'build-tools', 'png.mjs'));
+// pathToFileURL, not the raw path: Node's dynamic import() requires a proper
+// file:// URL on Windows — an absolute path like "D:\..." is not a URL scheme
+// import() recognises, and it throws ERR_UNSUPPORTED_ESM_URL_SCHEME.
+const { drawMark } = await import(pathToFileURL(join(root, 'dist', 'build-tools', 'mark.mjs')).href);
+const { encodePNG } = await import(pathToFileURL(join(root, 'dist', 'build-tools', 'png.mjs')).href);
 
 const SIZE = 1024;
 const pixels = drawMark({
