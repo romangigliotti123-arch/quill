@@ -55,6 +55,21 @@ public final class DictationCoordinator {
     /// at all — it falls back to paste-on-release, which lands in one piece after
     /// the older one is done. Roman's call, asked directly.
     private var isFinalising = false
+    /// "Finish, then Enter" — see `hotkeyAborted()`. Armed by a quick tap of
+    /// the dictation key that lands while a dictation is still finalising,
+    /// or shortly after one just landed; cleared the moment Return actually
+    /// gets sent.
+    private var pendingReturnAfterInsertion = false
+    /// When the last dictation's text actually landed — not when the key
+    /// was released. A tap arriving after `finishThenEnterWindow` has
+    /// passed is not "right after" anything any more and is left alone.
+    private var lastInsertionAt: Date?
+    private static let finishThenEnterWindow: TimeInterval = 1.2
+    /// Set by `hotkeyTriggerIncludesCommand(_:)` right before the current
+    /// gesture starts, and read once at the end of it — see
+    /// `hotkeyTriggerIncludesCommand(_:)` for why plain-Option dictation must
+    /// never fall into voice-triggered transform routing.
+    private var transformGestureActive = false
     private let transforms: (router: CommandRouter, engine: TransformEngine)?
     /// What Quill last inserted, so "make that shorter" has something to act on.
     ///
@@ -68,7 +83,20 @@ public final class DictationCoordinator {
     private let undo: InsertionUndo?
 
     private var timeline = DictationTimeline()
-    private var isDictating = false
+    /// A `didSet` rather than a post at each of the four call sites that flip
+    /// this — `beginDictation()`, `endDictation()`, `cancelDictation()`,
+    /// `fail()` — because a fifth call site added later would silently miss
+    /// the notification if it were the caller's job to remember it.
+    private var isDictating = false {
+        didSet {
+            guard oldValue != isDictating else { return }
+            NotificationCenter.default.post(name: .quillDictationStateChanged, object: isDictating)
+        }
+    }
+    /// Whether a dictation is live right now, for anything outside this file
+    /// that needs to know — the persistent overlay button, so a click toggles
+    /// rather than always starting.
+    public var isCurrentlyDictating: Bool { isDictating }
     /// Capturing, but not yet committed: the key is down and the gesture has not
     /// resolved. Audio recorded in this window is kept if the gesture becomes a
     /// dictation and thrown away if it does not.
@@ -92,6 +120,7 @@ public final class DictationCoordinator {
     /// stop, and the assertions were written against prose. A test whose result
     /// depends on where the mouse was last clicked is not a test.
     private let context: @MainActor () -> AppContext
+    private let sendReturn: @MainActor () -> Void
     /// Guards against a late result from a previous dictation landing in this
     /// one — it would paste stale text into whatever you are now typing in.
     private var sessionID = 0
@@ -111,9 +140,17 @@ public final class DictationCoordinator {
         /// Nil means the feature is off and every utterance is content — which is
         /// what shipped for the whole life of the Transforms screen.
         transforms: (router: CommandRouter, engine: TransformEngine)? = nil,
-        context: @escaping @MainActor () -> AppContext = { AppContext.current() }
+        context: @escaping @MainActor () -> AppContext = { AppContext.current() },
+        /// Posts the Return keystroke for "finish, then Enter" — injectable
+        /// for the same reason `context` is: a test that actually posted a
+        /// real Return to whatever app the test machine happens to have
+        /// focused would be a bug pretending to be a feature.
+        sendReturn: @escaping @MainActor () -> Void = {
+            SyntheticKeyboard.postChord(key: SyntheticKeyboard.keyReturn, flags: [])
+        }
     ) {
         self.context = context
+        self.sendReturn = sendReturn
         self.undo = undo
         self.transforms = transforms
         self.settings = settings
@@ -277,6 +314,38 @@ public final class DictationCoordinator {
         Task { [transcriber] in await transcriber.cancel() }
     }
 
+    /// "Finish, then Enter": release the dictation key, tap it again right
+    /// away, and Quill sends Return — but only once cleanup and insertion
+    /// have actually finished, never the instant the tap happens. A tap this
+    /// soon after releasing the key already lands here as an aborted
+    /// gesture — too short to become a new dictation on its own — which is
+    /// what makes it safe to read as "send it" without watching a second
+    /// key: nothing else in normal use means anything by a tap this quick,
+    /// right after one just ended.
+    private func maybeArmFinishThenEnter() {
+        guard settings.finishThenEnterEnabled else { return }
+        let recentlyLanded = lastInsertionAt.map {
+            Date().timeIntervalSince($0) < Self.finishThenEnterWindow
+        } ?? false
+        guard isFinalising || recentlyLanded else { return }
+        pendingReturnAfterInsertion = true
+        if !isFinalising {
+            // The text already landed before this tap arrived — nothing left
+            // to wait for.
+            fireDeferredReturnIfPending()
+        }
+    }
+
+    private func fireDeferredReturnIfPending() {
+        guard pendingReturnAfterInsertion else { return }
+        pendingReturnAfterInsertion = false
+        sendReturn()
+    }
+
+    /// For the tests below: whether a tap right now would be armed, without
+    /// actually sending anything.
+    var pendingReturnAfterInsertionForTesting: Bool { pendingReturnAfterInsertion }
+
     /// The gesture is confirmed as dictation. Audio has been recording since
     /// key-down, so there is nothing to start here — only something to show.
     private func beginDictation() {
@@ -418,7 +487,19 @@ public final class DictationCoordinator {
             // Cleared on every exit from this Task, including the two early
             // returns below. A flag that leaks true would silently disable live
             // typing for the rest of the session.
-            defer { self.isFinalising = false }
+            //
+            // The deferred Return is checked here too, not only inside the
+            // `.inserted` case below — a tap that lands between insertion
+            // actually happening and this Task actually exiting arms
+            // `pendingReturnAfterInsertion` with `isFinalising` still true
+            // (see `maybeArmFinishThenEnter()`), and the `.inserted` case
+            // that would otherwise fire it has already run and will not run
+            // again. Without this, that tap is armed forever and nothing
+            // ever sends it.
+            defer {
+                self.isFinalising = false
+                self.fireDeferredReturnIfPending()
+            }
             let raw = await transcriber.stop()
             guard epoch == self.insertionEpoch else {
                 // A newer DICTATION was confirmed while this one was finalising.
@@ -638,7 +719,7 @@ public final class DictationCoordinator {
             // treating a command as content types five words the user deletes,
             // while treating content as a command deletes what they said. It fires
             // only when the ENTIRE utterance is an instruction.
-            if let transforms = self.transforms {
+            if let transforms = self.transforms, self.transformGestureActive {
                 let routing = transforms.router.route(final, transforms: TransformStore.shared.ordered)
                 if case .content = routing.decision {} else {
                     // Take the command itself back off the screen first. Live
@@ -693,6 +774,11 @@ public final class DictationCoordinator {
                 self.undo?.record(final)
                 // So "make that shorter" has something to act on.
                 self.lastInsertion = .init(text: final, insertedAt: Date())
+                // The text is on screen now — the moment "finish, then
+                // Enter" exists to wait for. Fires the deferred Return if a
+                // tap already asked for one; otherwise just records when.
+                self.lastInsertionAt = Date()
+                self.fireDeferredReturnIfPending()
                 // Split on whitespace, not on the space character: a transform
                 // that returns a bullet list is one word by the old count.
                 if self.inputLost {
@@ -880,9 +966,24 @@ private final class ResumeOnce<T: Sendable>: @unchecked Sendable {
 
 extension DictationCoordinator: HotkeyEngineDelegate {
     public func hotkeyMayBegin() { speculativelyBegin() }
-    public func hotkeyAborted() { abandonSpeculation() }
+    public func hotkeyAborted() {
+        maybeArmFinishThenEnter()
+        abandonSpeculation()
+    }
     public func hotkeyPressed() { beginDictation() }
     public func hotkeyReleased() { endDictation() }
+    /// Arms or disarms the transform gate for the gesture about to start.
+    ///
+    /// Plain-Option dictation used to run `CommandRouter` on every finished
+    /// utterance, which meant saying a transform's trigger phrase as an
+    /// ordinary sentence — "make that a bullet list" as a real bullet list you
+    /// were dictating about, not an instruction — silently ran the transform
+    /// instead of typing your words. Roman: too easy to trigger by accident.
+    /// Now only a gesture that also held ⌘ reaches the router at all; plain
+    /// dictation always lands as content, no matter what it says.
+    public func hotkeyTriggerIncludesCommand(_ includesCommand: Bool) {
+        transformGestureActive = includesCommand
+    }
 
     /// A transform's chord. The tap has already swallowed the key.
     public func hotkeyTransform(_ transform: Transform) {
@@ -967,4 +1068,11 @@ extension DictationCoordinator: TranscriberDelegate {
         inputLost = true
         endDictation()
     }
+}
+
+public extension Notification.Name {
+    /// Posted with the new `Bool` as `object` whenever a dictation starts or
+    /// ends, from any trigger — held key, transform command, or the
+    /// persistent overlay button.
+    static let quillDictationStateChanged = Notification.Name("com.romangigliotti.quill.dictationStateChanged")
 }

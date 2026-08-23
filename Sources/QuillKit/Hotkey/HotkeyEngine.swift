@@ -412,15 +412,27 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
             let toggle = bindings.toggle
             if keyCode == hold.keyCode {
                 let isDown = flags.contains(hold.presenceMask)
-                let isolated = flags.intersection(HotkeyBinding.isolationMask) == hold.genericMask
+                let heldMask = flags.intersection(HotkeyBinding.isolationMask)
+                // The transform gesture: the hold trigger plus ⌘, and nothing
+                // else. Kept as a second accepted shape of the SAME trigger
+                // rather than a separate binding, so it works whichever key is
+                // assigned to hold — and skipped when hold itself IS ⌘, where
+                // "plus ⌘" would mean nothing. Roman: plain-Option dictation was
+                // triggering transforms on real words that happened to match a
+                // trigger phrase, so the phrase-recognising half of dictation now
+                // needs this second modifier and ordinary dictation does not.
+                let isTransformGesture = hold.genericMask != .maskCommand
+                    && heldMask == hold.genericMask.union(.maskCommand)
+                let isolated = heldMask == hold.genericMask || isTransformGesture
                 // Logged before the machine sees it, because the interesting case
                 // produces no effects at all: a trigger pressed while any other
                 // modifier is down is treated as a chord and refused, and a
                 // refusal is indistinguishable from the key never arriving. That
                 // blind spot hid roughly a quarter of an eval run.
                 if Self.logsGestures {
-                    NSLog("[quill] trigger %@ isolated=%@ flags=%llx",
-                          isDown ? "DOWN" : "up", isolated ? "yes" : "NO", flags.rawValue)
+                    NSLog("[quill] trigger %@ isolated=%@ transform=%@ flags=%llx",
+                          isDown ? "DOWN" : "up", isolated ? "yes" : "NO",
+                          isTransformGesture ? "yes" : "no", flags.rawValue)
                 }
                 // Stamped from the physical key, not from the state the machine
                 // ends up in: what decides whether a ⌫ is the other half of ⌥⌫ is
@@ -431,6 +443,10 @@ public final class EventTapHotkeyEngine: HotkeyEngine, @unchecked Sendable {
                     chordLock.lock()
                     heardSpeech = false
                     chordLock.unlock()
+                    // Delivered ahead of `.triggerDown` below, on the same
+                    // FIFO main-queue hop `deliver` uses, so the coordinator
+                    // knows this fact before `hotkeyMayBegin()` even arrives.
+                    deliver { $0.hotkeyTriggerIncludesCommand(isTransformGesture) }
                 }
                 apply(machine.handle(isDown ? .triggerDown(isolated: isolated) : .triggerUp,
                                      at: Self.now()))

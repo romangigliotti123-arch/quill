@@ -26,6 +26,11 @@ public protocol HotkeyEngineDelegate: AnyObject {
     func hotkeyAborted()
     func hotkeyPressed()
     func hotkeyReleased()
+    /// The trigger went down together with ⌘, or without it — the gesture that
+    /// gates voice-triggered transforms during dictation. Delivered right
+    /// before `hotkeyMayBegin()`, so the coordinator knows before the gesture
+    /// has even resolved to a real dictation.
+    func hotkeyTriggerIncludesCommand(_ includesCommand: Bool)
     /// A transform's chord was pressed. The event has already been swallowed, so
     /// the key never reaches the user's document — run the transform on whatever
     /// is selected there.
@@ -56,6 +61,8 @@ public extension HotkeyEngineDelegate {
     /// Default for the delegates that are not the running app. Only the
     /// coordinator has a document to reshape.
     func hotkeyTransform(_ transform: Transform) {}
+    /// Default: no transform gate to arm.
+    func hotkeyTriggerIncludesCommand(_ includesCommand: Bool) {}
 }
 
 public protocol HotkeyEngine: AnyObject {

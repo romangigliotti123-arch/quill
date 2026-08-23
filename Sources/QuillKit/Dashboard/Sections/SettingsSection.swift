@@ -27,17 +27,12 @@ public final class SettingsSectionView: NSView {
     private var holdRecorder: KeyRecorderControl?
     private var pushRecorder: KeyRecorderControl?
     private var pushNote: NSTextField?
-    /// Full width, below the packed groups — the same shape Style uses for
-    /// Tone, and for the same reason: this is a form, not a button-sized row,
-    /// and `SettingsGroup`'s row model is built for the latter.
-    private let accountCard: AccountCard
 
     public override var isFlipped: Bool { true }
 
     public init(style: DashboardStyle, settings: QuillSettings = .shared) {
         self.style = style
         self.settings = settings
-        accountCard = AccountCard(style: style)
         super.init(frame: .zero)
         wantsLayer = true
         build()
@@ -68,9 +63,8 @@ public final class SettingsSectionView: NSView {
         header = DashboardSectionHeader(title: "Settings", style: style)
         content.addSubview(header)
 
-        groups = [dictationGroup(), inputGroup(), permissionsGroup(), dataGroup(), aboutGroup()]
+        groups = [dictationGroup(), overlayGroup(), inputGroup(), permissionsGroup(), dataGroup(), aboutGroup()]
         groups.forEach(content.addSubview)
-        content.addSubview(accountCard)
         refreshPushNote()
         watchForGrants()
     }
@@ -159,6 +153,12 @@ public final class SettingsSectionView: NSView {
             "Fixes “flour” heard as “flower”, and endings lost when you talk fast.",
             font: DashboardType.caption, color: style.inkTertiary, lines: 2, lineHeight: 16)
 
+        let finishThenEnter = DashboardSwitch(isOn: settings.finishThenEnterEnabled, style: style)
+        finishThenEnter.onToggle = { [weak self] on in self?.settings.setFinishThenEnterEnabled(on) }
+        let finishThenEnterNote = DashboardType.label(
+            "Release, then tap again right away — Quill sends Return once it's actually finished, not before.",
+            font: DashboardType.caption, color: style.inkTertiary, lines: 2, lineHeight: 16)
+
         return SettingsGroup(title: "Dictation", style: style, rows: [
             .init(label: "Hold to talk", detail: nil, control: hold),
             .init(label: "Push to talk", detail: note, control: push),
@@ -166,7 +166,50 @@ public final class SettingsSectionView: NSView {
             .init(label: "Take back what was just inserted", detail: undoNote, control: undo),
             .init(label: "Numbers", detail: numbersNote, control: numbers),
             .init(label: "Work out a word from context", detail: contextNote, control: context),
+            .init(label: "Tap again to send", detail: finishThenEnterNote, control: finishThenEnter),
         ])
+    }
+
+    private var overlayPositionPicker: DashboardMenuButton?
+
+    /// The always-on button at the edge of the screen — Wispr Flow's bar. A
+    /// click starts or stops a dictation without holding a key at all; the
+    /// held key still works exactly as it always has either way.
+    private func overlayGroup() -> SettingsGroup {
+        let enabled = DashboardSwitch(isOn: settings.overlayBarEnabled, style: style)
+        enabled.onToggle = { [weak self] on in self?.settings.setOverlayBarEnabled(on) }
+
+        let position = DashboardMenuButton(title: settings.overlayBarPosition.label, style: style) {
+            [weak self] in
+            guard let self else { return [] }
+            let chosen = self.settings.overlayBarPosition
+            return QuillSettings.Values.OverlayBarPosition.allCases.map { position in
+                .init(title: position.label, isSelected: position == chosen) { [weak self] in
+                    self?.settings.setOverlayBarPosition(position)
+                    self?.refreshOverlayPosition()
+                }
+            }
+        }
+        overlayPositionPicker = position
+
+        let newNote = DashboardSwitch(isOn: settings.overlayShowsNewNoteButton, style: style)
+        newNote.onToggle = { [weak self] on in self?.settings.setOverlayShowsNewNoteButton(on) }
+        let newNoteNote = DashboardType.label(
+            "A second button on the bar for starting a note straight into a fresh dictation.",
+            font: DashboardType.caption, color: style.inkTertiary, lines: 2, lineHeight: 16)
+
+        return SettingsGroup(title: "Overlay", style: style, rows: [
+            .init(label: "Always-on button", detail: nil, control: enabled),
+            .init(label: "Position", detail: nil, control: position),
+            .init(label: "New note button", detail: newNoteNote, control: newNote),
+        ])
+    }
+
+    /// Same shape as `refreshNumberStyle` — a menu button does not restate
+    /// itself, so the screen would keep showing the old answer.
+    private func refreshOverlayPosition() {
+        overlayPositionPicker?.title = settings.overlayBarPosition.label
+        relayout()
     }
 
     private var retentionPicker: DashboardMenuButton?
@@ -501,12 +544,7 @@ public final class SettingsSectionView: NSView {
         for (group, place) in zip(groups, places) {
             group.frame = NSRect(x: place.x, y: place.y, width: place.width, height: place.height)
         }
-        var y = top + used
-
-        y += DashboardSpace.lg
-        let accountHeight = accountCard.fittedHeight(width: width)
-        accountCard.frame = NSRect(x: x, y: y, width: width, height: accountHeight)
-        y += accountHeight
+        let y = top + used
 
         // The document is as tall as its contents or the viewport, whichever is
         // more — shorter than the viewport and the whole thing sticks to the

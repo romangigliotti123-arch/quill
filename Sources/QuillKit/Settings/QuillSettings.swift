@@ -100,6 +100,21 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         /// Fixes went 2/10 to 5/10 with damage still at zero, and it reaches words
         /// the 44-item list cannot: coarse/course, sealing/ceiling, rode/rowed.
         public var contextRecovery: Bool
+        /// The always-on bottom bar — Wispr Flow's look, a click to start or
+        /// stop instead of holding a key. On by default: it is the feature
+        /// being asked for, not an opt-in extra.
+        public var overlayBarEnabled: Bool
+        public var overlayBarPosition: OverlayBarPosition
+        /// A second segment on the overlay bar for starting a note straight
+        /// into a fresh dictation. Off by default — the plain dictate button
+        /// is what most people reach for, and a second target next to it is
+        /// only worth the extra width once someone has said they want it.
+        public var overlayShowsNewNoteButton: Bool
+        /// Release the dictation key, then tap it again right away: once
+        /// cleanup and insertion actually finish — never before — Quill
+        /// sends Return. On by default: it is the feature being asked for,
+        /// not an opt-in extra, same reasoning as `overlayBarEnabled`.
+        public var finishThenEnterEnabled: Bool
 
         public init(holdKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
                     toggleKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
@@ -108,7 +123,11 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                     undoChord: Bool = true,
                     historyRetention: HistoryRetention = .month,
                     numberStyle: NumberStyle = .spellOutSmall,
-                    contextRecovery: Bool = true) {
+                    contextRecovery: Bool = true,
+                    overlayBarEnabled: Bool = true,
+                    overlayBarPosition: OverlayBarPosition = .bottomCenter,
+                    overlayShowsNewNoteButton: Bool = false,
+                    finishThenEnterEnabled: Bool = true) {
             self.holdKeyCode = holdKeyCode
             self.toggleKeyCode = toggleKeyCode
             self.inputDeviceUID = inputDeviceUID
@@ -117,6 +136,10 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
             self.historyRetention = historyRetention
             self.numberStyle = numberStyle
             self.contextRecovery = contextRecovery
+            self.overlayBarEnabled = overlayBarEnabled
+            self.overlayBarPosition = overlayBarPosition
+            self.overlayShowsNewNoteButton = overlayShowsNewNoteButton
+            self.finishThenEnterEnabled = finishThenEnterEnabled
         }
 
         public init(from decoder: Decoder) throws {
@@ -142,6 +165,14 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                 .flatMap { $0 } ?? fallback.numberStyle
             contextRecovery = try c.decodeIfPresent(Bool.self, forKey: .contextRecovery)
                 ?? fallback.contextRecovery
+            overlayBarEnabled = try c.decodeIfPresent(Bool.self, forKey: .overlayBarEnabled)
+                ?? fallback.overlayBarEnabled
+            overlayBarPosition = (try? c.decodeIfPresent(OverlayBarPosition.self, forKey: .overlayBarPosition))
+                .flatMap { $0 } ?? fallback.overlayBarPosition
+            overlayShowsNewNoteButton = try c.decodeIfPresent(Bool.self, forKey: .overlayShowsNewNoteButton)
+                ?? fallback.overlayShowsNewNoteButton
+            finishThenEnterEnabled = try c.decodeIfPresent(Bool.self, forKey: .finishThenEnterEnabled)
+                ?? fallback.finishThenEnterEnabled
         }
 
     /// How a spoken number reaches the page.
@@ -197,6 +228,24 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         public func cutoff(from now: Date, calendar: Calendar = .current) -> Date? {
             guard let days else { return nil }
             return calendar.date(byAdding: .day, value: -days, to: now)
+        }
+    }
+
+    /// Where the always-on bar docks. Five spots rather than free placement —
+    /// a bar that can land anywhere needs a drag gesture and a saved point per
+    /// display; five names cover what anyone actually wants and read back as
+    /// plain English in Settings.
+    public enum OverlayBarPosition: String, Codable, Sendable, CaseIterable {
+        case bottomCenter, bottomLeft, bottomRight, topLeft, topRight
+
+        public var label: String {
+            switch self {
+            case .bottomCenter: return "Bottom center"
+            case .bottomLeft:   return "Bottom left"
+            case .bottomRight:  return "Bottom right"
+            case .topLeft:      return "Top left"
+            case .topRight:     return "Top right"
+            }
         }
     }
 
@@ -257,6 +306,10 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public var historyRetention: Values.HistoryRetention { withLock { values.historyRetention } }
     public var numberStyle: Values.NumberStyle { withLock { values.numberStyle } }
     public var contextRecovery: Bool { withLock { values.contextRecovery } }
+    public var overlayBarEnabled: Bool { withLock { values.overlayBarEnabled } }
+    public var overlayBarPosition: Values.OverlayBarPosition { withLock { values.overlayBarPosition } }
+    public var overlayShowsNewNoteButton: Bool { withLock { values.overlayShowsNewNoteButton } }
+    public var finishThenEnterEnabled: Bool { withLock { values.finishThenEnterEnabled } }
 
     /// True when one key does both jobs, which is the default and means push-to-talk
     /// is reached by double-tapping rather than by a key of its own.
@@ -322,6 +375,12 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     }
     public func setNumberStyle(_ style: Values.NumberStyle) { update { $0.numberStyle = style } }
     public func setContextRecovery(_ on: Bool) { update { $0.contextRecovery = on } }
+    public func setOverlayBarEnabled(_ on: Bool) { update { $0.overlayBarEnabled = on } }
+    public func setOverlayBarPosition(_ position: Values.OverlayBarPosition) {
+        update { $0.overlayBarPosition = position }
+    }
+    public func setOverlayShowsNewNoteButton(_ on: Bool) { update { $0.overlayShowsNewNoteButton = on } }
+    public func setFinishThenEnterEnabled(_ on: Bool) { update { $0.finishThenEnterEnabled = on } }
 
     // MARK: - Disk
 

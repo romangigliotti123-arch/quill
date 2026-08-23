@@ -20,6 +20,7 @@ public final class TransformsSectionView: NSView {
 
     private let style: DashboardStyle
     private let store: TransformStore
+    private let settings: QuillSettings
     private var transforms: [Transform]
     private var selected: Transform?
 
@@ -39,9 +40,10 @@ public final class TransformsSectionView: NSView {
         self.init(style: style, store: .shared)
     }
 
-    public init(style: DashboardStyle, store: TransformStore) {
+    public init(style: DashboardStyle, store: TransformStore, settings: QuillSettings = .shared) {
         self.style = style
         self.store = store
+        self.settings = settings
         self.transforms = store.ordered
         self.selected = transforms.first
         listRule = DashboardRule(color: style.hairline)
@@ -60,7 +62,13 @@ public final class TransformsSectionView: NSView {
         // directly beneath it — every row carries its own "offline" tag and the
         // list is its own count — and it cost 21 points of list height to do so.
         // No other section carries one, either.
-        header = DashboardSectionHeader(title: "Transforms", style: style)
+        // A mechanical fact nothing else in the UI states, not a restatement
+        // of what the sidebar row already says about what this screen is for
+        // — the one exception to this header's usual title-only rule.
+        header = DashboardSectionHeader(
+            title: "Transforms",
+            meta: "Hold ⌘\(settings.hold.capText), then say one of these",
+            style: style)
         addSubview(header)
 
         scroll.drawsBackground = false

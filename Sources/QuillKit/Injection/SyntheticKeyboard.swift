@@ -14,6 +14,10 @@ public enum SyntheticKeyboard {
     /// speculatively while you were still speaking.
     public static let keyBackspace: CGKeyCode = 51
 
+    /// ANSI Return. Used by the "finish, then Enter" gesture — see
+    /// `DictationCoordinator.hotkeyAborted()`.
+    public static let keyReturn: CGKeyCode = 36
+
     /// Defensive chunk size in UTF-16 units for the typing fallback.
     /// `keyboardSetUnicodeString` takes a length, but long strings are unreliable
     /// across apps and truncation is silent — there is no return value, no error,
