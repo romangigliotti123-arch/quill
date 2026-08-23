@@ -11,27 +11,57 @@ and Linux — so it works on a plane and your voice never leaves the machine.
 
 ## Get it
 
-Two downloads, one app: **[Releases](../../releases/latest)**.
+Every download is on **[Releases](../../releases/latest)**. macOS is the
+native Swift app in this repo; Windows and Linux both come from
+[`quill-desktop/`](quill-desktop), a full Electron rebuild of the same app —
+same cleanup passes, same vocabulary guards, same command router, same
+measured thresholds, ported rather than reimagined.
 
-- **macOS** (Apple silicon, macOS 26+) — a signed `.app` you unzip and run.
-  It is self-signed rather than notarised, so the first launch shows a
-  Gatekeeper warning; see below.
-- **Windows and Linux** — an installer for each, built from
-  [`quill-desktop/`](quill-desktop), a full Electron rebuild of the same app:
-  same cleanup passes, same vocabulary guards, same command router, same
-  measured thresholds, ported rather than reimagined.
+### macOS (Apple silicon, macOS 26+)
 
-### Gatekeeper, on first launch (macOS)
+Download `Quill-macOS.zip`, unzip it, drag `Quill.app` wherever you keep
+apps, open it.
 
-Quill is signed with a self-signed identity, not an Apple Developer ID, so
-macOS will say it "cannot be opened because it is from an unidentified
-developer" or similar. This is expected, not a sign anything is wrong — right-click
+It is self-signed rather than notarised, so the first launch shows a
+Gatekeeper warning — "cannot be opened because it is from an unidentified
+developer" or similar. Expected, not a sign anything is wrong: right-click
 the app ▸ **Open** ▸ **Open** again in the dialog that follows, once. macOS
 remembers the choice after that.
 
-Windows SmartScreen will warn the same way on the Windows build, for the same
-reason — nothing is signed there either. [`quill-desktop/README.md`](quill-desktop/README.md)
-has the details.
+### Windows
+
+Download either `Quill.Setup.1.0.0.exe` (installs normally, adds a Start
+Menu entry) or `Quill-1.0.0-portable.exe` (runs from wherever it sits, no
+install). Run it.
+
+Nothing is signed, so Windows SmartScreen will warn the same way Gatekeeper
+does on macOS — click **More info** ▸ **Run anyway**. Once, same as macOS.
+
+### Linux
+
+Three package types on the Releases page — pick by distro, `x86_64` or
+`arm64` to match your machine:
+
+- **AppImage** (works almost anywhere): `chmod +x Quill-1.0.0.AppImage`,
+  then run it directly.
+- **Debian / Ubuntu**: `sudo dpkg -i quill-desktop_1.0.0_amd64.deb`
+- **Fedora / RHEL**: `sudo rpm -i quill-desktop-1.0.0.x86_64.rpm`
+
+Two things worth knowing before the first launch:
+
+- **Wayland** needs the global dictation key to read raw keyboard input,
+  which means being in the `input` group: `sudo usermod -aG input $USER`,
+  then log out and back in, once. X11 needs nothing extra.
+- **The tray icon** needs `libayatana-appindicator3` (GNOME also wants its
+  AppIndicator extension) — packaged as a *recommends*, not a *depends*, so
+  Quill still runs and dictates without it; you just lose the tray.
+
+### First launch, any platform
+
+The Windows and Linux build downloads the Whisper speech model the first
+time you dictate — tens of megabytes, once, unless you pick a bigger model
+in Settings later. That is the only thing that ever touches the network on
+its own; nothing else does unless you add an AI cleanup key yourself.
 
 ## What it does
 
