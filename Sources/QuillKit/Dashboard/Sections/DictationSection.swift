@@ -42,7 +42,7 @@ public final class DictationSectionView: NSView {
     private static let controlRowHeight: CGFloat = 34
 
     private let style: DashboardStyle
-    private let records: [DictationRecord]
+    private var records: [DictationRecord]
 
     private var filtered: [DictationRecord] = []
     private var selectedID: UUID?
@@ -104,6 +104,22 @@ public final class DictationSectionView: NSView {
 
         super.init(frame: .zero)
 
+        // A correction rewrites a record under this view, and nothing else would
+        // tell it. Without this the Correct button saves, the card keeps showing
+        // the old text, and the only reasonable conclusion is that it did not
+        // work.
+        NotificationCenter.default.addObserver(
+            forName: .quillHistoryChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.records = HistoryStore().all
+                self.renderedHeroID = nil      // force the card to rebuild
+                self.reload()
+                self.needsLayout = true
+            }
+        }
+
         addSubview(header)
 
         // A real scroller, because a dictation history is a thousand rows long
@@ -144,6 +160,8 @@ public final class DictationSectionView: NSView {
     public convenience init(style: DashboardStyle, store: HistoryStore = HistoryStore()) {
         self.init(style: style, records: store.all)
     }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }

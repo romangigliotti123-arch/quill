@@ -123,7 +123,19 @@ public final class DictationRecordView: NSView {
     public init(record: DictationRecord, style: DashboardStyle) {
         self.record = record
         self.style = style
-        self.diff = TranscriptDiff.between(raw: record.rawText, inserted: record.insertedText)
+        // Once corrected, the interesting difference is no longer what the
+        // recogniser heard against what Quill wrote — it is what Quill wrote
+        // against what the user actually meant. Same diff machinery, both sides
+        // moved along one.
+        //
+        // Showing the old raw-vs-inserted diff after a correction would leave the
+        // screen displaying text the user has just told the app was wrong, which
+        // reads as the correction not having saved.
+        if let corrected = record.correctedText {
+            self.diff = TranscriptDiff.between(raw: record.insertedText, inserted: corrected)
+        } else {
+            self.diff = TranscriptDiff.between(raw: record.rawText, inserted: record.insertedText)
+        }
 
         // Everything a person actually wants on this line, and nothing else.
         //
@@ -135,7 +147,8 @@ public final class DictationRecordView: NSView {
         // sitting permanently on a card about what somebody said.
         title = DashboardType.label(
             "\(DictationFormat.dayTitle(record.date)), \(DictationFormat.time(record.date))"
-            + "   \u{00B7}   \(DictationFormat.plural(record.wordCount, "word"))",
+            + "   \u{00B7}   \(DictationFormat.plural(record.wordCount, "word"))"
+            + (record.correctedText == nil ? "" : "   \u{00B7}   corrected"),
             font: DashboardType.headline, color: style.inkTertiary)
 
         // "Correct" rather than "Edit". Editing is housekeeping and nobody does
@@ -159,7 +172,7 @@ public final class DictationRecordView: NSView {
         let hasMarkedRuns = diff.segments.contains { $0.kind != .unchanged }
         rule = notes.isEmpty ? nil : DashboardRule(color: style.hairline)
         legend = (notes.isEmpty || !hasMarkedRuns) ? nil
-            : DictationRecordView.legendLabel(style: style)
+            : DictationRecordView.legendLabel(style: style, corrected: record.correctedText != nil)
 
         super.init(frame: .zero)
 
@@ -278,11 +291,20 @@ public final class DictationRecordView: NSView {
     /// The two treatments, shown once, using the exact attributes the transcript
     /// uses. A legend drawn from a second set of constants is a legend that goes
     /// out of date.
-    private static func legendLabel(style: DashboardStyle) -> NSTextField {
+    ///
+    /// The words change once a record has been corrected, because the two sides
+    /// of the diff change: it stops being what the recogniser heard against what
+    /// Quill wrote, and becomes what Quill wrote against what the user meant.
+    /// A legend naming the wrong pair is worse than none — this screen already
+    /// carries a note about a legend that pointed at treatments which were not on
+    /// screen, and this would be the same mistake with different words.
+    private static func legendLabel(style: DashboardStyle, corrected: Bool) -> NSTextField {
         let line = NSMutableAttributedString()
-        line.append(NSAttributedString(string: "heard", attributes: removedAttributes(style: style, font: DashboardType.caption)))
+        line.append(NSAttributedString(string: corrected ? "Quill wrote" : "heard",
+                                       attributes: removedAttributes(style: style, font: DashboardType.caption)))
         line.append(NSAttributedString(string: "   ", attributes: [.font: DashboardType.caption]))
-        line.append(NSAttributedString(string: "inserted", attributes: addedAttributes(style: style, font: DashboardType.caption)))
+        line.append(NSAttributedString(string: corrected ? "you meant" : "inserted",
+                                       attributes: addedAttributes(style: style, font: DashboardType.caption)))
         let field = NSTextField(labelWithString: "")
         field.isBezeled = false
         field.drawsBackground = false
