@@ -62,11 +62,25 @@ import Testing
 
 // MARK: - Where the text is going
 
-@Test func aTerminalGetsNoFullStopAndNoCapital() {
+@Test func aTerminalGetsNoFullStopAndNoCapital_forACommand() {
     // `git status.` is not a command, and the full stop has to be deleted by hand
-    // every single time.
+    // every single time. This half is unchanged and has to stay working.
     #expect(AppContextFormatter.apply("Git status.", context: .terminal) == "git status")
-    #expect(AppContextFormatter.apply("Run the build.", context: .terminal) == "run the build")
+    #expect(AppContextFormatter.apply("Npm run build.", context: .terminal) == "npm run build")
+}
+
+/// This expectation used to be `"Run the build."` -> `"run the build"`, and it
+/// was wrong about the sentence rather than about the rule.
+///
+/// "Run the build." is not a shell command — the command is `npm run build` —
+/// it is a sentence someone said to Claude Code, which is what a terminal
+/// mostly contains now. Measured on 85 real dictations from Roman's history:
+/// 85 prose, 0 commands, 76 opening capitals stripped and 71 full stops
+/// stripped by the old rule. See `SpokenCommandTests`.
+@Test func aSentenceInATerminalIsNoLongerTreatedAsACommand() {
+    #expect(AppContextFormatter.apply("Run the build.", context: .terminal) == "Run the build.")
+    #expect(AppContextFormatter.apply("Can you check that for me?", context: .terminal)
+            == "Can you check that for me?")
 }
 
 @Test func proseIsLeftExactlyAsTheCleanupProducedIt() {

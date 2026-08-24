@@ -84,12 +84,34 @@ public enum AppContext: String, Sendable, CaseIterable {
     /// of whoever you are writing to, and there is nothing on screen to tell you
     /// the app did it on purpose.
     ///
-    /// A terminal still gets none, because that is where suppression earns its
-    /// place: `Git status` is not a command, and the capital has to be deleted by
-    /// hand every single time.
+    /// A terminal still gets none *for a command*, because that is where
+    /// suppression earns its place: `Git status` is not a command, and the
+    /// capital has to be deleted by hand every single time.
+    ///
+    /// But only for a command. The same evidence that reversed this for `.code`
+    /// applies here and is stronger: of 85 real dictations in Roman's history,
+    /// **85 were prose and 0 were shell commands**, and Ghostty was the most
+    /// common destination in his recent history — because that is where Claude
+    /// Code lives. Thirty of those 85 lost their opening capital to this rule.
+    ///
+    /// `capitalisesSentences(for:)` is the one to call. This property answers for
+    /// a context with no utterance in hand, which after that finding means
+    /// answering as though a terminal were always a shell — kept only for callers
+    /// that genuinely have no text, and there are none on the dictation path.
     public var capitalisesSentences: Bool {
         switch self {
         case .terminal, .query: return false
+        case .code, .prose: return true
+        }
+    }
+
+    /// Whether *this* utterance should be given a capital.
+    ///
+    /// A terminal asks the words rather than the window. See `SpokenCommand`.
+    public func capitalisesSentences(for text: String) -> Bool {
+        switch self {
+        case .terminal: return !SpokenCommand.looksLikeCommand(text)
+        case .query:    return false
         case .code, .prose: return true
         }
     }
@@ -103,6 +125,18 @@ public enum AppContext: String, Sendable, CaseIterable {
     public var keepsTrailingFullStop: Bool {
         switch self {
         case .terminal, .query: return false
+        case .code, .prose: return true
+        }
+    }
+
+    /// Whether *this* utterance should keep its full stop.
+    ///
+    /// `npm run build.` is not a command; "That should do it." is a sentence. The
+    /// window cannot tell them apart and the words can.
+    public func keepsTrailingFullStop(for text: String) -> Bool {
+        switch self {
+        case .terminal: return !SpokenCommand.looksLikeCommand(text)
+        case .query:    return false
         case .code, .prose: return true
         }
     }
@@ -165,7 +199,7 @@ public enum AppContextFormatter {
         if context.stylesNumbers {
             out = FastCleaner.applyNumberStyle(to: out, style: numbers)
         }
-        if !context.keepsTrailingFullStop {
+        if !context.keepsTrailingFullStop(for: out) {
             // Only a full stop, and only one, and only at the very end. A question
             // mark is information — "did the build pass?" means something a full
             // stop does not — and an ellipsis is deliberate.
@@ -173,7 +207,7 @@ public enum AppContextFormatter {
                 out.removeLast()
             }
         }
-        if !context.capitalisesSentences {
+        if !context.capitalisesSentences(for: out) {
             out = lowercasingFirstLetterIfSafe(out)
         }
         return out
