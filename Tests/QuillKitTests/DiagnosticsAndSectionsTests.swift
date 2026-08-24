@@ -248,3 +248,51 @@ import Testing
     #expect(!AudioDeviceInfo.isLoopback("AirPods Pro"))
     #expect(!AudioDeviceInfo.isLoopback("Shure MV7"))
 }
+
+// MARK: - MCP
+
+/// The paste-into-Claude prompt has to work for someone who knows nothing about
+/// Quill, because that is exactly who Claude is when it reads it.
+///
+/// Editing `claude_desktop_config.json` by hand means knowing where it is, that
+/// it may not exist yet, and that `mcpServers` is a dictionary to merge into
+/// rather than replace — three chances to silently drop every other MCP server
+/// you had. Handing the job to a Claude with a terminal removes all three, but
+/// only if the prompt carries everything it needs.
+@Test @MainActor func theClaudePromptCarriesEverythingClaudeWouldHaveToGuess() {
+    let prompt = MCPConnectionDetails.claudePrompt
+
+    // The path is read off the running bundle, so under the test runner it is
+    // the runner's own — the shape is what can be checked here, and
+    // `theCopyablePathPointsAtTheRealServer` below checks the real one.
+    #expect(prompt.contains(MCPConnectionDetails.binaryPath))
+    #expect(prompt.contains("Contents/MacOS/QuillMCP"))
+    #expect(prompt.contains("get_writing_voice"), "the tool it should call to prove the setup worked")
+    #expect(prompt.contains("claude mcp add quill"), "Claude Code's own one-liner")
+    #expect(prompt.contains("claude_desktop_config.json"), "and where Claude Desktop keeps its config")
+    #expect(prompt.contains("merge, don't overwrite"),
+            "without this a rewrite of that file drops every other server the user had")
+    #expect(prompt.lowercased().contains("signed in"),
+            "a signed-out Quill is the one failure that is not a config problem, and looks exactly like one")
+
+    // A `\`-continuation inside a Swift multi-line string joins the lines but
+    // keeps the continued line's indentation, so the first version of this
+    // pasted with eight spaces sitting in the middle of its sentences. Invisible
+    // in the source; only printing the built string shows it.
+    for line in prompt.split(separator: "\n", omittingEmptySubsequences: false) {
+        let body = line.drop { $0 == " " }
+        #expect(!body.contains("   "), "stray indentation inside a line: \(line)")
+    }
+}
+
+/// The snippet and the prompt must name one path, and it must be a real file.
+@Test @MainActor func theCopyablePathPointsAtTheRealServer() throws {
+    #expect(MCPConnectionDetails.configSnippet.contains(MCPConnectionDetails.binaryPath))
+
+    // The shipped bundle, not this test process's. Skipped rather than failed
+    // when Quill is not installed, so a fresh clone still runs green.
+    let installed = "/Applications/Quill.app/Contents/MacOS/QuillMCP"
+    try #require(FileManager.default.fileExists(atPath: installed),
+                 "Quill is not installed; nothing to check the path against")
+    #expect(FileManager.default.isExecutableFile(atPath: installed))
+}
