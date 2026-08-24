@@ -257,6 +257,9 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         // cheaply, this catches the ones where the recogniser split a word.
         text = vocabulary.correct(text)
         text = Self.stripStandaloneDisfluencies(from: text)
+        // After the filled pauses, so "the thing is um the thing is" has already
+        // lost its "um" and reads as the adjacent repeat it is.
+        text = RepeatedWords.collapse(in: text)
         text = Self.collapseWhitespace(in: text)
         text = Self.tightenPunctuationSpacing(in: text)
         // After the spacing rules, so a domain the recogniser dotted correctly has
