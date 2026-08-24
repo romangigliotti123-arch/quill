@@ -21,6 +21,14 @@ public struct DictationRecord: Codable, Sendable, Equatable {
     /// cannot be audited, and a word-error-rate from an app that never heard the
     /// test audio looks exactly like a real one.
     public let inputDevice: String?
+    /// The bundle identifier of the app the text was inserted into, e.g.
+    /// "com.apple.TextEdit". Nil for a record written before this existed, and
+    /// for the paths where the text never landed anywhere.
+    ///
+    /// Recorded whether or not the app will let Quill read the field back:
+    /// knowing where your words went does not depend on being able to re-read
+    /// them, and Insights and the Style screen both want it.
+    public let destinationBundleID: String?
     public let timings: Timings
 
     /// Whether this record is a measurement rather than something the user said.
@@ -49,6 +57,7 @@ public struct DictationRecord: Codable, Sendable, Equatable {
                 insertedText: String,
                 wordCount: Int,
                 inputDevice: String?,
+                destinationBundleID: String? = nil,
                 timings: Timings) {
         self.id = id
         self.date = date
@@ -56,6 +65,7 @@ public struct DictationRecord: Codable, Sendable, Equatable {
         self.insertedText = insertedText
         self.wordCount = wordCount
         self.inputDevice = inputDevice
+        self.destinationBundleID = destinationBundleID
         self.timings = timings
     }
 
@@ -86,6 +96,7 @@ public struct DictationRecord: Codable, Sendable, Equatable {
         wordCount = try c.decodeIfPresent(Int.self, forKey: .wordCount)
             ?? insertedText.split(whereSeparator: \.isWhitespace).count
         inputDevice = try c.decodeIfPresent(String.self, forKey: .inputDevice)
+        destinationBundleID = try c.decodeIfPresent(String.self, forKey: .destinationBundleID)
         timings = try c.decodeIfPresent(Timings.self, forKey: .timings)
             ?? Timings(timeToFirstWordMs: nil, finalToInsertedMs: nil,
                        endToEndMs: nil, audioDurationMs: nil,

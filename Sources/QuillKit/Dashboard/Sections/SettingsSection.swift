@@ -163,6 +163,17 @@ public final class SettingsSectionView: NSView {
             "Release, then tap again right away — Quill sends Return once it's actually finished, not before.",
             font: DashboardType.caption, color: style.inkTertiary, lines: 2, lineHeight: 16)
 
+        let learn = DashboardSwitch(isOn: settings.learnFromEdits, style: style)
+        learn.onToggle = { [weak self] on in self?.settings.setLearnFromEdits(on) }
+        // Says what it reads, because "learn from my edits" on its own does not
+        // tell anyone that the reading happens inside another app's window. It
+        // only ever looks at the sentence Quill itself inserted, and it says so.
+        let learnNote = DashboardType.label(
+            "Watches the sentence Quill just inserted — only that sentence, never the rest of the "
+                + "document — and learns from what you change. Stays on this Mac. Some apps won't "
+                + "let Quill read it back; Style says which.",
+            font: DashboardType.caption, color: style.inkTertiary, lines: 4, lineHeight: 16)
+
         // One row rather than its own section — a whole header for one row
         // read as more clutter than the setting was worth, and it belongs
         // here anyway: it is what "cleanup" means once the deterministic
@@ -187,6 +198,7 @@ public final class SettingsSectionView: NSView {
             .init(label: "Work out a word from context", detail: contextNote, control: context),
             .init(label: "AI cleanup key", detail: aiNote, control: change),
             .init(label: "Tap again to send", detail: finishThenEnterNote, control: finishThenEnter),
+            .init(label: "Learn from my edits", detail: learnNote, control: learn),
         ])
     }
 

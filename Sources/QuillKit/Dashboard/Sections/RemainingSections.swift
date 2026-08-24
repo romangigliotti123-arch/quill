@@ -199,8 +199,12 @@ final class SectionBulletRow: NSView {
 /// What Quill has learned about how you write, and the tone it starts from.
 public final class StyleSectionView: NSView {
 
+    private let scroll = NSScrollView()
+    private let content = SettingsFlippedView()
     private let header: DashboardSectionHeader
     private let traits: SectionCard
+    private let changes: SectionCard
+    private let destinations: SectionCard?
     private let trust: SectionCard
     private let presets: SectionCard
     private let chips: [StyleToneRow]
@@ -249,6 +253,24 @@ public final class StyleSectionView: NSView {
             ("Typical sentence", sentence),
         ]
 
+        // What you said versus what you meant to type, which is the question this
+        // screen is for. `StylePhrasing` has held these pairs since the profile
+        // existed and nothing ever showed them — because nothing ever recorded
+        // one: `StyleStore.recordCorrection` had no callers until `EditWatcher`.
+        let noticed = profile.phrasings.sorted {
+            ($0.count, $0.lastObserved ?? .distantPast) > ($1.count, $1.lastObserved ?? .distantPast)
+        }
+        changes = SectionCard(style: style, title: "What you changed",
+                              trailing: noticed.isEmpty ? nil
+                                  : "\(DictationFormat.plural(noticed.count, "pair")) noticed")
+
+        // Where the text actually went. Recorded on every dictation whether or
+        // not the app will let Quill read the field back afterwards — knowing
+        // where your words went does not depend on being able to re-read them.
+        let places = Self.destinationTally()
+        destinations = places.isEmpty ? nil
+            : SectionCard(style: style, title: "Where your words went")
+
         let accepted = profile.modelAccepted
         let reverted = profile.modelReverted
         let judged = accepted + reverted
@@ -263,7 +285,22 @@ public final class StyleSectionView: NSView {
         }
 
         super.init(frame: .zero)
-        addSubview(header)
+
+        // Four cards and a tone strip no longer fit an 850-point window, and a
+        // fixed layout that does not fit does not complain — it just stops
+        // drawing the bottom of itself. Same scroll shape as Settings, MCP and
+        // Help.
+        scroll.drawsBackground = false
+        scroll.backgroundColor = .clear
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.contentView.drawsBackground = false
+        scroll.documentView = content
+        addSubview(scroll)
+        content.addSubview(header)
 
         // Read fresh at click time rather than closed over the `profile`
         // parameter above: the button can sit on screen for a long time, and
@@ -292,6 +329,35 @@ public final class StyleSectionView: NSView {
         deleteRow.button.onClick = { [weak self] in self?.confirmDeleteStyle() }
         traits.add(deleteRow) { _ in SectionButtonRow.height }
 
+        if noticed.isEmpty {
+            // An empty state that says what would fill it, and admits the one
+            // thing that stops it filling. "Nothing yet" on its own reads as
+            // broken on a feature nobody can see working.
+            let blank = DashboardType.label(
+                "Nothing yet. After a dictation Quill watches the sentence it inserted — only that "
+                    + "sentence — and when you fix something it records what you said against what you "
+                    + "meant. Terminals, Chrome and VS Code don't hand their text to Quill, so edits "
+                    + "made in those can't be read back; TextEdit, Mail and Notes can.",
+                font: DashboardType.callout, color: style.inkTertiary, lines: 6, lineHeight: 19)
+            changes.add(blank) { width in DashboardType.size(blank, width: width).height }
+        } else {
+            for phrasing in noticed.prefix(6) {
+                let row = SectionKeyValueRow(
+                    "\u{201C}\(phrasing.from)\u{201D} \u{2192} \u{201C}\(phrasing.to)\u{201D}",
+                    phrasing.count == 1 ? "once" : "\(phrasing.count) times",
+                    style: style)
+                changes.add(row) { _ in SectionKeyValueRow.height }
+            }
+        }
+
+        if let destinations {
+            for (name, count) in places.prefix(5) {
+                let row = SectionKeyValueRow(name, DictationFormat.plural(count, "dictation"),
+                                            style: style)
+                destinations.add(row) { _ in SectionKeyValueRow.height }
+            }
+        }
+
         let trustBody = DashboardType.label(
             judged == 0
               ? "Nothing to judge yet. This fills in as you accept or undo Quill's cleanup."
@@ -315,9 +381,38 @@ public final class StyleSectionView: NSView {
             presets.add(chip) { _ in StyleToneRow.height }
         }
 
-        addSubview(traits)
-        addSubview(trust)
-        addSubview(presets)
+        content.addSubview(traits)
+        content.addSubview(changes)
+        if let destinations { content.addSubview(destinations) }
+        content.addSubview(trust)
+        content.addSubview(presets)
+    }
+
+    /// Dictations grouped by the app they landed in, most-used first.
+    ///
+    /// Reads the history rather than keeping a second tally, so it cannot drift
+    /// from what actually happened, and skips records written before the
+    /// destination was recorded rather than counting them as "unknown" — an
+    /// "unknown: 84" row at the top of this card would say nothing except that
+    /// the feature is new.
+    private static func destinationTally() -> [(String, Int)] {
+        var counts: [String: Int] = [:]
+        for record in HistoryStore().all where !record.isMeasurement {
+            guard let id = record.destinationBundleID else { continue }
+            counts[id, default: 0] += 1
+        }
+        return counts
+            .map { (Self.appName(for: $0.key), $0.value) }
+            .sorted { ($0.1, $1.0) > ($1.1, $0.0) }
+    }
+
+    /// "TextEdit", not "com.apple.TextEdit". Falls back to the identifier when
+    /// the app has been deleted since — which is still more use than nothing.
+    private static func appName(for bundleID: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        else { return bundleID }
+        return FileManager.default.displayName(atPath: url.path)
+            .replacingOccurrences(of: ".app", with: "")
     }
 
     @available(*, unavailable)
@@ -348,6 +443,7 @@ public final class StyleSectionView: NSView {
 
     public override func layout() {
         super.layout()
+        scroll.frame = bounds
         let padX = DashboardMetrics.contentPaddingX
         let padY = DashboardMetrics.contentPaddingY
         let width = bounds.width - padX * 2
@@ -356,19 +452,39 @@ public final class StyleSectionView: NSView {
         header.frame = NSRect(x: padX, y: padY, width: width, height: header.height)
         var y = DashboardSectionHeader.contentTop(for: header)
 
-        // Two cards side by side, both as tall as the taller one's content, then
-        // the tone strip under them at full width. Heights come from the cards
-        // rather than from two constants that were 210 and 108 and left three
-        // hundred points of nothing under the page.
+        // Cards in pairs, each pair as tall as the taller one's content, then the
+        // tone strip under them at full width. Heights come from the cards rather
+        // than from constants that were 210 and 108 and left three hundred points
+        // of nothing under the page.
         let gap = DashboardSpace.lg
         let half = ((width - gap) / 2).rounded(.down)
-        let rowHeight = max(traits.fittedHeight(width: half), trust.fittedHeight(width: half))
-        traits.frame = NSRect(x: padX, y: y, width: half, height: rowHeight)
-        trust.frame = NSRect(x: padX + half + gap, y: y, width: width - half - gap, height: rowHeight)
-        y += rowHeight + gap
+
+        func pair(_ left: SectionCard, _ right: SectionCard?) {
+            guard let right else {
+                left.frame = NSRect(x: padX, y: y, width: width,
+                                    height: left.fittedHeight(width: width))
+                y += left.frame.height + gap
+                return
+            }
+            let height = max(left.fittedHeight(width: half), right.fittedHeight(width: half))
+            left.frame = NSRect(x: padX, y: y, width: half, height: height)
+            right.frame = NSRect(x: padX + half + gap, y: y,
+                                 width: width - half - gap, height: height)
+            y += height + gap
+        }
+
+        pair(traits, trust)
+        // Full width when there is nothing to sit beside it — a half-width card
+        // with a paragraph of empty state in it is a tall thin column of text
+        // next to nothing at all.
+        pair(changes, destinations)
 
         presets.frame = NSRect(x: padX, y: y, width: width,
                                height: presets.fittedHeight(width: width))
+        y += presets.frame.height
+
+        content.frame = NSRect(x: 0, y: 0, width: bounds.width,
+                               height: max(bounds.height, y + DashboardSpace.md))
     }
 }
 

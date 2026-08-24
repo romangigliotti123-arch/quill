@@ -137,7 +137,9 @@ private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
     // to take everything back and put their character in again, which is why the
     // delegate now carries the character instead of a boolean.
     let keyboard = ScriptedKeystrokes()
-    let typer = LiveTyper(keyboard: keyboard)
+    // Pinned: these tests are about LiveTyper's own generation and abandon
+    // logic, not about what the person running them has in front of them.
+    let typer = LiveTyper(keyboard: keyboard, frontmostPID: { 424242 })
     typer.begin()
     typer.update(to: "send it over", generation: typer.generation)
     #expect(keyboard.screen == "send it over")
@@ -156,7 +158,9 @@ private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
     // Escape is swallowed, so nothing of the user's is on screen and nothing is
     // owed back.
     let keyboard = ScriptedKeystrokes()
-    let typer = LiveTyper(keyboard: keyboard)
+    // Pinned: these tests are about LiveTyper's own generation and abandon
+    // logic, not about what the person running them has in front of them.
+    let typer = LiveTyper(keyboard: keyboard, frontmostPID: { 424242 })
     typer.begin()
     typer.update(to: "send it over", generation: typer.generation)
     typer.retract(generation: typer.generation)
@@ -169,7 +173,9 @@ private final class ScriptedKeystrokes: KeystrokeEmitting, @unchecked Sendable {
     // text. Treating it as one character is how live typing deletes a character
     // of the user's own writing that was already there.
     let keyboard = ScriptedKeystrokes(existing: "already here ")
-    let typer = LiveTyper(keyboard: keyboard)
+    // Pinned: these tests are about LiveTyper's own generation and abandon
+    // logic, not about what the person running them has in front of them.
+    let typer = LiveTyper(keyboard: keyboard, frontmostPID: { 424242 })
     typer.begin()
     typer.update(to: "send it over", generation: typer.generation)
     #expect(keyboard.screen == "already here send it over")

@@ -102,6 +102,13 @@ public final class DictationCoordinator {
     /// dictation and thrown away if it does not.
     private var isSpeculating = false
     private var capturedInputDevice: String?
+    /// Where the text went, captured at insertion rather than looked up later:
+    /// by the time the record is written the user may already have switched apps.
+    private var capturedDestination: String?
+    /// Watches what the user changes about the sentence, and teaches the style
+    /// profile from it. See `EditWatcher` — before this, nothing in the app ever
+    /// called `StyleStore.recordCorrection`.
+    private let editWatcher = EditWatcher()
     /// Where the words are going, decided at key-down.
     ///
     /// Captured with the focus rather than read at insertion time, for the same
@@ -529,6 +536,7 @@ public final class DictationCoordinator {
                         id: UUID(), date: Date(), rawText: rescued, insertedText: "",
                         wordCount: cleaned.split(whereSeparator: \.isWhitespace).count,
                         inputDevice: self.capturedInputDevice,
+                        destinationBundleID: self.capturedDestination,
                         timings: .init(timeToFirstWordMs: self.timeline.timeToFirstWordMs,
                                        finalToInsertedMs: nil,
                                        endToEndMs: self.timeline.endToEndMs,
@@ -693,6 +701,7 @@ public final class DictationCoordinator {
                         id: UUID(), date: Date(), rawText: rescued, insertedText: liveOnScreen,
                         wordCount: final.split(whereSeparator: \.isWhitespace).count,
                         inputDevice: self.capturedInputDevice,
+                        destinationBundleID: self.capturedDestination,
                         timings: .init(timeToFirstWordMs: self.timeline.timeToFirstWordMs,
                                        finalToInsertedMs: nil,
                                        endToEndMs: self.timeline.endToEndMs,
@@ -774,6 +783,15 @@ public final class DictationCoordinator {
                 // is believed to be on screen, and the undo chord may not fire
                 // against a sentence that never landed.
                 self.undo?.record(final)
+                // Same gate as the undo record above, and for the same reason:
+                // this is the only branch where the sentence is believed to be in
+                // the app. A clipboard fallback went somewhere this cannot watch.
+                let front = NSWorkspace.shared.frontmostApplication
+                self.capturedDestination = front?.bundleIdentifier
+                if let pid = front?.processIdentifier {
+                    self.editWatcher.begin(inserted: final, pid: pid,
+                                           bundleID: front?.bundleIdentifier)
+                }
                 // So "make that shorter" has something to act on.
                 self.lastInsertion = .init(text: final, insertedAt: Date())
                 // The text is on screen now — the moment "finish, then
@@ -807,6 +825,7 @@ public final class DictationCoordinator {
                 insertedText: final,
                 wordCount: final.split(whereSeparator: \.isWhitespace).count,
                 inputDevice: self.capturedInputDevice,
+                destinationBundleID: self.capturedDestination,
                 timings: .init(
                     timeToFirstWordMs: self.timeline.timeToFirstWordMs,
                     finalToInsertedMs: self.timeline.finalToInsertedMs,

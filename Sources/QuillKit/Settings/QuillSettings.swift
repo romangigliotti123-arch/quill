@@ -119,6 +119,21 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         /// sends Return. On by default: it is the feature being asked for,
         /// not an opt-in extra, same reasoning as `overlayBarEnabled`.
         public var finishThenEnterEnabled: Bool
+        /// After a dictation, watch the sentence Quill inserted and learn from
+        /// what the user changes about it.
+        ///
+        /// On by default, and that is the argued-about part. It reads the focused
+        /// field of the app the text landed in — which Quill already does, to
+        /// verify `⌥⌫` before deleting anything — and it only ever looks at the
+        /// span Quill itself produced, never the surrounding document. Nothing
+        /// leaves the machine; `StyleLearner` is pure local arithmetic.
+        ///
+        /// Off by default was the other option and it is the wrong one here. The
+        /// whole learning pipeline shipped with no caller and could only ever
+        /// report zero corrections; a feature that learns nothing until it is
+        /// found in Settings learns nothing. It has a switch, and the Style
+        /// screen says out loud that it is watching.
+        public var learnFromEdits: Bool
         /// The version of Quill that last launched on this Mac. Not a setting —
         /// nobody changes it — but it lives here because settings.json is the
         /// file whose existence already means "this Mac has run Quill before",
@@ -142,6 +157,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                     overlayBarPosition: OverlayBarPosition = .bottomLeft,
                     overlayShowsNewNoteButton: Bool = true,
                     finishThenEnterEnabled: Bool = true,
+                    learnFromEdits: Bool = true,
                     lastLaunchedVersion: String? = nil) {
             self.holdKeyCode = holdKeyCode
             self.toggleKeyCode = toggleKeyCode
@@ -155,6 +171,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
             self.overlayBarPosition = overlayBarPosition
             self.overlayShowsNewNoteButton = overlayShowsNewNoteButton
             self.finishThenEnterEnabled = finishThenEnterEnabled
+            self.learnFromEdits = learnFromEdits
             self.lastLaunchedVersion = lastLaunchedVersion
         }
 
@@ -189,6 +206,8 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                 ?? fallback.overlayShowsNewNoteButton
             finishThenEnterEnabled = try c.decodeIfPresent(Bool.self, forKey: .finishThenEnterEnabled)
                 ?? fallback.finishThenEnterEnabled
+            learnFromEdits = try c.decodeIfPresent(Bool.self, forKey: .learnFromEdits)
+                ?? fallback.learnFromEdits
             lastLaunchedVersion = try c.decodeIfPresent(String.self, forKey: .lastLaunchedVersion)
         }
 
@@ -327,6 +346,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public var overlayBarPosition: Values.OverlayBarPosition { withLock { values.overlayBarPosition } }
     public var overlayShowsNewNoteButton: Bool { withLock { values.overlayShowsNewNoteButton } }
     public var finishThenEnterEnabled: Bool { withLock { values.finishThenEnterEnabled } }
+    public var learnFromEdits: Bool { withLock { values.learnFromEdits } }
     public var lastLaunchedVersion: String? { withLock { values.lastLaunchedVersion } }
 
     /// True when one key does both jobs, which is the default and means push-to-talk
@@ -399,6 +419,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     }
     public func setOverlayShowsNewNoteButton(_ on: Bool) { update { $0.overlayShowsNewNoteButton = on } }
     public func setFinishThenEnterEnabled(_ on: Bool) { update { $0.finishThenEnterEnabled = on } }
+    public func setLearnFromEdits(_ on: Bool) { update { $0.learnFromEdits = on } }
 
     /// Records the running version and answers what the previous one was, or nil
     /// on the first launch of a Mac that has run Quill before but never recorded

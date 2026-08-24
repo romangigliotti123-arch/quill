@@ -90,7 +90,21 @@ public final class LiveTyper {
     // nonisolated: the default argument of a @MainActor initialiser is evaluated
     // wherever the caller is, and DictationCoordinator's own default arguments
     // are not main-isolated.
-    nonisolated public init(keyboard: KeystrokeEmitting = SystemKeystrokes()) {
+    /// Which process is frontmost, behind a seam.
+    ///
+    /// The real one asks NSWorkspace, which means these checks answer differently
+    /// depending on what the person running the tests happens to be looking at.
+    /// Four LiveTyper tests failed for a full run today because a probe activated
+    /// TextEdit for two seconds — they were not wrong, they were reading a real
+    /// focus change and reporting it correctly. A test that fails when you switch
+    /// apps is a test that will fail again, on CI, for a reason nobody will find.
+    nonisolated public let frontmostPID: @Sendable () -> pid_t?
+
+    nonisolated public init(keyboard: KeystrokeEmitting = SystemKeystrokes(),
+                            frontmostPID: @escaping @Sendable () -> pid_t? = {
+                                NSWorkspace.shared.frontmostApplication?.processIdentifier
+                            }) {
+        self.frontmostPID = frontmostPID
         self.keyboard = keyboard
     }
 
@@ -117,7 +131,7 @@ public final class LiveTyper {
             targetPID = nil
             return (false, generation)
         }
-        targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        targetPID = frontmostPID()
         targetElement = focusedElement()
         return (targetPID != nil, generation)
     }
@@ -289,7 +303,7 @@ public final class LiveTyper {
     /// text, and of being too loose is what we already had.
     private func focusHeld() -> Bool {
         guard let targetPID else { return false }
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == targetPID else {
+        guard frontmostPID() == targetPID else {
             return false
         }
         guard let target = targetElement, let now = focusedElement() else { return true }
