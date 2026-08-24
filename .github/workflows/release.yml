@@ -99,6 +99,23 @@ jobs:
       - name: Build
         run: Scripts/build.sh --release
 
+      # The check that would have caught eight broken releases.
+      #
+      # `AnalyzerFeed` chose its audio path with `#if compiler(>=6.4)` — decided
+      # by whichever machine ran the compiler. This runner's Xcode is newer than
+      # the developer's Mac, so every build made here took the macOS 27
+      # `AnalyzerInputConverter` branch and every build made there took the
+      # hand-rolled one. Same commit, same Mac, one 6.5-second clip: the local
+      # build produced 28 partial results and a correct transcript, this one
+      # produced zero and an empty string. Dictation was broken in every release
+      # ever published and worked perfectly for the only person who built it
+      # himself.
+      #
+      # No unit test could see it — they run on the machine that compiles the
+      # other branch. Only running the artefact against audio can.
+      - name: Check the built app can actually transcribe
+        run: Scripts/check_transcription.sh "$HOME/Library/Application Support/Quill/build/Quill.app"
+
       # Belt and braces. Scripts/build.sh already refuses to finish on a wrong
       # leaf; this re-checks the artefact that is actually about to be uploaded,
       # because the cost of getting it wrong is paid by every user at once and

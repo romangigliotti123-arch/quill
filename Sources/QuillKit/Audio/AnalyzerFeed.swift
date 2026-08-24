@@ -18,55 +18,46 @@ protocol AnalyzerFeeding: AnyObject {
 
 enum AnalyzerFeed {
 
-    /// Picks the 27 path when it is there, the hand-rolled one when it is not.
-    /// `analyzerFormat` is only consulted by the fallback; the macOS 27 converter
-    /// negotiates it with the modules itself.
+    /// One path, always: the hand-rolled converter below.
+    ///
+    /// **There used to be two, chosen by `#if compiler(>=6.4)`, and that is a
+    /// choice made by whichever machine compiles the code rather than by anyone
+    /// reading it.** GitHub's runner had a newer Xcode than the developer's Mac,
+    /// so every published release silently took the macOS 27
+    /// `AnalyzerInputConverter` branch while every local build took this one —
+    /// no commit, no diff, nothing to review.
+    ///
+    /// That branch does not work. Measured on one 6.5-second clip, same Mac,
+    /// same file, the two builds of the same commit:
+    ///
+    ///     locally built (Swift 6.3.3) : 28 partial, 4 final,
+    ///                                   "What is your country, Olaf? …"
+    ///     CI built      (Swift 6.4+)  : 0 partial, empty transcript,
+    ///                                   "Audio input timestamp overlaps or
+    ///                                    precedes prior audio input"
+    ///
+    /// So dictation was broken in every release ever published, and worked
+    /// perfectly for the one person who built it himself — the exact shape of
+    /// the `Bundle.module` crash in v1.0.0, arrived at by a different route.
+    /// `Scripts/check_transcription.sh` now runs the built app against a real
+    /// clip so the release job fails instead of shipping silence.
+    ///
+    /// `AnalyzerInputConverter` can come back the day someone can run it against
+    /// audio and show a transcript coming out. Not before: it was adopted for
+    /// tidiness, it has never once produced a word in a shipped build, and a
+    /// second path nobody can execute is not a fallback, it is a coin toss on the
+    /// build machine.
     static func make(
         modules: [any SpeechModule],
         captureFormat: AVAudioFormat,
         analyzerFormat: AVAudioFormat?
     ) async throws -> AnalyzerFeeding {
-        #if compiler(>=6.4)
-        if #available(macOS 27, *) {
-            return ModernAnalyzerFeed(try await AnalyzerInputConverter.converter(compatibleWith: modules))
-        }
-        #endif
         guard let analyzerFormat else { throw TranscriptionError.noCompatibleAudioFormat }
         return LegacyAnalyzerFeed(from: captureFormat, to: analyzerFormat)
     }
 }
 
-#if compiler(>=6.4)
-/// macOS 27's `AnalyzerInputConverter`: it owns the resampling, the format
-/// negotiation and the chunking that the fallback below has to do by hand.
-///
-/// Gated on the compiler, not just `@available`: `AnalyzerInputConverter` has
-/// to be *declared* in the SDK being compiled against, which only ships with
-/// the Swift 6.4 toolchain — a machine that has updated its OS to macOS 27
-/// ahead of Xcode has that type nowhere for `@available` alone to find. Once
-/// Xcode catches up, this compiles back in on its own; nothing to revert.
-@available(macOS 27, *)
-private final class ModernAnalyzerFeed: AnalyzerFeeding {
-    private let converter: AnalyzerInputConverter
-    // The engine tap and the stop() path can both reach the converter, and it is
-    // a plain class with no isolation of its own.
-    private let lock = NSLock()
-
-    init(_ converter: AnalyzerInputConverter) { self.converter = converter }
-
-    func inputs(from buffer: AVAudioPCMBuffer, at time: AVAudioTime?) throws -> [AnalyzerInput] {
-        lock.lock(); defer { lock.unlock() }
-        return try converter.convert(buffer, at: time)
-    }
-
-    func flush() throws -> [AnalyzerInput] {
-        lock.lock(); defer { lock.unlock() }
-        return try converter.flush()
-    }
-}
-#endif
-
-/// macOS 26 fallback: a single stateful `AVAudioConverter` doing sample-rate and
+/// A single stateful `AVAudioConverter` doing sample-rate and
 /// channel conversion.
 ///
 /// It has to be one long-lived converter, not one per buffer — a resampler
