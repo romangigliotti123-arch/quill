@@ -195,6 +195,13 @@ final class OnboardingKeyStep: NSView, OnboardingSizing {
 /// how much is left, which is the question anyone in a setup flow is asking.
 final class OnboardingDots: NSView {
     var count = 4 { didSet { needsDisplay = true } }
+
+    /// How wide the dots need to be drawn, so the footer can decide whether
+    /// there is room for them rather than drawing them under a button.
+    var intrinsicWidth: CGFloat {
+        guard count > 0 else { return 0 }
+        return CGFloat(count - 1) * 6 + 16 + CGFloat(count - 1) * 7
+    }
     var index = 0 { didSet { needsDisplay = true } }
     var tint: DashboardStyle? { didSet { needsDisplay = true } }
 

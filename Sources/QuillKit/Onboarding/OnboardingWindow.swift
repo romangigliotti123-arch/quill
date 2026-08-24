@@ -104,6 +104,8 @@ final class OnboardingRootView: NSView {
     private let skip: DashboardButton
     private let dots = OnboardingDots()
 
+    private static let pad: CGFloat = 40
+
     private var step: Step = .welcome { didSet { rebuild() } }
     private var body: NSView?
     private var permissionPoll: Timer?
@@ -233,6 +235,32 @@ final class OnboardingRootView: NSView {
         needsLayout = true
     }
 
+    /// Onboarding is one window showing five different-sized pages. It only ever
+    /// grows, so it settles on the tallest page and stays there rather than
+    /// resizing under the pointer every time Continue is clicked.
+    /// Returns true when it resized, meaning this layout pass is stale and the
+    /// resize will drive a fresh one.
+    @discardableResult
+    private func growWindowToFit(_ view: NSView,
+                                 headingBlurbBottom y: CGFloat,
+                                 footer: CGFloat) -> Bool {
+        guard let window, bounds.width > 0,
+              let sizing = view as? OnboardingSizing else { return false }
+        let inner = bounds.width - Self.pad * 2
+        guard inner > 0 else { return false }
+
+        let wanted = (y + sizing.fittingHeight(width: inner) + footer + 18).rounded(.up)
+        guard wanted > bounds.height + 0.5 else { return false }
+
+        var frame = window.frame
+        // Grow downward from the title bar rather than up from the bottom, so
+        // the window does not appear to jump up the screen mid-flow.
+        frame.origin.y -= wanted - frame.height
+        frame.size.height = wanted
+        window.setFrame(frame, display: true, animate: false)
+        return true
+    }
+
     private var blurbText: String {
         switch step {
         case .welcome:
@@ -336,15 +364,14 @@ final class OnboardingRootView: NSView {
     override func layout() {
         super.layout()
         material.frame = bounds
-        let pad: CGFloat = 40
-        let width = bounds.width - pad * 2
+        let width = bounds.width - Self.pad * 2
         guard width > 0 else { return }
 
         var y: CGFloat = 56
-        heading.frame = NSRect(x: pad, y: y, width: width,
+        heading.frame = NSRect(x: Self.pad, y: y, width: width,
                                height: DashboardType.size(heading, width: width).height)
         y += heading.frame.height + 10
-        blurb.frame = NSRect(x: pad, y: y, width: width,
+        blurb.frame = NSRect(x: Self.pad, y: y, width: width,
                              height: DashboardType.size(blurb, width: width).height)
         y += blurb.frame.height + 26
 
@@ -356,21 +383,41 @@ final class OnboardingRootView: NSView {
         // first thing anyone sees of this app. The steps are different heights,
         // so centring is what makes all four look composed instead of one.
         let footerHeight: CGFloat = 76
+        // Before anything is placed: if this step needs a taller window than the
+        // one it has, grow it and let the resize bring us back through here.
+        if let body, growWindowToFit(body, headingBlurbBottom: y, footer: footerHeight) { return }
         let room = bounds.height - y - footerHeight
         if let body {
-            let needed = min(room, (body as? OnboardingSizing)?.fittingHeight(width: width) ?? room)
-            body.frame = NSRect(x: pad, y: y + min(24, ((room - needed) / 3)).rounded(),
+            // NOT min(room, needed). Clamping to the window silently truncated
+            // any step taller than it — the last line of "That's it" rendered
+            // underneath the footer, and nothing failed, which is the worst way
+            // for a layout to be wrong. `growWindowToFit` has already made the
+            // window tall enough by the time this runs, so `room` only decides
+            // how much a SHORT step is centred by.
+            let needed = (body as? OnboardingSizing)?.fittingHeight(width: width) ?? room
+            body.frame = NSRect(x: Self.pad, y: y + max(0, min(24, ((room - needed) / 3))).rounded(),
                                 width: width, height: needed)
             body.layoutSubtreeIfNeeded()
         }
 
         let buttonY = bounds.height - footerHeight + 22
-        next.frame = NSRect(x: bounds.width - pad - next.intrinsicWidth, y: buttonY,
+        next.frame = NSRect(x: bounds.width - Self.pad - next.intrinsicWidth, y: buttonY,
                             width: next.intrinsicWidth, height: 32)
         skip.frame = NSRect(x: next.frame.minX - 8 - skip.intrinsicWidth, y: buttonY,
                             width: skip.intrinsicWidth, height: 32)
-        back.frame = NSRect(x: pad, y: buttonY, width: back.intrinsicWidth, height: 32)
-        dots.frame = NSRect(x: bounds.midX - 40, y: buttonY + 12, width: 80, height: 8)
+        back.frame = NSRect(x: Self.pad, y: buttonY, width: back.intrinsicWidth, height: 32)
+        // Centred on the window, the dots sat underneath "Continue without an
+        // account" — the skip button grows leftward from the right edge, and a
+        // long enough label reaches past the middle. So they are centred in the
+        // gap that is actually free, and dropped entirely when there isn't one.
+        let rightEdge = skip.isHidden ? next.frame.minX : skip.frame.minX
+        let free = NSRect(x: back.isHidden ? Self.pad : back.frame.maxX,
+                          y: buttonY + 12,
+                          width: rightEdge - 12 - (back.isHidden ? Self.pad : back.frame.maxX),
+                          height: 8)
+        let wanted = dots.intrinsicWidth
+        dots.isHidden = free.width < wanted
+        dots.frame = NSRect(x: free.midX - wanted / 2, y: free.minY, width: wanted, height: 8)
     }
 }
 
