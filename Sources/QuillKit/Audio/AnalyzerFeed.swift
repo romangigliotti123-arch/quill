@@ -18,45 +18,74 @@ protocol AnalyzerFeeding: AnyObject {
 
 enum AnalyzerFeed {
 
-    /// One path, always: the hand-rolled converter below.
+    /// Two paths, and which one you get depends on the toolchain that compiled
+    /// this file. That is not a design; it is a fact to be defended against.
     ///
-    /// **There used to be two, chosen by `#if compiler(>=6.4)`, and that is a
-    /// choice made by whichever machine compiles the code rather than by anyone
-    /// reading it.** GitHub's runner had a newer Xcode than the developer's Mac,
-    /// so every published release silently took the macOS 27
-    /// `AnalyzerInputConverter` branch while every local build took this one —
-    /// no commit, no diff, nothing to review.
+    /// `Scripts/build.sh` tries the Command Line Tools toolchain first and falls
+    /// back to Xcode's. On this Mac those are Swift 6.4 and Swift 6.3.3 — so a
+    /// local build takes the branch below and a build on a machine without CLT
+    /// takes the other one. Every published release took the other one, because
+    /// that is what the GitHub runner resolves to.
     ///
-    /// That branch does not work. Measured on one 6.5-second clip, same Mac,
-    /// same file, the two builds of the same commit:
+    /// Measured, same Mac, same 3-second clip, same commit:
     ///
-    ///     locally built (Swift 6.3.3) : 28 partial, 4 final,
-    ///                                   "What is your country, Olaf? …"
-    ///     CI built      (Swift 6.4+)  : 0 partial, empty transcript,
-    ///                                   "Audio input timestamp overlaps or
-    ///                                    precedes prior audio input"
+    ///     modern (AnalyzerInputConverter) : 12 partial, 3 final, correct text
+    ///     legacy (hand-rolled)            : 0 partial, empty, "Audio input
+    ///                                       timestamp overlaps or precedes"
     ///
-    /// So dictation was broken in every release ever published, and worked
-    /// perfectly for the one person who built it himself — the exact shape of
-    /// the `Bundle.module` crash in v1.0.0, arrived at by a different route.
-    /// `Scripts/check_transcription.sh` now runs the built app against a real
-    /// clip so the release job fails instead of shipping silence.
-    ///
-    /// `AnalyzerInputConverter` can come back the day someone can run it against
-    /// audio and show a transcript coming out. Not before: it was adopted for
-    /// tidiness, it has never once produced a word in a shipped build, and a
-    /// second path nobody can execute is not a fallback, it is a coin toss on the
-    /// build machine.
+    /// So dictation worked for whoever built it and has never once worked in a
+    /// release. The legacy path's timestamps were the bug — see
+    /// `LegacyAnalyzerFeed` — and are fixed; both paths now transcribe. This
+    /// keeps both because a fallback that only exists on paper is what produced
+    /// eight broken releases, and `Scripts/verify_release.sh` checks the artefact
+    /// that actually ships rather than the one that happened to be built here.
     static func make(
         modules: [any SpeechModule],
         captureFormat: AVAudioFormat,
         analyzerFormat: AVAudioFormat?
     ) async throws -> AnalyzerFeeding {
+        #if compiler(>=6.4)
+        if #available(macOS 27, *) {
+            return ModernAnalyzerFeed(try await AnalyzerInputConverter.converter(compatibleWith: modules))
+        }
+        #endif
         guard let analyzerFormat else { throw TranscriptionError.noCompatibleAudioFormat }
         return LegacyAnalyzerFeed(from: captureFormat, to: analyzerFormat)
     }
 }
 
+#if compiler(>=6.4)
+/// macOS 27's `AnalyzerInputConverter`: it owns the resampling, the format
+/// negotiation and the chunking that the fallback below has to do by hand.
+///
+/// Gated on the compiler, not just `@available`: `AnalyzerInputConverter` has
+/// to be *declared* in the SDK being compiled against, which only ships with
+/// the Swift 6.4 toolchain — a machine that has updated its OS to macOS 27
+/// ahead of Xcode has that type nowhere for `@available` alone to find. Once
+/// Xcode catches up, this compiles back in on its own; nothing to revert.
+@available(macOS 27, *)
+private final class ModernAnalyzerFeed: AnalyzerFeeding {
+    private let converter: AnalyzerInputConverter
+    // The engine tap and the stop() path can both reach the converter, and it is
+    // a plain class with no isolation of its own.
+    private let lock = NSLock()
+
+    init(_ converter: AnalyzerInputConverter) { self.converter = converter }
+
+    func inputs(from buffer: AVAudioPCMBuffer, at time: AVAudioTime?) throws -> [AnalyzerInput] {
+        lock.lock(); defer { lock.unlock() }
+        return try converter.convert(buffer, at: time)
+    }
+
+    func flush() throws -> [AnalyzerInput] {
+        lock.lock(); defer { lock.unlock() }
+        return try converter.flush()
+    }
+}
+#endif
+
+/// The fallback, for a toolchain without `AnalyzerInputConverter`.
+///
 /// A single stateful `AVAudioConverter` doing sample-rate and
 /// channel conversion.
 ///
@@ -68,6 +97,9 @@ private final class LegacyAnalyzerFeed: AnalyzerFeeding {
     private let source: AVAudioFormat
     private let target: AVAudioFormat
     private let lock = NSLock()
+    /// Frames handed to the analyzer so far, in the analyzer's own sample rate.
+    /// Guarded by `lock` with the converter it belongs to.
+    private var emitted: AVAudioFramePosition = 0
 
     init(from source: AVAudioFormat, to target: AVAudioFormat) {
         self.source = source
@@ -106,14 +138,28 @@ private final class LegacyAnalyzerFeed: AnalyzerFeeding {
         if let conversionError { throw conversionError }
         guard status != .error, out.frameLength > 0 else { return [] }
 
-        let startTime: CMTime?
-        if let time, time.isSampleTimeValid, time.sampleRate > 0 {
-            startTime = CMTime(seconds: Double(time.sampleTime) / time.sampleRate, preferredTimescale: 48_000)
-        } else {
-            // nil means "contiguous with the last buffer", which is exactly true
-            // for a continuous engine tap.
-            startTime = nil
-        }
+        // Counted in OUTPUT frames, not derived from the input's sample time.
+        //
+        // **This is what broke dictation in every published release.** The old
+        // version computed `CMTime(seconds: time.sampleTime / time.sampleRate)`
+        // from the capture timeline, then handed the analyzer a buffer measured
+        // in the analyzer's own rate. Those two do not line up: a resampler emits
+        // whatever number of frames the filter has ready, not exactly
+        // `frameLength × ratio`, so consecutive buffers claim start times that
+        // overlap the duration of the one before. `SpeechAnalyzer` rejects that —
+        //
+        //     Audio input timestamp overlaps or precedes prior audio input
+        //
+        // — and once rejected it returns no results at all. Zero partials, an
+        // empty final, and a user watching one wrong word appear for a whole
+        // spoken sentence.
+        //
+        // A running count of frames actually emitted, at the rate they are
+        // emitted in, is monotonic by construction and exactly as long as the
+        // audio it describes. Nothing else can be, because only the converter
+        // knows how many frames it produced.
+        let startTime = CMTime(value: emitted, timescale: CMTimeScale(target.sampleRate))
+        emitted += AVAudioFramePosition(out.frameLength)
         return [AnalyzerInput(buffer: out, bufferStartTime: startTime)]
     }
 
