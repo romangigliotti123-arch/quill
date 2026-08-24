@@ -119,6 +119,16 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         /// sends Return. On by default: it is the feature being asked for,
         /// not an opt-in extra, same reasoning as `overlayBarEnabled`.
         public var finishThenEnterEnabled: Bool
+        /// The version of Quill that last launched on this Mac. Not a setting —
+        /// nobody changes it — but it lives here because settings.json is the
+        /// file whose existence already means "this Mac has run Quill before",
+        /// and a second state file is a second thing to fall out of sync.
+        ///
+        /// It exists to notice an update. See `AppDelegate` for what that is
+        /// for: macOS drops a TCC grant whenever the signing certificate
+        /// changes, and a menu-bar app that has silently lost Accessibility is
+        /// indistinguishable from one that is broken.
+        public var lastLaunchedVersion: String?
 
         public init(holdKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
                     toggleKeyCode: UInt16 = HotkeyBinding.rightOption.keyCode,
@@ -131,7 +141,8 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                     overlayBarEnabled: Bool = true,
                     overlayBarPosition: OverlayBarPosition = .bottomLeft,
                     overlayShowsNewNoteButton: Bool = true,
-                    finishThenEnterEnabled: Bool = true) {
+                    finishThenEnterEnabled: Bool = true,
+                    lastLaunchedVersion: String? = nil) {
             self.holdKeyCode = holdKeyCode
             self.toggleKeyCode = toggleKeyCode
             self.inputDeviceUID = inputDeviceUID
@@ -144,6 +155,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
             self.overlayBarPosition = overlayBarPosition
             self.overlayShowsNewNoteButton = overlayShowsNewNoteButton
             self.finishThenEnterEnabled = finishThenEnterEnabled
+            self.lastLaunchedVersion = lastLaunchedVersion
         }
 
         public init(from decoder: Decoder) throws {
@@ -177,6 +189,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                 ?? fallback.overlayShowsNewNoteButton
             finishThenEnterEnabled = try c.decodeIfPresent(Bool.self, forKey: .finishThenEnterEnabled)
                 ?? fallback.finishThenEnterEnabled
+            lastLaunchedVersion = try c.decodeIfPresent(String.self, forKey: .lastLaunchedVersion)
         }
 
     /// How a spoken number reaches the page.
@@ -314,6 +327,7 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public var overlayBarPosition: Values.OverlayBarPosition { withLock { values.overlayBarPosition } }
     public var overlayShowsNewNoteButton: Bool { withLock { values.overlayShowsNewNoteButton } }
     public var finishThenEnterEnabled: Bool { withLock { values.finishThenEnterEnabled } }
+    public var lastLaunchedVersion: String? { withLock { values.lastLaunchedVersion } }
 
     /// True when one key does both jobs, which is the default and means push-to-talk
     /// is reached by double-tapping rather than by a key of its own.
@@ -386,16 +400,61 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
     public func setOverlayShowsNewNoteButton(_ on: Bool) { update { $0.overlayShowsNewNoteButton = on } }
     public func setFinishThenEnterEnabled(_ on: Bool) { update { $0.finishThenEnterEnabled = on } }
 
+    /// Records the running version and answers what the previous one was, or nil
+    /// on the first launch of a Mac that has run Quill before but never recorded
+    /// it — every install up to and including v1.0.3.
+    ///
+    /// Deliberately returns the old value rather than a bool: the caller wants
+    /// to know *whether this launch is the first after an update*, and that is
+    /// the only question this answers.
+    @discardableResult
+    public func noteLaunch(of version: String) -> String? {
+        let previous = withLock { values.lastLaunchedVersion }
+        if previous != version { update { $0.lastLaunchedVersion = version } }
+        return previous
+    }
+
     // MARK: - Disk
 
+    /// Set when settings.json exists and will not decode. While it is set the
+    /// file is never written, because the alternative is replacing whatever is
+    /// in there with a set of defaults.
+    private var loadFailed = false
+
+    /// Three states, not two — the sixth store to need saying so, and the last
+    /// one that had not been fixed.
+    ///
+    /// `try? Data ?? return` collapsed "there is no settings file yet" and "there
+    /// is one and I could not read it" into the same answer, and they call for
+    /// opposite behaviour. Every field below decodes with `decodeIfPresent`, so
+    /// a file from an older or newer build always reads; getting here means the
+    /// bytes are not JSON at all — a partial write during a crash, a full disk, a
+    /// hand-edit with a trailing comma. The old code then ran on defaults and,
+    /// the moment the user changed any single setting, atomically wrote those
+    /// defaults over the top. Chosen microphone, rebound dictation key, retention
+    /// period, every toggle: gone, silently, and the file that could have been
+    /// rescued by hand gone with it.
+    ///
+    /// So: refuse to write, keep a copy of what could not be read — `StoreFile`
+    /// does that — and say so. Same rule as history, snippets, notes, the
+    /// dictionary, transforms and style.
     private func load() {
-        guard let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode(Values.self, from: data)
-        else { return }
-        values = decoded
+        switch StoreFile.read(Values.self, from: url) {
+        case .missing:
+            break
+        case .decoded(let stored):
+            values = stored
+        case .unreadable:
+            loadFailed = true
+        }
     }
 
     private func save(_ snapshot: Values) {
+        // Never overwrite a file we failed to read. See load().
+        guard !loadFailed else {
+            NSLog("[quill] settings.json is unreadable — not saving over it.")
+            return
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(snapshot) else { return }

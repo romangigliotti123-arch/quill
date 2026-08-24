@@ -24,50 +24,96 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Scripts/make_cert.sh imports into the runner's own login keychain
-      # with `-A` (all apps, no per-use prompt) — correct for a developer's
-      # own interactive session, where that already works. It is NOT enough
-      # in a CI runner's non-interactive launchd session: without an
-      # explicit partition-list grant, `codesign` waits on a keychain-access
-      # prompt that can never be answered and the job hangs with no error,
-      # confirmed by a real run that sat in the Build step for 10+ minutes
-      # when the same build finishes locally in well under a minute. A
-      # dedicated keychain, made and unlocked with a password only this job
-      # ever knows, sidesteps needing the login keychain's real password —
-      # which nothing here has — while still granting codesign explicit,
-      # non-interactive access via set-key-partition-list.
-      - name: Create a signing identity
+      # THE certificate, imported from a secret — never generated here.
+      #
+      # This step used to run `openssl req -x509 -newkey` and mint a throwaway
+      # identity per run. It signed fine and the release looked correct, which
+      # is why it survived three releases. What it actually did was change the
+      # app's identity every time.
+      #
+      # macOS binds every TCC grant to the Designated Requirement, and for a
+      # self-signed app that requirement names the certificate's leaf hash:
+      #
+      #     identifier "com.romangigliotti.quill" and certificate leaf = H"…"
+      #
+      # v1.0.1 shipped a862afa8…, v1.0.2 shipped ddb73900…, v1.0.3 shipped
+      # 30268b8e… — three different apps as far as tccd is concerned. So every
+      # update silently revoked Microphone, Accessibility and Input Monitoring
+      # for everyone who took it, leaving the System Settings toggles reading ON
+      # while bound to a hash that no longer existed. The README already
+      # described the symptom ("a stale Accessibility grant looks like a broken
+      # app") without anyone connecting it to the thing that caused it.
+      #
+      # QUILL_SIGNING_P12 is the same identity Scripts/build.sh uses, so a
+      # locally built Quill and a downloaded one are one app to TCC.
+      #
+      # A dedicated keychain rather than the runner's login one: importing with
+      # `-A` is enough for a developer's interactive session but not for a CI
+      # runner's non-interactive launchd session, where codesign otherwise waits
+      # on a keychain-access prompt that can never be answered and the job hangs
+      # with no error — confirmed by a real run that sat in Build for 10+
+      # minutes. Making the keychain here means its password is one this job
+      # invents, so set-key-partition-list can grant codesign explicit access
+      # without needing the login keychain's real password, which nothing has.
+      - name: Import the signing identity
+        env:
+          P12_BASE64: ${{ secrets.QUILL_SIGNING_P12 }}
+          P12_PASSWORD: ${{ secrets.QUILL_SIGNING_P12_PASSWORD }}
         run: |
           set -euo pipefail
-          IDENTITY="Quill Self-Signed"
-          KEYCHAIN="ci-signing.keychain-db"
-          PASSWORD="$(openssl rand -hex 16)"
+          IDENTITY_SHA="E500962447AD091332F21CA6C28286B30E284C4F"
 
-          security create-keychain -p "$PASSWORD" "$KEYCHAIN"
+          # Fail here rather than fall back to a fresh certificate. A release
+          # signed with the wrong key costs every existing user all three
+          # permissions, and nothing downstream would notice.
+          if [ -z "${P12_BASE64:-}" ] || [ -z "${P12_PASSWORD:-}" ]; then
+            echo "::error::QUILL_SIGNING_P12 / QUILL_SIGNING_P12_PASSWORD are not set." >&2
+            echo "Signing with anything else would revoke every user's Microphone," >&2
+            echo "Accessibility and Input Monitoring grants on update. Refusing." >&2
+            exit 1
+          fi
+
+          KEYCHAIN="ci-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings "$KEYCHAIN"
-          security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
 
           TMP="$(mktemp -d)"
-          # printf, not a heredoc: a heredoc's closing delimiter has to sit at
-          # column zero, which YAML's own indentation of this block would break.
-          printf '%s\n' \
-            '[req]' 'distinguished_name = dn' 'x509_extensions = v3' 'prompt = no' \
-            '[dn]' 'CN = Quill Self-Signed' \
-            '[v3]' 'basicConstraints = critical, CA:false' \
-            'keyUsage = critical, digitalSignature' \
-            'extendedKeyUsage = critical, codeSigning' > "$TMP/cfg"
-          openssl req -x509 -newkey rsa:2048 -keyout "$TMP/k.key" -out "$TMP/k.crt" \
-              -days 3650 -nodes -config "$TMP/cfg" >/dev/null 2>&1
-          openssl pkcs12 -export -legacy -inkey "$TMP/k.key" -in "$TMP/k.crt" \
-              -out "$TMP/k.p12" -passout pass:quill -name "$IDENTITY" >/dev/null 2>&1
+          trap 'rm -rf "$TMP"' EXIT
+          printf '%s' "$P12_BASE64" | base64 --decode > "$TMP/signing.p12"
 
-          security import "$TMP/k.p12" -k "$KEYCHAIN" -P quill -A -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN"
-          rm -rf "$TMP"
+          security import "$TMP/signing.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -A -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+
+          if ! security find-identity -p codesigning | grep -q "$IDENTITY_SHA"; then
+            echo "::error::The imported key is not $IDENTITY_SHA." >&2
+            echo "The secret holds a different certificate; releasing it would drop" >&2
+            echo "every user's permissions. Refusing." >&2
+            exit 1
+          fi
+          echo "Signing identity $IDENTITY_SHA ready."
 
       - name: Build
         run: Scripts/build.sh --release
+
+      # Belt and braces. Scripts/build.sh already refuses to finish on a wrong
+      # leaf; this re-checks the artefact that is actually about to be uploaded,
+      # because the cost of getting it wrong is paid by every user at once and
+      # cannot be undone by a later release.
+      - name: Check the shipped app carries the pinned certificate
+        run: |
+          set -euo pipefail
+          APP="$HOME/Library/Application Support/Quill/build/Quill.app"
+          EXPECTED="e500962447ad091332f21ca6c28286b30e284c4f"
+          DR="$(codesign -d -r- "$APP" 2>&1 | grep -o 'designated => .*' | tr 'A-Z' 'a-z')"
+          echo "$DR"
+          if ! echo "$DR" | grep -q "$EXPECTED"; then
+            echo "::error::Wrong signing certificate — every user's TCC grants would drop." >&2
+            exit 1
+          fi
 
       - name: Zip the app
         run: |

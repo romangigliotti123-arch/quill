@@ -41,6 +41,57 @@ public struct DictationRecord: Codable, Sendable, Equatable {
         inputDevice.map(AudioDeviceInfo.isLoopback) ?? false
     }
 
+
+    /// Written out because `init(from:)` below suppresses the synthesised one.
+    public init(id: UUID,
+                date: Date,
+                rawText: String,
+                insertedText: String,
+                wordCount: Int,
+                inputDevice: String?,
+                timings: Timings) {
+        self.id = id
+        self.date = date
+        self.rawText = rawText
+        self.insertedText = insertedText
+        self.wordCount = wordCount
+        self.inputDevice = inputDevice
+        self.timings = timings
+    }
+
+    /// Decoded key by key, with a default for anything absent.
+    ///
+    /// The synthesised decoder throws on a missing key, and these records are
+    /// read as one `[DictationRecord]` — so a single field added in a future
+    /// release makes every record written before it undecodable, `StoreFile`
+    /// correctly refuses to overwrite the file, and the user opens Quill after
+    /// an update to an empty history and a store that has stopped saving. The
+    /// data is still on disk, which is no comfort to someone looking at a blank
+    /// screen.
+    ///
+    /// `Timings` already had the shape right, one field at a time, each with a
+    /// comment explaining that a missing optional decodes to nil rather than
+    /// failing. That worked because the author remembered. This makes it
+    /// structural instead: adding a field here cannot break an existing history.
+    ///
+    /// `rawText` and `insertedText` stay required. They are the record — a
+    /// history entry without them is not a dictation that lost a field, it is
+    /// corruption, and quietly inventing an empty one hides that.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        date = try c.decodeIfPresent(Date.self, forKey: .date) ?? Date()
+        rawText = try c.decode(String.self, forKey: .rawText)
+        insertedText = try c.decode(String.self, forKey: .insertedText)
+        wordCount = try c.decodeIfPresent(Int.self, forKey: .wordCount)
+            ?? insertedText.split(whereSeparator: \.isWhitespace).count
+        inputDevice = try c.decodeIfPresent(String.self, forKey: .inputDevice)
+        timings = try c.decodeIfPresent(Timings.self, forKey: .timings)
+            ?? Timings(timeToFirstWordMs: nil, finalToInsertedMs: nil,
+                       endToEndMs: nil, audioDurationMs: nil,
+                       usedThoroughCleanup: false)
+    }
+
     public struct Timings: Codable, Sendable, Equatable {
         public let timeToFirstWordMs: Int?
         public let finalToInsertedMs: Int?
@@ -65,6 +116,22 @@ public struct DictationRecord: Codable, Sendable, Equatable {
         /// existed does not have them, and the synthesised decoder treats a
         /// missing optional as nil rather than failing to load the history.
         public let recogniserFirstWordMs: Int?
+
+        /// Same reason as the record's own decoder above. Every field here is
+        /// already optional except `usedThoroughCleanup`, which would still be
+        /// enough on its own to make a whole history file unreadable.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            timeToFirstWordMs = try c.decodeIfPresent(Int.self, forKey: .timeToFirstWordMs)
+            finalToInsertedMs = try c.decodeIfPresent(Int.self, forKey: .finalToInsertedMs)
+            endToEndMs = try c.decodeIfPresent(Int.self, forKey: .endToEndMs)
+            audioDurationMs = try c.decodeIfPresent(Int.self, forKey: .audioDurationMs)
+            usedThoroughCleanup = try c.decodeIfPresent(Bool.self, forKey: .usedThoroughCleanup) ?? false
+            releaseToInsertedMs = try c.decodeIfPresent(Int.self, forKey: .releaseToInsertedMs)
+            micOpenMs = try c.decodeIfPresent(Int.self, forKey: .micOpenMs)
+            speechOnsetMs = try c.decodeIfPresent(Int.self, forKey: .speechOnsetMs)
+            recogniserFirstWordMs = try c.decodeIfPresent(Int.self, forKey: .recogniserFirstWordMs)
+        }
 
         public init(timeToFirstWordMs: Int?,
                     finalToInsertedMs: Int?,

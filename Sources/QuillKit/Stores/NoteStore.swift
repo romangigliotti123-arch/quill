@@ -21,6 +21,19 @@ public struct Note: Codable, Sendable, Equatable, Identifiable {
         self.updated = updated
     }
 
+    /// Key by key, so a field added in a future release cannot make every note
+    /// written before it undecodable. See `DictationRecord.init(from:)` — the
+    /// whole array is read at once, so one missing key costs the user every
+    /// note they have, not one field of one note.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
+        created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
+        updated = try c.decodeIfPresent(Date.self, forKey: .updated) ?? created
+    }
+
     /// What a list row shows when there's no title yet — the first line of
     /// what was actually said, same idea as a Finder icon preview.
     public var displayTitle: String {

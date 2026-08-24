@@ -168,6 +168,50 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // before any of them can fail.
         if needsSetup {
             DispatchQueue.main.async { OnboardingWindowController.present() }
+        } else {
+            showUpdateNoticeIfPermissionsWereDropped()
+        }
+    }
+
+    /// The first launch after an update, when macOS has quietly taken the
+    /// permissions away.
+    ///
+    /// A TCC grant is bound to the app's Designated Requirement, which for a
+    /// self-signed app names the signing certificate. Change the certificate and
+    /// every grant stops applying — and the System Settings toggle keeps reading
+    /// ON, pointing at a hash that no longer exists, so there is nothing on
+    /// screen anywhere that says what happened. The releases before v1.0.4 each
+    /// shipped a different certificate, so this happened on every single update:
+    /// the user's dictation key stopped working, the toggles all looked correct,
+    /// and the README's advice — remove Quill from the list and add it again —
+    /// was findable only by someone who already knew what to search for.
+    ///
+    /// From v1.0.4 the certificate is pinned, so this should never fire again.
+    /// It stays because "should never" is not "cannot": a lost signing key, or
+    /// a real Developer ID certificate one day, would do exactly this, and the
+    /// cost of being wrong is a user concluding the app is broken.
+    ///
+    /// Deliberately not on every launch — only when the version actually
+    /// changed. Someone who has considered Accessibility and decided against it
+    /// gets told once, not every time they log in.
+    @MainActor
+    private func showUpdateNoticeIfPermissionsWereDropped() {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let previous = QuillSettings.shared.noteLaunch(of: version)
+        // nil means an install from before this was recorded, which is every
+        // build up to v1.0.3 — and those are exactly the installs whose grants
+        // the update to v1.0.4 drops. Treat it as the update it is.
+        guard previous != version else { return }
+        guard !Permissions.missing.isEmpty else { return }
+
+        // The Help screen already lists each permission with its real state and
+        // a button that opens the right pane. Better than an alert that says the
+        // same thing and then goes away.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.dashboard == nil { self.dashboard = DashboardWindowController(selection: .help) }
+            self.dashboard?.present()
+            self.dashboard?.rootView.showSection(.help)
         }
     }
 

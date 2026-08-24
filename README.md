@@ -110,7 +110,8 @@ All three live in System Settings ▸ Privacy & Security.
 
 If the key does nothing and there is no error, it is almost always Accessibility
 granted to an older build. Remove Quill from the list and add it again. The Help
-tab inside the app has the rest.
+tab inside the app has the rest, and **Updating** below explains why this used to
+happen on every single update and no longer does.
 
 ## The AI cleanup is optional
 
@@ -138,13 +139,48 @@ read and edit. Dictations are kept for a month by default — changeable to a da
 a week, or forever in Settings ▸ Files, where there is also an **Erase
 everything** button that puts the app back to how it was the day you installed it.
 
+## Updating
+
+Replace `Quill.app`. Nothing you own is in the app bundle, so every setting,
+dictation, note, snippet, dictionary word and the account you are signed into
+carries straight over.
+
+Two things make that a guarantee rather than a hope, and both had to be fixed:
+
+**Every file is read key by key, with a default for anything absent.** Swift's
+synthesised `Codable` throws on a missing key, and these files are decoded whole
+— so a single field added in a new version would make every record written
+before it undecodable. The stores correctly refuse to overwrite a file they
+could not read, so nothing would be destroyed; you would simply open Quill after
+an update to an empty history, an empty Dictionary and a store that had quietly
+stopped saving. `Tests/QuillKitTests/UpgradeSurvivalTests.swift` holds the exact
+bytes shipped releases wrote and fails the moment a change would stop reading
+them.
+
+**Every release is signed with the same certificate.** macOS binds a permission
+grant to the app's Designated Requirement, which for a self-signed app names the
+signing certificate — so a new certificate is a new app as far as TCC is
+concerned, and all three grants stop applying while the System Settings toggles
+still read ON. v1.0.1, v1.0.2 and v1.0.3 each shipped a different one, because
+the release workflow generated a throwaway certificate per run; every update
+silently cost you your permissions, and the paragraph above about a "stale
+Accessibility grant" was describing that without naming the cause. From v1.0.4
+the certificate is pinned, checked during the build, checked again on the
+artefact before it is uploaded, and checked by a test that all three places
+still agree.
+
+**Updating to v1.0.4 is the last time you have to re-grant anything.** That one
+is unavoidable: v1.0.3's throwaway certificate no longer exists to sign against.
+Quill notices — a first launch on a new version with a permission missing opens
+the Help tab instead of doing nothing at all.
+
 ## Tests
 
 ```sh
 QUILL_SKIP_LIVE_TESTS=1 Scripts/test.sh
 ```
 
-700+ tests, about ten seconds. Drop the variable to include the tests that call
+720 tests, about ten seconds. Drop the variable to include the tests that call
 the real model endpoint (needs a key).
 
 ## Repo layout

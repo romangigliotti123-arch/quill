@@ -29,7 +29,28 @@ cd "$ROOT"
 
 APP_NAME="Quill"
 BUNDLE_ID="com.romangigliotti.quill"
-IDENTITY="Quill Self-Signed"
+
+# The one certificate every Quill is signed with, named by its SHA-1 rather
+# than by its common name.
+#
+# macOS pins a TCC grant to the app's Designated Requirement, which for a
+# self-signed app is `identifier "com.romangigliotti.quill" and certificate
+# leaf = H"<this>"`. Change the certificate and every grant the user has —
+# Microphone, Accessibility, Input Monitoring — silently stops applying: the
+# System Settings toggle keeps reading ON while pointing at a dead hash, and
+# the app looks broken with no error anywhere.
+#
+# That is what used to happen on every single release. The release workflow
+# generated a throwaway certificate per run, so v1.0.1, v1.0.2 and v1.0.3 each
+# shipped a different leaf and each update cost the user all three permissions.
+# CI now imports this exact identity from the QUILL_SIGNING_P12 secret, so a
+# locally built Quill and a downloaded one are the same app as far as TCC is
+# concerned, forever.
+#
+# By hash and not by name because two certificates can share a common name —
+# an older "Quill Self-Signed" is still sitting in this Mac's login keychain —
+# and `codesign -s <name>` fails with "ambiguous" when they do.
+IDENTITY_SHA="E500962447AD091332F21CA6C28286B30E284C4F"
 
 CONFIG="debug"
 INSTALL=false
@@ -141,12 +162,15 @@ if ! $found_config; then
 fi
 
 SIGN_ID="-"
-if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
-    SIGN_ID="$IDENTITY"
-    echo "==> Signing: $SIGN_ID (stable — TCC grants survive rebuilds)"
+if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY_SHA"; then
+    SIGN_ID="$IDENTITY_SHA"
+    echo "==> Signing: Quill Self-Signed ($IDENTITY_SHA)"
+    echo "    Stable across builds and releases, so TCC grants survive both."
 else
-    echo "!! Signing ad-hoc. Permissions WILL drop on every rebuild." >&2
-    echo "!! Fix once with: Scripts/make_cert.sh" >&2
+    echo "!! The shared signing identity is not in this keychain." >&2
+    echo "!! Signing ad-hoc: permissions will drop on every rebuild, and this" >&2
+    echo "!! build will not match a downloaded Quill either." >&2
+    echo "!! Restore it with: Scripts/make_cert.sh" >&2
 fi
 
 xattr -cr "$APP_DIR"
@@ -160,7 +184,20 @@ codesign --force --deep --sign "$SIGN_ID" \
 
 codesign --verify --verbose=2 "$APP_DIR" 2>&1 | sed 's/^/    /'
 echo "==> Designated requirement (must be identical across builds):"
-codesign -d -r- "$APP_DIR" 2>&1 | grep -o 'designated => .*' | sed 's/^/    /'
+DR="$(codesign -d -r- "$APP_DIR" 2>&1 | grep -o 'designated => .*')"
+echo "    $DR"
+
+# Checked rather than printed. A wrong leaf here is the whole difference
+# between an update that keeps the user's permissions and one that quietly
+# takes them away, and it is invisible in a wall of build output.
+if [ "$SIGN_ID" != "-" ]; then
+    EXPECTED_LEAF="$(echo "$IDENTITY_SHA" | tr 'A-Z' 'a-z')"
+    if ! echo "$DR" | tr 'A-Z' 'a-z' | grep -q "$EXPECTED_LEAF"; then
+        echo "!! Signed with the wrong certificate. Every user's TCC grants would drop." >&2
+        echo "!! Expected leaf H\"$EXPECTED_LEAF\"." >&2
+        exit 1
+    fi
+fi
 
 if $INSTALL; then
     echo "==> Installing to /Applications"

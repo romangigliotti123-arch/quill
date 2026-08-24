@@ -57,6 +57,29 @@ public struct Snippet: Codable, Sendable, Equatable, Identifiable {
         self.created = created
     }
 
+    /// Key by key, so a field added in a future release cannot make every
+    /// snippet written before it undecodable — the whole array is read at once,
+    /// so one missing key costs all of them. See `DictationRecord.init(from:)`.
+    ///
+    /// `phrase` and `replacement` stay required: a snippet without either is
+    /// not a snippet that lost a field, and silently substituting an empty
+    /// string would leave an entry that fires on nothing and types nothing.
+    ///
+    /// `mode` falls back rather than throwing, because a value written by a
+    /// newer build is a case this one has never heard of, and losing every
+    /// snippet over an unknown enum is the same failure by another route.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        phrase = try c.decode(String.self, forKey: .phrase)
+        replacement = try c.decode(String.self, forKey: .replacement)
+        mode = (try? c.decodeIfPresent(Mode.self, forKey: .mode)).flatMap { $0 } ?? .anywhere
+        isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        useCount = try c.decodeIfPresent(Int.self, forKey: .useCount) ?? 0
+        lastUsed = try c.decodeIfPresent(Date.self, forKey: .lastUsed)
+        created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
+    }
+
     /// Characters this snippet has saved: every firing typed the replacement
     /// instead of the phrase. The one honest measure of whether it earns its
     /// place in the list.

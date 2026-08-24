@@ -16,6 +16,15 @@ public struct Vocabulary: Codable, Sendable, Equatable {
 
     public var terms: [String]
 
+    /// One field today, and a `terms` key that has always been there — but the
+    /// synthesised decoder throws the moment a second field is added and an old
+    /// dictionary does not have it, and the whole Dictionary would go with it.
+    /// See `DictationRecord.init(from:)`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        terms = try c.decodeIfPresent([String].self, forKey: .terms) ?? []
+    }
+
     /// Overridable, so a candidate dictionary can be scored against the corpus
     /// without being installed over the user's real one.
     ///
