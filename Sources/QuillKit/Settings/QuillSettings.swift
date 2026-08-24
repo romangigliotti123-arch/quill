@@ -104,11 +104,15 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
         /// stop instead of holding a key. On by default: it is the feature
         /// being asked for, not an opt-in extra.
         public var overlayBarEnabled: Bool
+        /// Bottom left, not bottom centre. Centre puts the bar over the middle
+        /// of whatever you are dictating into, which is where the text you are
+        /// watching appear tends to be.
         public var overlayBarPosition: OverlayBarPosition
         /// A second segment on the overlay bar for starting a note straight
-        /// into a fresh dictation. Off by default — the plain dictate button
-        /// is what most people reach for, and a second target next to it is
-        /// only worth the extra width once someone has said they want it.
+        /// into a fresh dictation. On by default: it was off on the reasoning
+        /// that a second target is only worth the width once someone asks for
+        /// it, which had it backwards — off, nobody discovers Notes exists at
+        /// all, and the bar is the only place it is ever advertised.
         public var overlayShowsNewNoteButton: Bool
         /// Release the dictation key, then tap it again right away: once
         /// cleanup and insertion actually finish — never before — Quill
@@ -125,8 +129,8 @@ public final class QuillSettings: @unchecked Sendable, HotkeyBindingProviding {
                     numberStyle: NumberStyle = .spellOutSmall,
                     contextRecovery: Bool = true,
                     overlayBarEnabled: Bool = true,
-                    overlayBarPosition: OverlayBarPosition = .bottomCenter,
-                    overlayShowsNewNoteButton: Bool = false,
+                    overlayBarPosition: OverlayBarPosition = .bottomLeft,
+                    overlayShowsNewNoteButton: Bool = true,
                     finishThenEnterEnabled: Bool = true) {
             self.holdKeyCode = holdKeyCode
             self.toggleKeyCode = toggleKeyCode
