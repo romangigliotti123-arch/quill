@@ -112,6 +112,34 @@ for bundle in "$(dirname "$BIN_PATH")"/*.bundle; do
 done
 shopt -u nullglob
 
+# The app has to be able to FIND its resources once it is assembled.
+#
+# `Bundle.module` is generated code and its failure path is `fatalError`. The
+# accessor SwiftPM generates for the release build looks in exactly two places:
+# `Bundle.main.bundleURL/<name>.bundle` — the .app root, not Contents/Resources
+# where the loop above just put it — and the absolute path of the build
+# directory on the machine that compiled it. v1.0.0 shipped that way and every
+# sign-in crashed on every Mac except the one that built it, where the baked
+# build path still existed.
+#
+# The app no longer calls `Bundle.module` (see AccountStore.plistURL). This
+# check is the packaging half: assert the file the app looks for is actually
+# reachable in the assembled bundle, in whichever shape SwiftPM emitted, so a
+# broken package fails here instead of in front of a user.
+found_config=false
+for bundle in "$CONTENTS/Resources"/*.bundle; do
+    [[ -e "$bundle" ]] || continue
+    if [[ -f "$bundle/GoogleService-Info.plist" ]] \
+    || [[ -f "$bundle/Contents/Resources/GoogleService-Info.plist" ]]; then
+        found_config=true
+    fi
+done
+if ! $found_config; then
+    echo "!! No GoogleService-Info.plist reachable under $CONTENTS/Resources/*.bundle." >&2
+    echo "!! Accounts, sync and MCP would all be unavailable. Refusing to package." >&2
+    exit 1
+fi
+
 SIGN_ID="-"
 if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
     SIGN_ID="$IDENTITY"
@@ -122,6 +150,9 @@ else
 fi
 
 xattr -cr "$APP_DIR"
+# `| sed` made this always succeed: codesign's exit status was the pipeline's
+# first command and was discarded, so a signing failure printed and carried on.
+set -o pipefail
 codesign --force --deep --sign "$SIGN_ID" \
          --entitlements "$ROOT/Packaging/$APP_NAME.entitlements" \
          --identifier "$BUNDLE_ID" \

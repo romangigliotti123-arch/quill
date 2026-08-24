@@ -274,7 +274,11 @@ public final class SyncEngine: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if let cachedConfig { return cachedConfig }
-        guard let url = Bundle.module.url(forResource: "GoogleService-Info", withExtension: "plist"),
+        // Shares AccountStore's lookup rather than Bundle.module, whose failure
+        // path is a fatalError — see the note there. Sync runs in the
+        // background, so trapping here would kill the app with no user action
+        // to explain it at all.
+        guard let url = AccountStore.configURL(),
               let dict = NSDictionary(contentsOf: url),
               let projectID = dict["PROJECT_ID"] as? String
         else { return nil }

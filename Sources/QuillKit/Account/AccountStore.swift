@@ -88,11 +88,53 @@ public final class AccountStore: @unchecked Sendable {
     /// deployed alongside it (`firestore.rules`), not by hiding this string.
     /// Google's own documentation says so explicitly; it is why the plist is
     /// committed to this repo and the NIM key never is.
+    /// Where `GoogleService-Info.plist` might be, in the order worth trying.
+    ///
+    /// NOT `Bundle.module`. That is generated code whose failure path is
+    /// `fatalError("could not load resource bundle")`, so asking it for a
+    /// resource in an app whose packaging is even slightly wrong does not
+    /// return nil — it kills the process. v1.0.0 shipped with a flat
+    /// `Quill_QuillKit.bundle` (no Info.plist, so `Bundle(url:)` refuses it)
+    /// and every attempt to sign in or create an account trapped here, in a
+    /// function three lines below written specifically to fail gracefully.
+    ///
+    /// So the file is found by looking, and both bundle shapes are handled.
+    /// The worst case is now "accounts unavailable", which is what the rest of
+    /// this function was always prepared for.
+    static func configURL() -> URL? {
+        if let url = Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist") {
+            return url
+        }
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        return plistURL(searchingResourcesAt: resources)
+    }
+
+    /// Split out so a test can point it at a directory it built itself, rather
+    /// than at whatever bundle the test runner happens to be.
+    static func plistURL(searchingResourcesAt resources: URL) -> URL? {
+        let name = "GoogleService-Info"
+        let ext = "plist"
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: resources, includingPropertiesForKeys: nil)) ?? []
+        for nested in contents where nested.pathExtension == "bundle" {
+            // A well-formed bundle…
+            if let inner = Bundle(url: nested)?.url(forResource: name, withExtension: ext) {
+                return inner
+            }
+            // …and the flat shape SwiftPM also emits, which Bundle refuses to open.
+            let flat = nested.appendingPathComponent("\(name).\(ext)")
+            if FileManager.default.fileExists(atPath: flat.path) { return flat }
+            let structured = nested.appendingPathComponent("Contents/Resources/\(name).\(ext)")
+            if FileManager.default.fileExists(atPath: structured.path) { return structured }
+        }
+        return nil
+    }
+
     private func loadConfig() -> FirebaseConfig? {
         lock.lock()
         defer { lock.unlock() }
         if let config { return config }
-        guard let url = Bundle.module.url(forResource: "GoogleService-Info", withExtension: "plist"),
+        guard let url = Self.configURL(),
               let dict = NSDictionary(contentsOf: url),
               let apiKey = dict["API_KEY"] as? String,
               let projectID = dict["PROJECT_ID"] as? String
