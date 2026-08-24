@@ -64,6 +64,10 @@ public final class HelpSectionView: NSView {
         rebuildGroups()
     }
 
+    static var runningVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    }
+
     private func rebuildGroups() {
         // `removeAll`, and it is the whole bug this method used to have.
         //
@@ -190,6 +194,46 @@ public final class HelpSectionView: NSView {
         let known = SettingsGroup(title: "When something is wrong", style: style, rows: knownRows)
         content.addSubview(known)
         groups.append(known)
+
+        // Whether it has actually crashed, from macOS's own reports.
+        //
+        // "Sometimes there's still really random crashes, but I'm not sure if
+        // that's all the time or just sometimes" — and neither was the app. It
+        // was sitting on eight crash reports about itself and said nothing, so
+        // answering that took reading them by hand and separately checking the
+        // crash reporter was working at all that day.
+        //
+        // A crash becomes a date, a version and a function name. "None" is an
+        // answer too, and the more useful one: a crash on a version you no longer
+        // run is history rather than a live problem.
+        let crashes = CrashHistory.recent(limit: 3)
+        let crashRows: [SettingsGroup.Row] = crashes.isEmpty
+            ? [.init(label: "Crashes", detail: DashboardType.label(
+                  "None recorded. macOS writes one of these every time an app dies unexpectedly, "
+                      + "so this being empty means it has not.",
+                  font: DashboardType.caption, color: style.inkTertiary, lines: 0),
+                  control: HelpStatusPip(status: .pass, style: style))]
+            : crashes.map { crash in
+                let when = DateFormatter()
+                when.dateFormat = "d MMM, h:mm a"
+                let stale = crash.version != Self.runningVersion
+                // Says why the pip is green, because "crash … OK" on its own
+                // reads as the app shrugging at a crash.
+                let note = (crash.symbol ?? "No Quill frame in the report.")
+                    + (stale ? "  ·  on a version you no longer run" : "  ·  this is the version you are running")
+                return .init(
+                    label: "\(when.string(from: crash.date))  ·  v\(crash.version)",
+                    detail: DashboardType.label(
+                        note, font: DashboardType.caption, color: style.inkTertiary, lines: 0),
+                    control: HelpStatusPip(
+                        // A crash on the version you are running now is worth a
+                        // warning. One on a version you have replaced is history.
+                        status: stale ? .pass : .warn,
+                        style: style))
+            }
+        let crashGroup = SettingsGroup(title: "Has it crashed?", style: style, rows: crashRows)
+        content.addSubview(crashGroup)
+        groups.append(crashGroup)
 
         needsLayout = true
     }

@@ -155,14 +155,18 @@ import Testing
     }
 
     let laidOut = groups(in: view)
-    #expect(laidOut.count == 3, "\(laidOut.count) groups on screen; the screen has three")
+    // Not a fixed count: the screen gained a fourth card when it started
+    // reporting crashes, and a test that pins the number fails on every card
+    // added rather than on the bug it was written for.
+    #expect(laidOut.count >= 3)
     #expect(laidOut.map(\.frame.minY).min() == firstLayout,
             "the top of the content moved after a rebuild — dead blocks are still being packed")
 
-    // Both columns start level. Three blocks over two columns means two of them
-    // begin at the same y; a hidden block above one of them is what broke that.
-    let tops = Set(laidOut.map { ($0.frame.minY * 100).rounded() })
-    #expect(tops.count == 2, "the two columns no longer start at the same height")
+    // Both columns start level. Exactly two blocks share the topmost y — one per
+    // column — and an invisible block packed above one of them is what breaks it.
+    let top = laidOut.map { ($0.frame.minY * 100).rounded() }.min()
+    let atTop = laidOut.filter { ($0.frame.minY * 100).rounded() == top }.count
+    #expect(atTop == 2, "the two columns no longer start at the same height")
 }
 
 // MARK: - The registry
