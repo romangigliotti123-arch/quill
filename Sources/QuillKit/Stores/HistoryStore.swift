@@ -29,6 +29,16 @@ public struct DictationRecord: Codable, Sendable, Equatable {
     /// knowing where your words went does not depend on being able to re-read
     /// them, and Insights and the Style screen both want it.
     public let destinationBundleID: String?
+    /// What the user changed the text to, after the fact, from the Dictation
+    /// screen. Nil when they never touched it, which is almost always.
+    ///
+    /// Kept alongside `insertedText` rather than replacing it. The pair is the
+    /// evidence — what Quill produced and what the user actually wanted — and
+    /// overwriting the first would throw away the only record of what needed
+    /// correcting. It is also what `heard` / `inserted` on this screen is drawn
+    /// from, and a diff against an edited version is a diff against the wrong
+    /// thing.
+    public var correctedText: String?
     public let timings: Timings
 
     /// Whether this record is a measurement rather than something the user said.
@@ -58,6 +68,7 @@ public struct DictationRecord: Codable, Sendable, Equatable {
                 wordCount: Int,
                 inputDevice: String?,
                 destinationBundleID: String? = nil,
+                correctedText: String? = nil,
                 timings: Timings) {
         self.id = id
         self.date = date
@@ -66,6 +77,7 @@ public struct DictationRecord: Codable, Sendable, Equatable {
         self.wordCount = wordCount
         self.inputDevice = inputDevice
         self.destinationBundleID = destinationBundleID
+        self.correctedText = correctedText
         self.timings = timings
     }
 
@@ -97,6 +109,7 @@ public struct DictationRecord: Codable, Sendable, Equatable {
             ?? insertedText.split(whereSeparator: \.isWhitespace).count
         inputDevice = try c.decodeIfPresent(String.self, forKey: .inputDevice)
         destinationBundleID = try c.decodeIfPresent(String.self, forKey: .destinationBundleID)
+        correctedText = try c.decodeIfPresent(String.self, forKey: .correctedText)
         timings = try c.decodeIfPresent(Timings.self, forKey: .timings)
             ?? Timings(timeToFirstWordMs: nil, finalToInsertedMs: nil,
                        endToEndMs: nil, audioDurationMs: nil,
@@ -256,6 +269,30 @@ public final class HistoryStore: @unchecked Sendable {
     /// old" becomes true while the app is sitting there. Roman asked for exactly
     /// that: a dictation made a month ago goes today, not the next time Quill
     /// happens to restart.
+    /// Record what the user meant, from the Dictation screen.
+    ///
+    /// **This is the learning path that works everywhere.** `EditWatcher` reads
+    /// the sentence back out of the app it landed in, which only some apps allow:
+    /// TextEdit, Mail and Notes answer, and terminals, Chrome and VS Code do not.
+    /// Roman's two most common destinations are Ghostty and Chrome, so for him
+    /// that watcher sees almost nothing. Correcting a dictation here costs one
+    /// click, works for every dictation whatever app it went to, and Quill owns
+    /// both sides of the pair so there is nothing to infer.
+    ///
+    /// Returns the pair to learn from, or nil when nothing changed.
+    @discardableResult
+    public func correct(id: UUID, to text: String) -> (was: String, now: String)? {
+        queue.sync {
+            guard !loadFailed, let index = records.firstIndex(where: { $0.id == id }) else { return nil }
+            let previous = records[index].correctedText ?? records[index].insertedText
+            let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleaned.isEmpty, cleaned != previous else { return nil }
+            records[index].correctedText = cleaned
+            persist()
+            return (previous, cleaned)
+        }
+    }
+
     public func prune() {
         queue.sync {
             let removed = expire()

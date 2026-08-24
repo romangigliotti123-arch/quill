@@ -109,6 +109,8 @@ public final class DictationRecordView: NSView {
     private let title: NSTextField
     private let copyButton: DashboardButton
     private let insertButton: DashboardButton
+    private let correctButton: DashboardButton
+    private var correctPopover: NSPopover?
 
     private let transcript: NSTextField
     private let legend: NSTextField?
@@ -136,6 +138,10 @@ public final class DictationRecordView: NSView {
             + "   \u{00B7}   \(DictationFormat.plural(record.wordCount, "word"))",
             font: DashboardType.headline, color: style.inkTertiary)
 
+        // "Correct" rather than "Edit". Editing is housekeeping and nobody does
+        // it; correcting is telling the app it got something wrong, which is the
+        // thing worth doing and the only moment the app can learn anything.
+        correctButton = DashboardButton(title: "Correct", symbol: "pencil", kind: .ghost, style: style)
         copyButton = DashboardButton(title: "Copy", symbol: "doc.on.doc", kind: .secondary, style: style)
         insertButton = DashboardButton(title: "Re-insert", symbol: "text.insert", kind: .primary, style: style)
 
@@ -158,6 +164,7 @@ public final class DictationRecordView: NSView {
         super.init(frame: .zero)
 
         addSubview(title)
+        addSubview(correctButton)
         addSubview(copyButton)
         addSubview(insertButton)
         addSubview(transcript)
@@ -175,10 +182,96 @@ public final class DictationRecordView: NSView {
 
         copyButton.onClick = { [weak self] in self?.copyToPasteboard() }
         insertButton.onClick = { [weak self] in self?.reinsert() }
+        correctButton.onClick = { [weak self] in self?.showCorrectionPopover() }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    // MARK: - Correcting
+
+    /// Tell Quill what you actually meant.
+    ///
+    /// This is the learning path that works everywhere. `EditWatcher` reads the
+    /// sentence back out of the app it landed in, and most apps decline —
+    /// terminals, Chrome and VS Code all refuse, and those are where the text
+    /// mostly goes. Here Quill owns both sides of the pair, so it works for every
+    /// dictation whatever its destination, and there is nothing to infer.
+    private func showCorrectionPopover() {
+        correctPopover?.close()
+
+        let width: CGFloat = 380
+        let inset: CGFloat = 14
+        let current = record.correctedText ?? record.insertedText
+
+        let field = NSTextView(frame: NSRect(x: 0, y: 0, width: width - inset * 2, height: 96))
+        field.string = current
+        field.font = DashboardType.body
+        field.textColor = style.ink
+        field.drawsBackground = false
+        field.isRichText = false
+        field.isAutomaticQuoteSubstitutionEnabled = false
+
+        let scroll = NSScrollView(frame: NSRect(x: inset, y: inset + 42, width: width - inset * 2, height: 96))
+        scroll.documentView = field
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .noBorder
+
+        let hint = DashboardType.label(
+            "What you meant. Quill learns from the difference.",
+            font: DashboardType.caption, color: style.inkTertiary)
+        hint.frame = NSRect(x: inset, y: inset + 146, width: width - inset * 2, height: 16)
+
+        let save = DashboardButton(title: "Save", kind: .primary, style: style)
+        save.frame = NSRect(x: width - inset - save.intrinsicWidth, y: inset,
+                            width: save.intrinsicWidth, height: 28)
+
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 200))
+        content.addSubview(hint)
+        content.addSubview(scroll)
+        content.addSubview(save)
+
+        let controller = NSViewController()
+        controller.view = content
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.contentSize = content.frame.size
+        popover.behavior = .transient
+        correctPopover = popover
+
+        save.onClick = { [weak self] in
+            guard let self else { return }
+            self.applyCorrection(field.string)
+            popover.close()
+        }
+        popover.show(relativeTo: correctButton.bounds, of: correctButton, preferredEdge: .maxY)
+        popover.contentViewController?.view.window?.makeFirstResponder(field)
+    }
+
+    private func applyCorrection(_ text: String) {
+        guard let pair = HistoryStore().correct(id: record.id, to: text) else { return }
+
+        // What it changes about the writing.
+        _ = StyleStore.shared.recordCorrection(dictated: pair.was, edited: pair.now)
+
+        // And what it changes about the hearing, which is the half that actually
+        // improves recognition: Dictionary terms are handed to the recogniser as
+        // contextual strings, so a word learned here comes out right next time
+        // rather than being repaired after the fact.
+        let outcome = CorrectionLearning.learn(
+            was: pair.was, now: pair.now,
+            existingTerms: Vocabulary.load().terms,
+            isKnownWord: { word in
+                NSSpellChecker.shared.checkSpelling(
+                    of: word, startingAt: 0, language: "en", wrap: false,
+                    inSpellDocumentWithTag: 0, wordCount: nil).location == NSNotFound
+            })
+        if !outcome.dictionaryCandidates.isEmpty {
+            NotificationCenter.default.post(name: .quillDictionaryCandidates, object: outcome.dictionaryCandidates)
+        }
+        NotificationCenter.default.post(name: .quillHistoryChanged, object: nil)
+    }
 
     // MARK: - Content
 
@@ -365,10 +458,13 @@ public final class DictationRecordView: NSView {
         let copyWidth = copyButton.intrinsicWidth
         copyButton.frame = NSRect(x: insertButton.frame.minX - DashboardSpace.xs - copyWidth,
                                   y: insertButton.frame.minY, width: copyWidth, height: 30)
+        let correctWidth = correctButton.intrinsicWidth
+        correctButton.frame = NSRect(x: copyButton.frame.minX - DashboardSpace.xs - correctWidth,
+                                     y: insertButton.frame.minY, width: correctWidth, height: 30)
 
         let titleSize = title.fittingSize
         title.frame = NSRect(x: pad, y: pad,
-                             width: min(titleSize.width, copyButton.frame.minX - pad - DashboardSpace.md),
+                             width: min(titleSize.width, correctButton.frame.minX - pad - DashboardSpace.md),
                              height: ceil(titleSize.height))
 
         var y = title.frame.maxY + DashboardSpace.md
