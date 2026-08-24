@@ -129,9 +129,16 @@ private func isolatedSettings(learnFromEdits: Bool = true) -> QuillSettings {
     private func watcher(_ field: ScriptedField,
                          store: StyleStore,
                          settings: QuillSettings = isolatedSettings()) -> EditWatcher {
-        EditWatcher(reader: field, store: store, settings: settings,
-                    now: { Date(timeIntervalSince1970: 1_700_000_000) },
-                    usesTimer: false)
+        {
+            let w = EditWatcher(reader: field, store: store, settings: settings,
+                                now: { Date(timeIntervalSince1970: 1_700_000_000) },
+                                usesTimer: false)
+            // Pinned, for the same reason LiveTyper's tests pin theirs: otherwise
+            // these pass or fail depending on which window is in front of whoever
+            // is running them.
+            w.frontmostPID = { 1 }
+            return w
+        }()
     }
 
     @Test func aCorrectionThatHoldsStillIsLearned() throws {
@@ -146,6 +153,7 @@ private func isolatedSettings(learnFromEdits: Bool = true) -> QuillSettings {
         #expect(store.profile.correctionCount == 0, "nothing has been learned yet")
 
         w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
         w.sample()
         w.sample()
 
@@ -167,6 +175,7 @@ private func isolatedSettings(learnFromEdits: Bool = true) -> QuillSettings {
         let store = StyleStore(inMemory: .freshDefault)
         let w = watcher(field, store: store)
         w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
         w.sample()
         w.sample()
 
@@ -183,6 +192,7 @@ private func isolatedSettings(learnFromEdits: Bool = true) -> QuillSettings {
         let store = StyleStore(inMemory: .freshDefault)
         let w = watcher(field, store: store)
         w.begin(inserted: sentence, pid: 1, bundleID: "com.mitchellh.ghostty")
+        w.flush()
 
         #expect(w.lastOutcome == .couldNotRead(bundleID: "com.mitchellh.ghostty"))
         #expect(store.profile.correctionCount == 0)
@@ -193,6 +203,7 @@ private func isolatedSettings(learnFromEdits: Bool = true) -> QuillSettings {
         let store = StyleStore(inMemory: .freshDefault)
         let w = watcher(field, store: store)
         w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
         w.sample()
 
         #expect(w.lastOutcome == .ignored(.deleted))
@@ -210,6 +221,7 @@ private func isolatedSettings(learnFromEdits: Bool = true) -> QuillSettings {
         let store = StyleStore(inMemory: .freshDefault)
         let w = watcher(field, store: store)
         w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
         w.sample(); w.sample(); w.sample()
 
         #expect(store.profile.correctionCount == 0)
@@ -220,7 +232,9 @@ private func isolatedSettings(learnFromEdits: Bool = true) -> QuillSettings {
         let store = StyleStore(inMemory: .freshDefault)
         let w = watcher(field, store: store, settings: isolatedSettings(learnFromEdits: false))
         w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
 
+        w.flush()
         #expect(field.reads == 0, "switched off, it must not even read the field")
         #expect(w.lastOutcome == nil)
     }
@@ -233,6 +247,7 @@ private func isolatedSettings(learnFromEdits: Bool = true) -> QuillSettings {
         let field = ScriptedField([sentence])
         let w = watcher(field, store: StyleStore(inMemory: profile))
         w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
         #expect(field.reads == 0)
     }
 
@@ -242,10 +257,82 @@ private func isolatedSettings(learnFromEdits: Bool = true) -> QuillSettings {
         let store = StyleStore(inMemory: .freshDefault)
         let w = watcher(field, store: store)
         w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
         w.sample(); w.sample()
 
         #expect(w.lastOutcome == nil)
         #expect(store.profile.correctionCount == 0)
+    }
+
+    /// Roman, the day this shipped: *"the dictations arent working they are
+    /// really buggy right now from the option key and the on screen button."*
+    ///
+    /// `begin` did its first Accessibility read inline. That put a synchronous
+    /// cross-process call — 250ms ceiling, against an app busy processing the
+    /// keystrokes Quill had just sent it — on the main thread at the end of every
+    /// dictation, and then 75 more of them over the following 90 seconds, running
+    /// straight through the next dictation while `LiveTyper` was making its own AX
+    /// calls at the same target on every partial.
+    ///
+    /// The hotkey's event tap has its own thread and survived it. Everything the
+    /// tap hands to main does not: press and release are delivered with
+    /// `DispatchQueue.main.async`, so a congested main thread is a dictation that
+    /// starts late, stops late, or mistimes a double-tap — from the key and from
+    /// the overlay button alike, which is exactly what was reported.
+    @Test func beginDoesNoAccessibilityWorkOnTheCallersThread() throws {
+        final class ThreadRecorder: FocusedTextReading, @unchecked Sendable {
+            let lock = NSLock()
+            var threads: [Thread] = []
+            func focusedText(pid: pid_t) -> String? {
+                lock.withLock { threads.append(Thread.current) }
+                return "i recieve the invoice on monday"
+            }
+        }
+        let recorder = ThreadRecorder()
+        let w = EditWatcher(reader: recorder, store: StyleStore(inMemory: .freshDefault),
+                            settings: isolatedSettings(), usesTimer: false)
+        let caller = Thread.current
+        w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
+
+        let threads = recorder.lock.withLock { recorder.threads }
+        #expect(threads.count == 1, "one read to open the watch, not a poll")
+        #expect(threads.allSatisfy { $0 !== caller },
+                "an Accessibility call ran on the thread that finished the dictation")
+    }
+
+    /// Seven looks, not seventy-five. The first version polled every 1.2 seconds
+    /// for 90 seconds against a field it had no reason to keep reading.
+    @Test func aWatchIsBoundedAndStopsLookingWhenItRunsOut() throws {
+        let field = ScriptedField(["Hi. \(sentence)"])
+        let store = StyleStore(inMemory: .freshDefault)
+        let w = watcher(field, store: store)
+        w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
+        let afterOpen = field.reads
+
+        // More steps than the schedule has, to prove it stops rather than runs on.
+        for _ in 0..<20 { w.sample() }
+
+        #expect(EditWatcher.schedule.count == 7)
+        #expect(field.reads - afterOpen <= EditWatcher.schedule.count,
+                "read the field more times than the schedule allows")
+        #expect(w.lastOutcome == .keptAsWritten, "it should conclude, not keep looking")
+    }
+
+    /// Reading the text out of an app the user has switched away from is wasted
+    /// work, and not a thing to do casually in an app whose pitch is that nothing
+    /// leaves the machine.
+    @Test func itDoesNotReadTheFieldWhileTheUserIsLookingAtSomethingElse() throws {
+        let field = ScriptedField(["Hi. \(sentence)"])
+        let w = watcher(field, store: StyleStore(inMemory: .freshDefault))
+        w.begin(inserted: sentence, pid: 1, bundleID: "com.apple.TextEdit")
+        w.flush()
+        let afterOpen = field.reads
+
+        w.frontmostPID = { 99 }          // they switched apps
+        w.sample(); w.sample()
+        #expect(field.reads == afterOpen, "kept reading a background app's text")
     }
 }
 

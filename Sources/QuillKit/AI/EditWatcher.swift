@@ -86,16 +86,21 @@ public struct AccessibilityFocusedTextReader: FocusedTextReading {
 /// requirement below for the rest.
 public final class EditWatcher: @unchecked Sendable {
 
-    /// How often to look, and for how long.
+    /// When to look, counted in seconds from the insertion.
     ///
-    /// Not a live observer, because Accessibility has no notification for "the
-    /// value of this field changed" that arrives reliably from every app, and
-    /// polling something this cheap once a second is not the cost worth
-    /// optimising. The window is a minute and a half: long enough to reread a
-    /// sentence and fix it, short enough that a watch is not still running when
-    /// the next dictation starts.
-    static let interval: TimeInterval = 1.2
-    static let window: TimeInterval = 90
+    /// **Backoff, not a fixed interval, and this is the second version.** The
+    /// first polled every 1.2 seconds for 90 seconds: 75 reads per dictation,
+    /// each one pulling the entire contents of a focused field across a process
+    /// boundary, running straight through whatever the user did next — including
+    /// the next dictation, where `LiveTyper` is making its own Accessibility
+    /// calls on every partial to check that focus has not moved. Two subsystems
+    /// hammering AX at the same target, one of them for a minute and a half after
+    /// it had any reason to.
+    ///
+    /// Seven reads catch the same edits. Nobody fixes a typo at second 61 and not
+    /// at second 48, and the early samples are where corrections actually happen —
+    /// people reread what just appeared.
+    static let schedule: [TimeInterval] = [2, 4, 7, 12, 20, 32, 48]
 
     /// An edit has to hold still before it counts.
     ///
@@ -118,7 +123,18 @@ public final class EditWatcher: @unchecked Sendable {
     private let lock = NSLock()
     private var watch: Watch?
     private var timer: DispatchSourceTimer?
-    private let queue = DispatchQueue(label: "com.romangigliotti.quill.editwatcher")
+    /// Every Accessibility call this type makes happens here, never on main.
+    ///
+    /// `begin` used to do its first read inline, which put a synchronous
+    /// cross-process AX call — with a 250ms ceiling, against an app that was at
+    /// that instant busy processing the keystrokes Quill had just sent it — on
+    /// the main thread at the end of every single dictation. The hotkey's own
+    /// event tap has its own thread and survived that, but everything it hands to
+    /// main does not: press and release are delivered with
+    /// `DispatchQueue.main.async`, so a congested main thread is a dictation that
+    /// starts late, stops late, or mistimes a double-tap.
+    private let queue = DispatchQueue(label: "com.romangigliotti.quill.editwatcher",
+                                      qos: .utility)
 
     /// Nothing here holds the field's text. Only the anchors, the sentence Quill
     /// wrote, and the candidate currently being confirmed.
@@ -129,6 +145,8 @@ public final class EditWatcher: @unchecked Sendable {
         let startedAt: Date
         var pending: String?
         var pendingCount = 0
+        /// How far through `schedule` this watch has got.
+        var step = 0
     }
 
     /// What the last watch concluded, for the Style screen to show and for tests
@@ -169,6 +187,15 @@ public final class EditWatcher: @unchecked Sendable {
     /// went somewhere this cannot see.
     public func begin(inserted: String, pid: pid_t, bundleID: String?) {
         guard settings.learnFromEdits, store.profile.isLearningEnabled else { return }
+        // Returns immediately. Everything below happens on `queue`, because the
+        // caller is the main thread finishing a dictation and it has a waveform
+        // to dismiss and a key press to be ready for.
+        queue.async { [weak self] in
+            self?.open(inserted: inserted, pid: pid, bundleID: bundleID)
+        }
+    }
+
+    private func open(inserted: String, pid: pid_t, bundleID: String?) {
         guard let field = reader.focusedText(pid: pid) else {
             finish(.couldNotRead(bundleID: bundleID))
             return
@@ -182,21 +209,27 @@ public final class EditWatcher: @unchecked Sendable {
         lock.withLock {
             watch = Watch(anchors: anchors, pid: pid, bundleID: bundleID, startedAt: now())
         }
-        startTimer()
+        scheduleNext()
     }
 
-    /// Stop watching without concluding anything — a new dictation has started,
-    /// so the previous sentence is no longer the one being edited.
+    /// Stop watching without concluding anything.
+    ///
+    /// Called when a new dictation begins: the previous sentence is no longer the
+    /// one being edited, and more to the point nothing else should be making
+    /// Accessibility calls at the same target while `LiveTyper` is typing into it.
     public func cancel() {
         lock.withLock { watch = nil }
         stopTimer()
     }
 
-    private func startTimer() {
+    private func scheduleNext() {
         stopTimer()
         guard usesTimer else { return }
+        let step = lock.withLock { watch?.step }
+        guard let step, step < Self.schedule.count else { return }
+        let delay = Self.schedule[step] - (step == 0 ? 0 : Self.schedule[step - 1])
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + Self.interval, repeating: Self.interval)
+        t.schedule(deadline: .now() + delay)
         t.setEventHandler { [weak self] in self?.sample() }
         timer = t
         t.resume()
@@ -207,20 +240,32 @@ public final class EditWatcher: @unchecked Sendable {
         timer = nil
     }
 
+    /// Waits for the work `begin` dispatched. Tests only: production never needs
+    /// to know when the first read finished, which is the whole point of it not
+    /// happening on the caller's thread.
+    func flush() { queue.sync {} }
+
     /// One look. Exposed so a test can step time rather than wait for it.
     func sample() {
         guard var current = lock.withLock({ watch }) else { stopTimer(); return }
+        lock.withLock { watch?.step += 1 }
+        defer { scheduleNext() }
 
-        if now().timeIntervalSince(current.startedAt) > Self.window {
-            // Expired with nothing conclusive. The commonest real outcome, and
-            // it is not a failure: most dictations are simply left alone.
+        if current.step >= Self.schedule.count {
+            // Out of looks with nothing conclusive. The commonest real outcome,
+            // and not a failure: most dictations are simply left alone.
             finish(current.pending == nil ? .keptAsWritten : .ignored(.anchorsLost))
             return
         }
 
+        // Only while they are looking at it. Someone who has switched away is not
+        // editing that sentence right now, and reading the text out of a
+        // background app is both wasted work and a thing not to do casually.
+        guard isFrontmost(current.pid) else { return }
+
         guard let field = reader.focusedText(pid: current.pid) else {
             // The window closed, focus moved, or the app never answered. Not
-            // conclusive either way, so keep waiting until the window expires.
+            // conclusive either way, so keep looking until the schedule runs out.
             return
         }
 
@@ -255,6 +300,15 @@ public final class EditWatcher: @unchecked Sendable {
             }
         }
     }
+
+    /// Behind a seam for the same reason `LiveTyper.frontmostPID` is: a test that
+    /// asks NSWorkspace answers differently depending on which window happens to
+    /// be in front of whoever is running it.
+    var frontmostPID: @Sendable () -> pid_t? = {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
+
+    private func isFrontmost(_ pid: pid_t) -> Bool { frontmostPID() == pid }
 
     private func finish(_ result: Outcome) {
         lock.withLock {

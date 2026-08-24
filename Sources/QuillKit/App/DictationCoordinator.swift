@@ -296,6 +296,13 @@ public final class DictationCoordinator {
         // itself makes, so the stamp never claims a microphone that recorded
         // nothing.
         capturedInputDevice = AudioDeviceInfo.activeInputName(uid: settings.inputDeviceUID)
+        // Whatever was being watched is no longer the sentence being edited, and
+
+        // LiveTyper is about to start its own Accessibility checks against the
+
+        // same app on every partial. One at a time.
+
+        editWatcher.cancel()
         // Per dictation, not per launch: last time's loud sentence must not vouch
         // for this time's dead microphone.
         peakLevel = 0
