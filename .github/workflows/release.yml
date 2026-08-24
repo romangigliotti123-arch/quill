@@ -113,6 +113,13 @@ jobs:
       #
       # No unit test could see it — they run on the machine that compiles the
       # other branch. Only running the artefact against audio can.
+      #
+      # And this runner cannot: it has no on-device speech model, and answers
+      # `harness failed: unavailable` in 0.15 seconds. So this step reports and
+      # does not block, and `Scripts/verify_release.sh` — run on a Mac that does
+      # have a model, against the published artefact — is the real gate. Leaving
+      # the step here anyway because the day a runner image ships a speech model,
+      # this starts working with no change.
       - name: Check the built app can actually transcribe
         run: Scripts/check_transcription.sh "$HOME/Library/Application Support/Quill/build/Quill.app"
 

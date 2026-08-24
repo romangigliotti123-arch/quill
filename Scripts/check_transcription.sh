@@ -49,6 +49,27 @@ echo "$OUT" | grep -E "results|peak input|errors|transcript" | sed 's/^/    /' |
 
 TRANSCRIPT="$(echo "$OUT" | sed -n 's/^transcript *: *//p')"
 
+# A machine with no speech model cannot answer the question, and pretending
+# otherwise in either direction is worse than saying so.
+#
+# GitHub's macOS runners are exactly that machine: `harness failed: unavailable`,
+# in 0.15 seconds. So this cannot be a release gate there, however much it ought
+# to be — the artefact has to be checked on a Mac that can actually do speech.
+# `Scripts/verify_release.sh` is that check, and it is the one that matters.
+#
+# QUILL_REQUIRE_TRANSCRIPTION=1 turns "cannot tell" into a failure, for callers
+# that know the machine can do it.
+if echo "$OUT" | grep -qi "unavailable\|modelNotInstalled\|not installed"; then
+    echo "    $(echo "$OUT" | head -3)"
+    if [ "${QUILL_REQUIRE_TRANSCRIPTION:-0}" = "1" ]; then
+        echo "!! No speech model on this machine, and the caller required one." >&2
+        exit 1
+    fi
+    echo "⚠️  SKIPPED — no speech model on this machine, so this proves nothing."
+    echo "   Run Scripts/verify_release.sh on a Mac that has one before publishing."
+    exit 0
+fi
+
 if ! echo "$OUT" | grep -q "transcript"; then
     echo "!! The harness produced no report at all. Everything the app printed:" >&2
     echo "$OUT" | sed 's/^/    /' >&2
