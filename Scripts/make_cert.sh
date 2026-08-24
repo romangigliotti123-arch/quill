@@ -27,7 +27,7 @@
 set -euo pipefail
 
 IDENTITY_SHA="E500962447AD091332F21CA6C28286B30E284C4F"
-VAULT="$HOME/Documents/Work/romans vault/romans vault/Security/Credentials"
+VAULT="$HOME/Documents/Work/romans vault/Security/Credentials"
 
 if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY_SHA"; then
     echo "✅ Quill's signing identity is already in this keychain."
