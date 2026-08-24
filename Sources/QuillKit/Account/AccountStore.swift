@@ -174,10 +174,36 @@ public final class AccountStore: @unchecked Sendable {
                                        attributes: [.posixPermissions: 0o600])
     }
 
+    /// Listeners are called on the main thread, always.
+    ///
+    /// They were called on whatever thread finished the network request, which
+    /// after `authenticate` is a background Swift-concurrency thread. Five of
+    /// the six observers are views that set `isHidden`, `isDimmed` or
+    /// `needsLayout` directly, and AppKit off the main thread raises. Signing in
+    /// from the Account tab crashed on `DevicesCard.isSignedIn.didSet` →
+    /// `NSView._setHidden:` → `-[NSException raise]`.
+    ///
+    /// Signing UP did not crash, which is the reason this survived: whether
+    /// AppKit actually raises depends on what the view hierarchy is doing at
+    /// that instant, so the same mistake looked like a working code path
+    /// roughly half the time.
+    ///
+    /// Fixed here rather than in each observer so a future one cannot
+    /// reintroduce it by not knowing.
     private func notify() {
         let account = current
         let handlers = lock.withLock { Array(listeners.values) }
-        handlers.forEach { $0(account) }
+        Self.onMain { handlers.forEach { $0(account) } }
+    }
+
+    /// Runs `work` on the main thread, immediately if already there.
+    ///
+    /// Not `DispatchQueue.main.async` unconditionally: `observe` calls the
+    /// handler once during view setup, which is already on main, and deferring
+    /// that would leave every card rendering its signed-out state for a frame
+    /// before correcting itself.
+    private static func onMain(_ work: @escaping @Sendable () -> Void) {
+        if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
 
     /// Called from the Account screen when it appears, and again whenever
@@ -187,7 +213,8 @@ public final class AccountStore: @unchecked Sendable {
         loadSessionIfNeeded()
         let id = UUID()
         lock.withLock { listeners[id] = handler }
-        handler(current)
+        let account = current
+        Self.onMain { handler(account) }
         return id
     }
 
