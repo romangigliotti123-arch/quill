@@ -39,9 +39,22 @@ OUT="$(QUILL_DATA_DIR="$SCRATCH" \
        QUILL_TRANSCRIBE_FILE="$CLIP" \
        QUILL_TRANSCRIBE_BATCH=1 \
        "$BIN" 2>&1)" || true
-echo "$OUT" | grep -E "results|peak input|errors|transcript" | sed 's/^/    /'
+
+# `|| true` on every grep, deliberately. The first version of this script used a
+# bare `grep` under `set -e`, so when the app printed nothing the script died on
+# the grep — before reaching the message explaining what had gone wrong. It
+# reported "exit code 1" and nothing else, which is precisely the failure mode
+# the whole script exists to prevent.
+echo "$OUT" | grep -E "results|peak input|errors|transcript" | sed 's/^/    /' || true
 
 TRANSCRIPT="$(echo "$OUT" | sed -n 's/^transcript *: *//p')"
+
+if ! echo "$OUT" | grep -q "transcript"; then
+    echo "!! The harness produced no report at all. Everything the app printed:" >&2
+    echo "$OUT" | sed 's/^/    /' >&2
+    echo "!! Cannot tell whether this build transcribes. Refusing to publish it." >&2
+    exit 1
+fi
 
 if [ -z "${TRANSCRIPT// /}" ]; then
     echo "!! The app transcribed nothing at all." >&2
@@ -53,7 +66,7 @@ fi
 # One known word, not the whole sentence: the check is "speech became words",
 # and pinning the exact string would fail on a recogniser improvement, which is
 # not a regression.
-if ! echo "$TRANSCRIPT" | grep -qi "country"; then
+if ! echo "$TRANSCRIPT" | grep -qi "country"; then  # informational grep, guarded below
     echo "!! Transcribed something, but not the words in the clip:" >&2
     echo "!!   $TRANSCRIPT" >&2
     echo "!! Expected it to contain \"country\"." >&2
