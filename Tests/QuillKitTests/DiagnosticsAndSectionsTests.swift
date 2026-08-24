@@ -118,6 +118,53 @@ import Testing
     #expect(!text(warned).contains("Everything Quill needs is in place"))
 }
 
+/// Roman, after granting the three permissions one at a time:
+/// *"the help tab looks really messed up whenever i grant something."*
+///
+/// It was. `rebuildGroups()` took the old groups off the screen and left them in
+/// the array it packs, so every rebuild appended three more blocks that no
+/// longer existed. The column packer still reserved their heights, so the real
+/// content slid down by a screenful and the two columns ended up starting at
+/// different heights — worse each time, since granting all three permissions
+/// rebuilds three times.
+///
+/// The first layout is always right, which is why every screenshot of this
+/// screen looked correct and no test caught it. This one rebuilds before it
+/// measures.
+@Test @MainActor func grantingAPermissionDoesNotPushTheHelpScreenDown() {
+    func checks(_ status: Diagnostics.Check.Status) -> [Diagnostics.Check] {
+        Permission.allCases.map {
+            Diagnostics.Check(title: $0.rawValue, status: status,
+                              detail: status == .pass ? "Granted." : "Denied.",
+                              remedy: status == .pass ? nil : "Grant it in System Settings.")
+        }
+    }
+    func groups(in view: NSView) -> [SettingsGroup] {
+        (view as? SettingsGroup).map { [$0] } ?? view.subviews.flatMap(groups(in:))
+    }
+
+    let view = HelpSectionView(style: .dark, checks: checks(.fail))
+    view.frame = NSRect(x: 0, y: 0, width: 1350, height: 850)
+    view.layoutSubtreeIfNeeded()
+    let firstLayout = groups(in: view).map(\.frame.minY).min()
+
+    // Three grants, three rebuilds — alternating so each one is a real change.
+    for status in [Diagnostics.Check.Status.pass, .fail, .pass] {
+        view.refresh(with: checks(status))
+        view.layoutSubtreeIfNeeded()
+    }
+
+    let laidOut = groups(in: view)
+    #expect(laidOut.count == 3, "\(laidOut.count) groups on screen; the screen has three")
+    #expect(laidOut.map(\.frame.minY).min() == firstLayout,
+            "the top of the content moved after a rebuild — dead blocks are still being packed")
+
+    // Both columns start level. Three blocks over two columns means two of them
+    // begin at the same y; a hidden block above one of them is what broke that.
+    let tops = Set(laidOut.map { ($0.frame.minY * 100).rounded() })
+    #expect(tops.count == 2, "the two columns no longer start at the same height")
+}
+
 // MARK: - The registry
 
 @Test @MainActor func everySectionInTheSidebarHasAScreenBehindIt() {

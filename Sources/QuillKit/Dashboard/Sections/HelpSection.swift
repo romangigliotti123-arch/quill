@@ -65,7 +65,20 @@ public final class HelpSectionView: NSView {
     }
 
     private func rebuildGroups() {
+        // `removeAll`, and it is the whole bug this method used to have.
+        //
+        // The views came off the screen and the array kept them. Every rebuild
+        // appended three more, so `layout()` packed six blocks, then nine, then
+        // twelve — and only the last three of them existed. The rest were
+        // invisible and still had their heights reserved by the column packer,
+        // so granting a permission pushed the real content down by a screenful
+        // and left the two columns starting at different heights.
+        //
+        // It needs a rebuild to show up at all: the first layout is always
+        // correct, which is why every screenshot of this screen looked right.
+        // Granting all three permissions in one sitting does it three times.
         groups.forEach { $0.removeFromSuperview() }
+        groups.removeAll()
         summary?.removeFromSuperview()
 
         let failing = checks.filter { $0.status == .fail }
@@ -188,13 +201,20 @@ public final class HelpSectionView: NSView {
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            MainActor.assumeIsolated {
-                let fresh = Diagnostics.run()
-                guard fresh != self.checks else { return }
-                self.checks = fresh
-                self.rebuildGroups()
-            }
+            MainActor.assumeIsolated { self.refresh(with: Diagnostics.run()) }
         }
+    }
+
+    /// Swap in a fresh reading and redraw.
+    ///
+    /// Internal rather than private so a test can drive a rebuild without
+    /// needing a permission to actually change on the machine running it —
+    /// which is not something a test can arrange, and is exactly why the
+    /// rebuild path shipped broken.
+    func refresh(with fresh: [Diagnostics.Check]) {
+        guard fresh != checks else { return }
+        checks = fresh
+        rebuildGroups()
     }
 
     // MARK: - Layout
