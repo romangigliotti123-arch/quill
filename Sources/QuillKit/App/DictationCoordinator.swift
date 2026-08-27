@@ -387,6 +387,7 @@ public final class DictationCoordinator {
             speculativelyBegin()
         }
         isDictating = true
+        AppDelegate.dictationInFlight = true
         inputLost = false
         isSpeculating = false
         // Here and nowhere else on the way in: this is the moment a gesture stops
@@ -513,6 +514,7 @@ public final class DictationCoordinator {
             // ever sends it.
             defer {
                 self.isFinalising = false
+                AppDelegate.dictationInFlight = false
                 self.fireDeferredReturnIfPending()
                 NotificationCenter.default.post(name: .quillDictationSettled, object: nil)
             }

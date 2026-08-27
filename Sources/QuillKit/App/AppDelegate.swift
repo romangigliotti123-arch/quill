@@ -274,10 +274,34 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             "dictations=\(Self.dictationsThisLaunch)",
         ].joined(separator: " ")
 
+        // An idle-app cleaner does not get to interrupt a sentence.
+        //
+        // The sender in Roman's log is Vorssaint, a menu-bar utility whose
+        // `autoQuitEnabled` setting quits apps it judges unused. Quill looks
+        // unused to that kind of tool almost all the time: it is `LSUIElement`,
+        // it holds no window, and between dictations it genuinely is idle. The
+        // fix for the general case is Vorssaint's exclusion list, not this — but
+        // whatever the requester, being asked to quit in the middle of a
+        // dictation must not cost the user the words they are currently saying.
+        //
+        // Only refused for an Apple Event, and only mid-dictation. A quit the
+        // user chose — the menu, ⌘Q, logging out — is honoured immediately, in
+        // every state. Refusing one of those would be a far worse bug than the
+        // one this is guarding.
+        if Self.dictationInFlight, NSAppleEventManager.shared().currentAppleEvent != nil {
+            NSLog("[quill] refused a quit from %@ — a dictation is in flight", Self.appleEventSender())
+            Self.recordExit(state: "REFUSED (dictating) " + state, stack: "")
+            return .terminateCancel
+        }
+
         NSLog("[quill] TERMINATING — %@ — %@", state, stack)
         Self.recordExit(state: state, stack: stack)
         return .terminateNow
     }
+
+    /// True from key-down until the words have landed. Read by
+    /// `applicationShouldTerminate` and nothing else.
+    nonisolated(unsafe) static var dictationInFlight = false
 
     /// Which process asked us to quit, by name.
     ///
