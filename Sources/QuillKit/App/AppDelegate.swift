@@ -229,6 +229,66 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// Who asked us to quit, and from where.
+    ///
+    /// Roman: "it just crashed and i think it always crashed whenever you open
+    /// the interface, x out of it and try and dictate."
+    ///
+    /// It is not crashing. `RBSProcessExitContext| voluntary` and
+    /// `termination reported by launchd (0, 0, 0)` — exit status zero, no
+    /// signal, no `.ips`. The app is quitting itself, which from the outside is
+    /// indistinguishable from a crash: the menu bar item disappears and the next
+    /// dictation does nothing.
+    ///
+    /// That distinction is the whole reason this exists. A crash leaves a report
+    /// naming the faulting frame; a voluntary exit leaves nothing at all, and
+    /// there is no way to tell an intentional Quit from a stray `terminate(nil)`
+    /// after the fact. So the app now says so itself, with the call stack, every
+    /// time — and the two legitimate callers (Uninstall, and the relaunch after
+    /// Erase) will be named in it just as plainly as an accidental one.
+    ///
+    /// Never blocks the quit. An instrument that changes the thing it measures
+    /// is not an instrument, and a user who chose Quit must get one.
+    public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let frames = Thread.callStackSymbols
+            .prefix(14)
+            .filter { $0.contains("Quill") }
+            .joined(separator: " | ")
+        let inside = frames.isEmpty
+            ? "(nothing inside Quill — asked from outside: Cmd-Q, `osascript quit`, or a logout/restart)"
+            : frames
+        NSLog("[quill] TERMINATING — dashboard open: %@, frames: %@",
+              dashboard == nil ? "no" : "yes", inside)
+        Self.recordExit(dashboardOpen: dashboard != nil, frames: inside)
+        return .terminateNow
+    }
+
+    /// A file, not just `NSLog`, because the log is not readable here.
+    ///
+    /// Nothing this app writes with `NSLog` comes back out of `log show` on this
+    /// Mac — checked repeatedly while chasing this, with the app running and the
+    /// predicate matching other processes fine. A diagnosis you cannot read is
+    /// not a diagnosis, so the reason goes somewhere it can always be read.
+    ///
+    /// Appends, bounded, next to the other stores. Every quit gets one line: when
+    /// it happened, whether the window was open, and who asked. A deliberate Quit
+    /// names the AppKit menu frames; an accidental `terminate(nil)` names the
+    /// code that called it; an outside kill names nothing, which is itself the
+    /// answer.
+    private static func recordExit(dashboardOpen: Bool, frames: String) {
+        let url = QuillData.directory.appendingPathComponent("exits.log")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let line = "\(stamp)\twindow=\(dashboardOpen ? "open" : "closed")\t\(frames)\n"
+
+        // Keep the tail rather than the head: the interesting quit is the most
+        // recent one, and a log that grows forever is its own bug.
+        var existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        existing += line
+        let lines = existing.split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.count > 50 { existing = lines.suffix(50).joined(separator: "\n") }
+        try? existing.write(to: url, atomically: true, encoding: .utf8)
+    }
+
     public func applicationWillTerminate(_ notification: Notification) {
         permissionPoll?.invalidate()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
