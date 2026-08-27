@@ -265,6 +265,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             .joined(separator: " | ")
 
         let state = [
+            "sender=\(Self.appleEventSender())",
             "dashboard=\(dashboard == nil ? "nil" : "alive")",
             "policy=\(NSApp.activationPolicy().rawValue)",
             "active=\(NSApp.isActive)",
@@ -276,6 +277,38 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[quill] TERMINATING — %@ — %@", state, stack)
         Self.recordExit(state: state, stack: stack)
         return .terminateNow
+    }
+
+    /// Which process asked us to quit, by name.
+    ///
+    /// The stack from the last reproduction ended in `_handleAEQuit` ←
+    /// `AEProcessAppleEvent`: somebody sent Quill a quit Apple Event, the same
+    /// thing `osascript -e 'tell application "Quill" to quit'` sends. Nothing in
+    /// Quill sends it — there is no `NSRunningApplication.terminate()` anywhere
+    /// in the app — and the system log brokers these without naming either end,
+    /// so the sender cannot be recovered from outside.
+    ///
+    /// It can be recovered from inside. The event is still current while this
+    /// handler runs, and it carries the sender's pid as an attribute. That turns
+    /// "something quit it" into a process name, which is the difference between
+    /// a fix and another round trip.
+    static func appleEventSender() -> String {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else {
+            return "none (not an Apple Event — menu, code, or the system)"
+        }
+        var description = "event=\(event.eventClass):\(event.eventID)"
+        // `keySenderPIDAttr` is 'spid'. Foundation does not expose a constant.
+        let senderPID = AEKeyword(0x73706964)
+        if let pidDescriptor = event.attributeDescriptor(forKeyword: senderPID) {
+            let pid = pid_t(pidDescriptor.int32Value)
+            let name = NSRunningApplication(processIdentifier: pid)?.localizedName
+                ?? NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+                ?? "pid \(pid)"
+            description += " from=\(name)(pid \(pid))"
+        } else {
+            description += " from=unknown"
+        }
+        return description
     }
 
     /// How many dictations have finished since launch.
