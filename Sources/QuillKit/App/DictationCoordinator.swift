@@ -809,6 +809,10 @@ public final class DictationCoordinator {
             }
             self.isLive = false
             self.timeline.textInserted = Date()
+            // Only so the exit log can say which dictation it died on. Roman's
+            // report is that the first one is fine and the second kills it; a
+            // number in the line either confirms that or kills the theory.
+            AppDelegate.dictationsThisLaunch += 1
 
             switch result {
             case .inserted:

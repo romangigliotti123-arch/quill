@@ -250,18 +250,40 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Never blocks the quit. An instrument that changes the thing it measures
     /// is not an instrument, and a user who chose Quit must get one.
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let frames = Thread.callStackSymbols
-            .prefix(14)
-            .filter { $0.contains("Quill") }
+        // The WHOLE stack, not just our frames.
+        //
+        // The first version of this filtered to symbols containing "Quill",
+        // which threw away the only frames that could still answer the question.
+        // Three reproductions in, we know the terminate is graceful, is not our
+        // Quit menu item, and carries no Quill frames at all — so the caller is
+        // AppKit or the system, and its name is in exactly the frames that were
+        // being discarded. An instrument that filters out the answer is worse
+        // than none, because it looks like it worked.
+        let stack = Thread.callStackSymbols
+            .prefix(24)
+            .map { $0.split(separator: " ").dropFirst(3).joined(separator: " ") }
             .joined(separator: " | ")
-        let inside = frames.isEmpty
-            ? "(nothing inside Quill — asked from outside: Cmd-Q, `osascript quit`, or a logout/restart)"
-            : frames
-        NSLog("[quill] TERMINATING — dashboard open: %@, frames: %@",
-              dashboard == nil ? "no" : "yes", inside)
-        Self.recordExit(dashboardOpen: dashboard != nil, frames: inside)
+
+        let state = [
+            "dashboard=\(dashboard == nil ? "nil" : "alive")",
+            "policy=\(NSApp.activationPolicy().rawValue)",
+            "active=\(NSApp.isActive)",
+            "windows=\(NSApp.windows.count)",
+            "visibleWindows=\(NSApp.windows.filter(\.isVisible).count)",
+            "dictations=\(Self.dictationsThisLaunch)",
+        ].joined(separator: " ")
+
+        NSLog("[quill] TERMINATING — %@ — %@", state, stack)
+        Self.recordExit(state: state, stack: stack)
         return .terminateNow
     }
+
+    /// How many dictations have finished since launch.
+    ///
+    /// Roman, on the sharpest reproduction yet: "i clicked option it was fine,
+    /// clicked again it crashed." If that is real, the count in the exit line is
+    /// the cheapest possible confirmation — it will read 1 every time.
+    nonisolated(unsafe) static var dictationsThisLaunch = 0
 
     /// A file, not just `NSLog`, because the log is not readable here.
     ///
@@ -275,10 +297,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// names the AppKit menu frames; an accidental `terminate(nil)` names the
     /// code that called it; an outside kill names nothing, which is itself the
     /// answer.
-    private static func recordExit(dashboardOpen: Bool, frames: String) {
+    private static func recordExit(state: String, stack: String) {
         let url = QuillData.directory.appendingPathComponent("exits.log")
         let stamp = ISO8601DateFormatter().string(from: Date())
-        let line = "\(stamp)\twindow=\(dashboardOpen ? "open" : "closed")\t\(frames)\n"
+        let line = "\(stamp)\t\(state)\n\t\(stack)\n"
 
         // Keep the tail rather than the head: the interesting quit is the most
         // recent one, and a log that grows forever is its own bug.
