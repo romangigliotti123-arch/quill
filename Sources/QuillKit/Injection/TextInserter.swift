@@ -67,6 +67,25 @@ public final class TextInserter: TextInserting {
     /// Both are silent at the API level: `CGEvent.post` returns nothing either
     /// way and the keystroke simply never arrives. They have to be checked
     /// beforehand, because there is nothing to detect afterwards.
+    /// Is the thing about to receive our keystrokes Quill's own dashboard?
+    ///
+    /// Deliberately narrower than "is Quill the active app", which is what this
+    /// asked first and which was wrong. Quill has a window that is SUPPOSED to
+    /// receive dictation: the quick-note bubble makes itself key and then calls
+    /// `hotkeyPressed()` on purpose, so a guard keyed on app activation would
+    /// silently break the one feature whose whole job is dictating into Quill.
+    ///
+    /// The dashboard is the window that must never receive it. Naming it exactly
+    /// keeps the note bubble working and still stops a sentence being pasted into
+    /// the Settings screen — which is what happens when the dashboard has been
+    /// open, because the flip back from `.regular` to `.accessory` is deferred a
+    /// runloop turn and closing a window does not hand focus to another app.
+    private static func frontmostWindowIsTheDashboard() -> Bool {
+        guard NSRunningApplication.current.isActive else { return false }
+        guard let key = NSApp.keyWindow ?? NSApp.mainWindow else { return false }
+        return key.windowController is DashboardWindowController
+    }
+
     private func blockingReason() -> String? {
         // Never type into ourselves.
         //
@@ -89,8 +108,8 @@ public final class TextInserter: TextInserting {
         // Parked rather than dropped, like every other blocked insertion: the
         // words go to the clipboard and history with a reason the user can read.
         // Losing words is the one thing this app may never do.
-        if NSRunningApplication.current.isActive {
-            return "Quill itself was frontmost, so there was nowhere to type. "
+        if Self.frontmostWindowIsTheDashboard() {
+            return "Quill's own window was frontmost, so there was nowhere to type. "
                 + "Click into the app you want the text in, then paste."
         }
         if Permissions.secureInputEnabled {

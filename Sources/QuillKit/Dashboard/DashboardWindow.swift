@@ -572,45 +572,6 @@ public final class DashboardWindowController: NSWindowController, NSWindowDelega
     }
 }
 
-// MARK: - Who pressed Quit
-
-/// The Quit menu item's target, so that a quit through the menu is
-/// distinguishable from every other way the app can be asked to go away.
-///
-/// `applicationShouldTerminate` already records each exit, but it cannot tell an
-/// intentional ⌘Q from a stray one: both arrive from AppKit with no Quill frames
-/// on the stack. This sits one step earlier, where the difference still exists.
-///
-/// It matters here because of how Quill inserts text. `TextInserter` puts the
-/// sentence on the pasteboard and posts ⌘V to whatever is frontmost — and after
-/// the dashboard has been open, "whatever is frontmost" can be Quill itself,
-/// with a main menu installed and ⌘Q live on it. Synthetic chords landing on our
-/// own menu is a real shape, so it needs ruling in or out by evidence rather
-/// than by argument.
-@objc final class QuitAudit: NSObject {
-    static let shared = QuitAudit()
-
-    @objc func quit(_ sender: Any?) {
-        let item = (sender as? NSMenuItem)?.title ?? "unknown"
-        let by = NSApp.currentEvent.map { "\($0.type.rawValue) modifiers=\($0.modifierFlags.rawValue)" } ?? "no current event"
-        NSLog("[quill] QUIT MENU ITEM fired — item: %@, event: %@", item, by)
-        QuitAudit.note("quit-menu-item\titem=\(item)\tevent=\(by)")
-        NSApp.terminate(nil)
-    }
-
-    /// Same file `applicationShouldTerminate` writes to, so the two lines land
-    /// next to each other and the order tells the story.
-    static func note(_ text: String) {
-        let url = QuillData.directory.appendingPathComponent("exits.log")
-        let line = "\(ISO8601DateFormatter().string(from: Date()))\t\(text)\n"
-        var existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        existing += line
-        let lines = existing.split(separator: "\n", omittingEmptySubsequences: false)
-        if lines.count > 50 { existing = lines.suffix(50).joined(separator: "\n") }
-        try? existing.write(to: url, atomically: true, encoding: .utf8)
-    }
-}
-
 // MARK: - Menu
 
 public enum DashboardMainMenu {
@@ -630,18 +591,7 @@ public enum DashboardMainMenu {
         hideOthers.keyEquivalentModifierMask = [.command, .option]
         appMenu.addItem(hideOthers)
         appMenu.addItem(.separator())
-        // Routed through our own object rather than straight to
-        // `NSApplication.terminate(_:)`, so that when the app disappears we can
-        // say whether THIS is what did it.
-        //
-        // The exits.log line for Roman's reproduction showed a graceful
-        // terminate with no Quill frames above the handler, which is what an
-        // AppKit menu action looks like from inside — and this is the only menu
-        // action in the app that quits. Naming it costs one indirection and
-        // turns "something outside asked" into a yes or a no.
-        let quit = NSMenuItem(title: "Quit Quill", action: #selector(QuitAudit.quit(_:)), keyEquivalent: "q")
-        quit.target = QuitAudit.shared
-        appMenu.addItem(quit)
+        appMenu.addItem(withTitle: "Quit Quill", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
 

@@ -271,7 +271,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             "active=\(NSApp.isActive)",
             "windows=\(NSApp.windows.count)",
             "visibleWindows=\(NSApp.windows.filter(\.isVisible).count)",
-            "dictations=\(Self.dictationsThisLaunch)",
         ].joined(separator: " ")
 
         // An idle-app cleaner does not get to interrupt a sentence.
@@ -301,7 +300,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// True from key-down until the words have landed. Read by
     /// `applicationShouldTerminate` and nothing else.
-    nonisolated(unsafe) static var dictationInFlight = false
+    ///
+    /// `@MainActor` rather than `nonisolated(unsafe)`, which is what this was
+    /// first written as and what a reviewer should reject. Both sides genuinely
+    /// are the main actor — `DictationCoordinator` is `@MainActor` and sets it,
+    /// AppKit calls the terminate handler on the main thread and reads it — so
+    /// the isolation is real and can be stated rather than waived.
+    @MainActor static var dictationInFlight = false
 
     /// Which process asked us to quit, by name.
     ///
@@ -335,12 +340,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return description
     }
 
-    /// How many dictations have finished since launch.
-    ///
-    /// Roman, on the sharpest reproduction yet: "i clicked option it was fine,
-    /// clicked again it crashed." If that is real, the count in the exit line is
-    /// the cheapest possible confirmation — it will read 1 every time.
-    nonisolated(unsafe) static var dictationsThisLaunch = 0
 
     /// A file, not just `NSLog`, because the log is not readable here.
     ///
