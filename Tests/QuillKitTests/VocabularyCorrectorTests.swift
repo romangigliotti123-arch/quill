@@ -189,6 +189,45 @@ private func corrector() -> VocabularyCorrector { VocabularyCorrector(vocabulary
     #expect(cleaner.cleanFast("push it to neglified tonight").contains("Netlify"))
 }
 
+/// Four consecutive dictations on 25 Aug 2026, all of them him trying to get one
+/// word out and reading it back wrong:
+///
+///     "My Linux machine is running on KashiOS."
+///     "I meant to say Kashi, OS."
+///     "Kashi OS."
+///     "Kashi O S."
+///
+/// Unreachable by the fuzzy corrector — "kashios" against "cachyos" is three
+/// substitutions in seven letters, about 0.57, nowhere near the bar — so it is
+/// a table entry for the same reason SQLite is.
+@Test func everyWayHeSaidCachyOSComesOutRight() {
+    let cleaner = FastCleaner()
+    for said in [
+        "My Linux machine is running on KashiOS.",
+        "I meant to say Kashi, OS.",
+        "Kashi OS.",
+        "Kashi O S.",
+        "I installed cashy OS on the desktop.",
+    ] {
+        #expect(cleaner.cleanFast(said).contains("CachyOS"), "not repaired: \(said)")
+    }
+}
+
+/// The entries carry no anchor because none of those spans means anything in
+/// ordinary English — but "Kashi" alone is a name and a cereal, so the words
+/// around it have to survive.
+@Test func theCachyOSEntriesDoNotFireOnOrdinaryEnglish() {
+    let cleaner = FastCleaner()
+    for sentence in [
+        "I had Kashi cereal for breakfast",
+        "her name is Kashi and she works upstairs",
+        "the cash you sent arrived this morning",
+    ] {
+        #expect(!cleaner.cleanFast(sentence).contains("CachyOS"),
+                "rewrote an ordinary sentence: \(cleaner.cleanFast(sentence))")
+    }
+}
+
 @Test func theOrdinaryMeaningsOfThoseWordsSurvive() {
     // The whole reason the two real-English ones are anchored on the word that
     // followed them in his actual dictation. An unanchored "course" -> "CORS"

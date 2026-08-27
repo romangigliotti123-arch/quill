@@ -129,4 +129,54 @@ struct SyncEngineTests {
         let merged = local.merged(with: remote)
         #expect(merged.correctionCount == 12)
     }
+
+    // MARK: - Syncing an idle profile must not double it
+
+    /// From Roman's live `style.json`, 27 Aug 2026. Every counter in it was
+    /// exactly 2^62 — `correctionCount`, the phrasing count, and
+    /// `sentenceLength.count` — with `total` at 3.23e19 so the average still came
+    /// out at exactly 7.0 words per sentence. Both numbers scaled by one factor
+    /// is doubling, not corruption, and the Style screen was rendering the
+    /// sentence "from 4611686018427387904 corrections".
+    ///
+    /// `syncField` reads local, merges it with the cloud copy, and writes the
+    /// result to BOTH — so an idle sync merges a profile with itself.
+    @Test func syncingAnUnchangedProfileLeavesItExactlyAsItWas() {
+        var profile = StyleProfile.freshDefault
+        profile.correctionCount = 9
+        profile.sentenceLength.add(7)
+        profile.phrasings = [StylePhrasing(from: "kashios", to: "CachyOS", count: 3, lastObserved: Date())]
+
+        // What an idle sync does, sixty-two times over.
+        var synced = profile
+        for _ in 0 ..< 62 { synced = synced.merged(with: synced) }
+
+        #expect(synced.correctionCount == 9, "doubled to \(synced.correctionCount)")
+        #expect(synced.phrasings.first?.count == 3)
+        #expect(synced.sentenceLength.count == profile.sentenceLength.count)
+        #expect(synced == profile, "an idle sync changed the profile")
+    }
+
+    /// A profile that is ALREADY corrupt must not be able to end the process just
+    /// by being read and merged. Swift's `+` traps on overflow, and 2^62 + 2^62
+    /// is 2^63, which does not fit in Int — so before this, the very next sync
+    /// after the one that produced his file would have crashed rather than
+    /// printed a silly number.
+    @Test func aProfileWithCorruptCountersCannotCrashTheMerge() {
+        var a = StyleProfile.freshDefault
+        a.correctionCount = 4_611_686_018_427_387_904   // 2^62, from the real file
+        var b = StyleProfile.freshDefault
+        b.correctionCount = 4_611_686_018_427_387_904
+        b.preset = .casual                               // so the two differ and the guard does not short-circuit
+
+        let merged = a.merged(with: b)
+        #expect(merged.correctionCount == Int.max, "expected saturation, got \(merged.correctionCount)")
+    }
+
+    @Test func saturatingAddClampsInsteadOfTrapping() {
+        #expect(Int.max.saturatingAdd(1) == Int.max)
+        #expect(Int.min.saturatingAdd(-1) == Int.min)
+        #expect(7.saturatingAdd(5) == 12)
+        #expect(0.saturatingAdd(0) == 0)
+    }
 }

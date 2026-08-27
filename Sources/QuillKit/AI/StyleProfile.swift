@@ -164,6 +164,43 @@ public struct StyleProfile: Codable, Sendable, Equatable {
     /// has been actively dictating on lately is the one whose settings they
     /// meant last.
     func merged(with other: Self) -> Self {
+        // Merging a profile with a copy of itself is a no-op, not a doubling.
+        //
+        // This is the whole bug, and it was found in Roman's live style.json on
+        // 27 Aug 2026:
+        //
+        //     correctionCount   4611686018427387904   (exactly 2^62)
+        //     sentenceLength    total 3.23e19, count 4611686018427387904
+        //     phrasing count    4611686018427387904
+        //
+        // A clean power of two is the signature of doubling, and the ratio gives
+        // it away: total/count is still exactly 7.0 words per sentence, so both
+        // numbers were scaled by the same factor rather than corrupted
+        // independently. The Style screen was rendering the sentence "from
+        // 4611686018427387904 corrections".
+        //
+        // `SyncEngine.syncField` reads the local file, merges it with whatever
+        // the cloud holds, and writes the result to BOTH. So on an idle sync the
+        // two sides are identical, every counter below adds a number to itself,
+        // and the whole profile doubles once per sync. Sixty-two doublings is
+        // about half an hour of being signed in.
+        //
+        // It was one merge away from being a crash rather than a wrong number: at
+        // 2^62 the next `correctionCount + other.correctionCount` is 2^63, which
+        // does not fit in Int, and Swift's `+` traps on overflow rather than
+        // wrapping.
+        //
+        // This guard is exact and it is enough for the runaway, because the
+        // runaway needs repeated merges with no new data on either side — which
+        // is precisely equality. It is NOT a complete fix for the additive
+        // design: when one side genuinely has a new observation the shared
+        // history behind it is still counted twice, once, before the two sides
+        // converge and this guard takes over. Bounded and roughly right beats
+        // unbounded and exponential, but the real answer is per-device counters
+        // keyed on `device.json`'s id, merged by taking the max per device, which
+        // is a schema change and is written up rather than half-done here.
+        guard self != other else { return self }
+
         var result = self
         let otherIsNewer = (other.lastLearned ?? .distantPast) > (lastLearned ?? .distantPast)
         if otherIsNewer {
@@ -184,7 +221,7 @@ public struct StyleProfile: Codable, Sendable, Equatable {
         for theirs in other.phrasings {
             if let ours = byID[theirs.id] {
                 var merged = ours
-                merged.count += theirs.count
+                merged.count = ours.count.saturatingAdd(theirs.count)
                 merged.lastObserved = [ours.lastObserved, theirs.lastObserved].compactMap { $0 }.max()
                 byID[theirs.id] = merged
             } else {
@@ -202,9 +239,15 @@ public struct StyleProfile: Codable, Sendable, Equatable {
             .prefix(Self.maximumPhrasings)
             .map { $0 }
 
-        result.correctionCount = correctionCount + other.correctionCount
-        result.modelAccepted = modelAccepted + other.modelAccepted
-        result.modelReverted = modelReverted + other.modelReverted
+        // Saturating, not trapping. These are display counters — the difference
+        // between a big number and a slightly bigger one is nothing, and the
+        // difference between either and a dead process is everything. A profile
+        // that has already been corrupted by an older build (2^62 was sitting in
+        // his real file) must not be able to take the app down on the next sync
+        // just because it is being read.
+        result.correctionCount = correctionCount.saturatingAdd(other.correctionCount)
+        result.modelAccepted = modelAccepted.saturatingAdd(other.modelAccepted)
+        result.modelReverted = modelReverted.saturatingAdd(other.modelReverted)
         return result
     }
 
@@ -776,10 +819,32 @@ public struct RunningMean: Codable, Sendable, Equatable {
     /// match, which is the average silently going wrong rather than merely
     /// being generous with history.
     func merged(with other: Self) -> Self {
+        // Same guard as `StyleProfile.merged`, for the same reason and from the
+        // same evidence: his real file held count 2^62 and total 3.23e19, both
+        // scaled by the identical factor, which is what merging with yourself
+        // repeatedly does. `count` is an Int and would have trapped.
+        guard self != other else { return self }
         var result = self
         result.total = total + other.total
-        result.count = count + other.count
+        result.count = count.saturatingAdd(other.count)
         return result
+    }
+}
+
+// MARK: - Counters that cannot end the process
+
+extension Int {
+    /// Addition that clamps instead of trapping.
+    ///
+    /// Swift's `+` traps on overflow, which is right for arithmetic that must be
+    /// correct and wrong for a display counter read off disk. A style.json
+    /// already carrying a corrupt count — 2^62 was found in a real one — must not
+    /// be able to kill the app simply by being merged, and "a wrong big number on
+    /// the Style screen" is a far better failure than a crash on sync.
+    func saturatingAdd(_ other: Int) -> Int {
+        let (sum, overflowed) = addingReportingOverflow(other)
+        guard overflowed else { return sum }
+        return other < 0 ? .min : .max
     }
 }
 

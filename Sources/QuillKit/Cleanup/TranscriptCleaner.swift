@@ -103,6 +103,34 @@ public struct FastCleaner: TranscriptCleaning, Sendable {
         "swift ui": "SwiftUI",
         "mac os": "macOS",
         "i os": "iOS",
+        // CachyOS, the Arch derivative on his Linux box. Four consecutive
+        // dictations on 25 Aug 2026 — he said it, read it back wrong, and said it
+        // again, four times, which is the clearest "this word is costing me"
+        // signal in the whole history file:
+        //
+        //   "My Linux machine is running on KashiOS."
+        //   "I meant to say Kashi, OS."
+        //   "Kashi OS."
+        //   "Kashi O S."
+        //
+        // Unreachable by the fuzzy corrector for the usual reason: "kashios"
+        // against "cachyos" is three substitutions in seven letters, ~0.57, far
+        // under the 0.875 bar — and the bar is where it is because lowering it is
+        // what turned "build a bed" into "Builda Bed".
+        //
+        // No anchor needed on any of them. "Kashi" alone is a name and a cereal,
+        // but none of these four spans means anything in ordinary English, so
+        // there is no sentence for them to damage.
+        "kashios": "CachyOS",
+        "kashi os": "CachyOS",
+        "kashi o s": "CachyOS",
+        "cashy os": "CachyOS",
+        // With the comma, because the recogniser put one there when he slowed
+        // down to spell it out — "I meant to say Kashi, OS." Keys are matched
+        // against the text as written, so the comma form is a different key; the
+        // "note. js version" entry above is here for the same reason.
+        "kashi, os": "CachyOS",
+        "kashi, o s": "CachyOS",
 
         // Observed manglings of his own speech that the fuzzy corrector CANNOT
         // reach, and why each is unreachable rather than merely missed:
