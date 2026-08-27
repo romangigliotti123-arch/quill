@@ -195,7 +195,12 @@ private final class UnsafeSendableBox: @unchecked Sendable {
     // `QuillData.files` is a fixed list built for `summary()` to name a byte
     // count against; these two are diagnostic output *about* an erase and have
     // no such count to show.
-    let incidental: Set<String> = ["erase-dry-run.txt", "erased.txt"]
+    // `exits.log` joins them for the same reason: it records why the app quit,
+    // which is diagnostic output about the app rather than anything the user
+    // wrote. `incidentalFiles` already removes it — every name ending `.log` —
+    // so an erase still takes it; it simply has no byte count worth naming in
+    // `summary()`.
+    let incidental: Set<String> = ["erase-dry-run.txt", "erased.txt", "exits.log"]
     // style.json is the one deliberate exception, not an oversight: it is
     // written (StyleStore.defaultURL) and intentionally NOT on the erase
     // list, so that "Erase everything" and "Uninstall" cannot take the

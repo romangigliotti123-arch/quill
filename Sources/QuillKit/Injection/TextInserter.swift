@@ -68,6 +68,31 @@ public final class TextInserter: TextInserting {
     /// way and the keystroke simply never arrives. They have to be checked
     /// beforehand, because there is nothing to detect afterwards.
     private func blockingReason() -> String? {
+        // Never type into ourselves.
+        //
+        // Insertion posts real keyboard events at whatever is frontmost, and
+        // after the dashboard has been open that can be Quill: the window closes
+        // but the flip back from `.regular` to `.accessory` is deferred a
+        // runloop turn, and closing a window does not immediately hand focus to
+        // another app. A dictation that lands then is pasted into Quill's own
+        // window, which is never what anyone meant — the user dictated FOR
+        // something else.
+        //
+        // Worse than useless, it is dangerous, because while the dashboard's main
+        // menu is installed Quill has live key equivalents — ⌘Q among them — and
+        // synthetic chords aimed at "the frontmost app" are aimed at that menu.
+        // Roman's report is an app that vanishes when you open the interface,
+        // close it, and dictate; `exits.log` recorded a graceful terminate with
+        // nothing of ours on the stack, which is exactly what a menu action looks
+        // like from inside `applicationShouldTerminate`.
+        //
+        // Parked rather than dropped, like every other blocked insertion: the
+        // words go to the clipboard and history with a reason the user can read.
+        // Losing words is the one thing this app may never do.
+        if NSRunningApplication.current.isActive {
+            return "Quill itself was frontmost, so there was nowhere to type. "
+                + "Click into the app you want the text in, then paste."
+        }
         if Permissions.secureInputEnabled {
             return "Secure Input is on, so macOS is refusing synthetic keystrokes. "
                 + "It is usually a password field, or a terminal with Secure Keyboard Entry turned on."
