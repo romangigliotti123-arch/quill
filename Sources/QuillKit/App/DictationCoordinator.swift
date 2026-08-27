@@ -666,6 +666,32 @@ public final class DictationCoordinator {
                 usedThorough = true
             }
 
+            // Read the whole thing back before anyone else sees it.
+            //
+            // Every pass above reasons about a span and is trusted with the
+            // result. On 24 Aug that trust cost eleven words of a real dictation:
+            // the offline restart rule matched two words across a full stop and
+            // deleted the sentence between them, and nothing anywhere noticed.
+            //
+            // This is the only place that can notice, because it is the only
+            // place holding both the plain answer and the clever one. When the
+            // clever one has lost content it cannot account for, the plain one
+            // ships instead. Deliberately here rather than after snippets and the
+            // context formatter: those two legitimately add words and strip a
+            // trailing full stop, and comparing against them would mean either
+            // teaching this check about both or letting it accuse them.
+            let verdict = UtteranceReview.review(final, against: fast,
+                                                 protecting: VocabularyBook.shared.terms)
+            if verdict.revertedUnjustifiedDeletion {
+                // Loud on purpose. A backstop that fires silently is a backstop
+                // nobody ever finds out was needed — and if this line starts
+                // appearing, some pass upstream has a bug worth chasing.
+                NSLog("[quill] utterance review overruled cleanup: %@",
+                      verdict.note ?? "unjustified deletion")
+                usedThorough = false
+            }
+            final = verdict.text
+
             // Snippet expansion goes here and nowhere else: after cleanup, so the
             // cleaner never sentence-cases an email address or "repairs" a URL,
             // and before insertion, so nothing is typed and then rewritten inside

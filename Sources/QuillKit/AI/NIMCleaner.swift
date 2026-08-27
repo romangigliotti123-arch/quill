@@ -528,7 +528,35 @@ public enum CleanupProjection {
     static func retractionIsFullyApplied(
         run: Range<Int>, cue: SelfCorrection.Cue, inTokens: [SpeechToken]
     ) -> Bool {
-        if run.lowerBound < cue.range.lowerBound { return true }
+        if run.lowerBound < cue.range.lowerBound {
+            // A retraction may eat unlimited material before the cue — but only
+            // back to the start of the sentence the cue is in.
+            //
+            // This branch used to `return true` outright, and that made the
+            // presence of a cue anywhere inside a deleted run a licence to delete
+            // the run, however long and whatever it crossed. Roman's history,
+            // 24 Aug 2026, is what that licence looks like in a document:
+            //
+            //   said: "...They don't look realistic. I want the photos of the
+            //          clothes to actually look realistic. Not just like
+            //          cartoons..."
+            //
+            // "actually" is a cue, it sits inside the deleted span, and the span
+            // reached back over a full stop into the previous sentence. Eleven
+            // words the speaker meant, gone, and this check called it justified.
+            //
+            // Same rule as `SelfCorrection.resolveParallelRestarts`, and the same
+            // `dropLast()` for the same reason: a terminator immediately before
+            // the cue is the legitimate "I went to the shop. Actually I went to
+            // the park" shape, where the speaker finished a sentence and took it
+            // back with their next word. A terminator buried further back means
+            // the cue belongs to a later sentence and the deletion is reaching
+            // through a settled one.
+            let reachesThroughASettledSentence = inTokens[run.lowerBound ..< cue.range.lowerBound]
+                .dropLast()
+                .contains(where: \.endsSentence)
+            return !reachesThroughASettledSentence
+        }
         return run.upperBound == inTokens.count
             && SelfCorrection.isAbandonment(cue.range, in: inTokens)
     }

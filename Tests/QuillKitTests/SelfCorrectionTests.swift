@@ -248,3 +248,46 @@ import Testing
     #expect(!out.lowercased().contains("shop"), "the retracted opening survived: \(out)")
     #expect(out.lowercased().contains("market"))
 }
+
+// MARK: - A restart may not reach back through a finished sentence
+
+/// Regression, from Roman's own history on 24 Aug 2026. Eleven words of real
+/// content deleted offline, by a rule, with no model anywhere near it — the exact
+/// failure the whole file is written to avoid.
+///
+/// "actually" is a retraction cue; the two words after it are "look realistic";
+/// and those two words also close the PREVIOUS sentence. So the restart matched
+/// across the full stop and deleted everything between the two occurrences,
+/// taking the sentence he actually meant with it.
+@Test func aRestartDoesNotReachBackThroughAFinishedSentence() {
+    let input = "They don't look realistic. I want the photos of the clothes to "
+        + "actually look realistic. Not just like cartoons."
+    let out = SelfCorrection.resolve(input) ?? input
+
+    #expect(out.lowercased().contains("photos of the clothes"),
+            "a whole sentence the speaker meant was deleted: \(out)")
+    #expect(out.lowercased().contains("not just like cartoons"))
+    // Nothing to correct here, so the resolver should decline outright.
+    #expect(SelfCorrection.resolve(input) == nil,
+            "the resolver changed a sentence that carried no retraction")
+}
+
+/// The other half of the same rule, and the reason the check ignores a
+/// terminator sitting immediately before the cue: finishing a sentence and then
+/// taking it back with your next word IS a retraction, and must still work.
+@Test func aRetractionThatStartsRightAfterAFullStopStillResolves() {
+    let input = "I went to the shop. Actually I went to the park."
+    let out = SelfCorrection.resolve(input) ?? input
+    #expect(!out.lowercased().contains("shop"), "the retracted sentence survived: \(out)")
+    #expect(out.lowercased().contains("park"))
+}
+
+/// Same-sentence restarts are untouched by the sentence-boundary guard — there is
+/// no terminator inside the span for it to trip on.
+@Test func theSentenceBoundaryGuardLeavesSameSentenceRestartsAlone() {
+    let input = "Send it to Noah and then send it to Sam no wait send it to Carlo."
+    let out = SelfCorrection.resolve(input) ?? input
+    #expect(out.lowercased().contains("noah"))
+    #expect(out.lowercased().contains("carlo"))
+    #expect(!out.lowercased().contains("sam"), "the retracted clause survived: \(out)")
+}

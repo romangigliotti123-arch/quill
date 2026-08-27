@@ -210,6 +210,10 @@ if let i = args.firstIndex(of: "--replay"), i + 1 < args.count {
     CorpusReplay.run(path: args[i + 1])
     exit(0)
 }
+if let i = args.firstIndex(of: "--stages"), i + 1 < args.count {
+    ThoroughProbe.run(path: args[i + 1])
+    exit(0)
+}
 guard args.count > 1 else {
     print("usage: livetypeprobe <audio.wav> | --bench")
     exit(2)

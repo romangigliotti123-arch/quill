@@ -289,6 +289,48 @@ public enum SelfCorrection {
                 // word's FINAL appearance before the cue is the start of the
                 // utterance, so the restart really does restart everything.
                 guard length >= 2 || start == 0 else { continue }
+                // A restart may not reach back through a finished sentence.
+                //
+                // From Roman's own history, 24 Aug — eleven words of real content
+                // deleted with no model involved, by this rule, offline:
+                //
+                //   said:     "...They don't look realistic. I want the photos of
+                //              the clothes to actually look realistic. Not just
+                //              like cartoons..."
+                //   inserted: "...They don't look realistic. Not just like
+                //              cartoons..."
+                //
+                // "actually" is a cue, the two words after it are "look
+                // realistic", and those two words also appear in the PREVIOUS
+                // sentence — so the restart matched across the full stop and ate
+                // everything between the two occurrences, including the entire
+                // sentence he actually meant.
+                //
+                // The evidence this rule runs on is a repeated run of words, and
+                // that evidence is worth much less once a sentence has been
+                // finished: people restate a phrase in a following sentence all
+                // the time ("They don't look realistic. I want them to look
+                // realistic."), and that is a rephrasing, not a retraction. A
+                // speaker who put a full stop down and started again has settled
+                // the sentence behind it.
+                //
+                // Same-sentence restarts — the case this rule exists for — are
+                // untouched: "send it to Noah and then send it to Sam no wait
+                // send it to Carlo" carries no terminator inside the span.
+                //
+                // `dropLast()` is what keeps the legitimate cross-sentence
+                // retraction working, and it is the whole difference between the
+                // two shapes. "I went to the shop. Actually I went to the park"
+                // is a real retraction: the terminator sits on the token
+                // IMMEDIATELY before the cue, so the speaker finished a sentence
+                // and then took it back as their next word. Record 25 is the
+                // other shape — the terminator is buried mid-span, with a further
+                // clause after it, which means the cue belongs to a later
+                // sentence and the match behind it is coincidence.
+                let crossesSentence = tokens[start ..< cue.range.lowerBound]
+                    .dropLast()
+                    .contains(where: \.endsSentence)
+                guard !crossesSentence else { continue }
                 tokens.removeSubrange(start ..< cue.range.upperBound)
                 return true
             }
