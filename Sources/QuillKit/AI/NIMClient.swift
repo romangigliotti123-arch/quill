@@ -52,10 +52,10 @@ public enum NIMKey {
         }
         try? fm.createDirectory(at: fileURL.deletingLastPathComponent(),
                                 withIntermediateDirectories: true)
-        try? fm.removeItem(at: fileURL)
-        return fm.createFile(atPath: fileURL.path,
-                             contents: Data(trimmed.utf8),
-                             attributes: [.posixPermissions: 0o600])
+        // Same atomic write as the session file, and for the same reason: this
+        // used to delete the key and then create it, so a failed create left no
+        // key at all. See `StoreFile.writeSecurely`.
+        return StoreFile.writeSecurely(Data(trimmed.utf8), to: fileURL)
     }
 
     /// Something a human can quote in a bug report that is not the key. Eight hex

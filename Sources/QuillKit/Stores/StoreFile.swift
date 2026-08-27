@@ -41,6 +41,52 @@ enum StoreFile {
         return .unreadable
     }
 
+    /// Writing a file whose permissions must be right from the first byte,
+    /// without ever being between two files.
+    ///
+    /// Every other store here writes with `Data.write(options: .atomic)`, which
+    /// is safe. The two that do not are the two that hold secrets —
+    /// `account.json` and `nim-key.txt` — because a token must never be even
+    /// briefly world-readable, and `.atomic` gives no control over the mode of
+    /// the temporary file it creates. Both reached for the same thing instead:
+    ///
+    ///     try? fm.removeItem(at: url)                          // delete the good one
+    ///     fm.createFile(atPath: url.path, contents: data, ...) // then write
+    ///
+    /// That is not a write, it is a window. Anything that makes the create fail
+    /// leaves no file at all. `AccountStore` then discarded the return value on
+    /// top, so a failed write logged the user out — silently, at the NEXT launch,
+    /// hours after the write that lost it, with nothing connecting the two. It
+    /// runs on every token refresh, roughly hourly for as long as someone stays
+    /// signed in.
+    ///
+    /// So: create the new file beside the old one with the mode already set,
+    /// then `rename(2)` over the top. rename is atomic within a filesystem — the
+    /// path resolves to the old file or the new one and never to nothing — and
+    /// it carries the temporary file's permissions with it, which is what makes
+    /// this safe in both senses at once.
+    ///
+    /// Every failure leaves whatever is already there untouched, and says so.
+    @discardableResult
+    static func writeSecurely(_ data: Data, to url: URL, permissions: Int = 0o600) -> Bool {
+        let directory = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let temporary = directory.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: temporary.path, contents: data,
+                                             attributes: [.posixPermissions: permissions]) else {
+            NSLog("[quill] could not write a new %@ — keeping the existing one", url.lastPathComponent)
+            return false
+        }
+        guard rename(temporary.path, url.path) == 0 else {
+            NSLog("[quill] could not replace %@ (errno %d) — keeping the existing one",
+                  url.lastPathComponent, errno)
+            try? FileManager.default.removeItem(at: temporary)
+            return false
+        }
+        return true
+    }
+
     /// Keeps a copy of what could not be read, and says so.
     ///
     /// The user's data outranks the app's convenience every time, and a file the

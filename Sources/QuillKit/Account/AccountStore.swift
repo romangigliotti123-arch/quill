@@ -246,11 +246,15 @@ public final class AccountStore: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(newSession) else { return }
-        try? FileManager.default.createDirectory(at: Self.fileURL.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        try? FileManager.default.removeItem(at: Self.fileURL)
-        FileManager.default.createFile(atPath: Self.fileURL.path, contents: data,
-                                       attributes: [.posixPermissions: 0o600])
+        // Atomic, 0600, and it tells us when it could not. The old code here
+        // deleted the existing file and then called `createFile` with its Bool
+        // discarded — so a failed write left no session at all and said nothing,
+        // and the user found out at the next launch. It ran on every token
+        // refresh, which is roughly hourly for as long as someone stays signed
+        // in. See `StoreFile.writeSecurely`.
+        if !StoreFile.writeSecurely(data, to: Self.fileURL) {
+            NSLog("[quill] the sign-in could not be saved — still signed in for this session")
+        }
     }
 
     /// Listeners are called on the main thread, always.

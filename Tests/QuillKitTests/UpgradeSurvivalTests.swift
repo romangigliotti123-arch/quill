@@ -467,6 +467,60 @@ import Testing
         #expect(!salvaged.isEmpty, "no salvage copy was kept")
     }
 
+    // MARK: - Saving a session must never be able to lose it
+
+    /// The bug that actually logged him out.
+    ///
+    /// `persist` deleted `account.json` and then called `createFile`, discarding
+    /// its Bool. A failed create left no file at all, silently, and the symptom
+    /// arrived at the NEXT launch as a login screen. It ran on every token
+    /// refresh — roughly hourly for as long as someone stays signed in.
+    @Test func aFailedWriteLeavesTheExistingSessionInPlace() throws {
+        let dir = scratch()
+        let url = dir.appendingPathComponent("account.json")
+        try Data(shippedAccountJSON.utf8).write(to: url)
+
+        // A directory where the file should go is the cheapest way to make the
+        // create fail without root or a full disk.
+        let blocked = dir.appendingPathComponent("blocked", isDirectory: true)
+        try FileManager.default.createDirectory(at: blocked, withIntermediateDirectories: true)
+        #expect(StoreFile.writeSecurely(Data("{}".utf8), to: blocked) == false)
+
+        // The real file is untouched and still decodes to the same session.
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let session = try decoder.decode(AccountStore.Session.self, from: Data(contentsOf: url))
+        #expect(session.uid == "abc123")
+    }
+
+    @Test func aSuccessfulWriteReplacesTheFileAndKeepsItPrivate() throws {
+        let dir = scratch()
+        let url = dir.appendingPathComponent("account.json")
+        try Data("{\"old\":true}".utf8).write(to: url)
+
+        #expect(StoreFile.writeSecurely(Data(shippedAccountJSON.utf8), to: url))
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let session = try decoder.decode(AccountStore.Session.self, from: Data(contentsOf: url))
+        #expect(session.uid == "abc123")
+
+        // 0600 from the first byte — these are tokens, and a file that was
+        // world-readable for a moment has been world-readable.
+        let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
+        #expect(mode == 0o600, "mode was \(String(describing: mode.map { String($0, radix: 8) }))")
+    }
+
+    /// No temporary files left behind, on either outcome — a directory filling
+    /// with `.account.json.<uuid>` would be its own bug.
+    @Test func theAtomicWriteLeavesNoLitter() throws {
+        let dir = scratch()
+        let url = dir.appendingPathComponent("account.json")
+        #expect(StoreFile.writeSecurely(Data(shippedAccountJSON.utf8), to: url))
+        let left = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        #expect(left == ["account.json"], "left behind: \(left)")
+    }
+
     // MARK: - Corrupt counters heal on the way in
 
     /// The doubling bug reached Firestore as well as the local file, so repairing
