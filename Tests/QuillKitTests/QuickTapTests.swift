@@ -172,3 +172,63 @@ private struct SilentKeys: KeystrokeEmitting {
     #expect(DictationCoordinator.tapDuration < 0.855)
     #expect(DictationCoordinator.tapDuration >= 0.2, "short enough to catch a key bounce and nothing else")
 }
+
+// MARK: - The busy flag must not survive the gesture
+
+/// Found by review, and it was mine.
+///
+/// `isBusy` began life as a latched `AppDelegate.dictationInFlight`, set in
+/// `beginDictation()` and cleared only in the finalisation Task's `defer`. A
+/// change-of-mind tap never reaches that Task — it returns early — so the latch
+/// stuck true for the rest of the process, and `applicationShouldTerminate` then
+/// refused EVERY Apple-Event quit forever: the auto-quit case the guard was
+/// written for, `osascript`, and macOS logout.
+///
+/// One silent ~200ms tap of the dictation key was enough to arm it.
+@MainActor
+@Test func aChangeOfMindTapDoesNotLeaveTheAppLookingBusy() async {
+    let (coordinator, transcriber, _, _) = make("nothing")
+    coordinator.hotkeyMayBegin()
+    coordinator.hotkeyPressed()
+    // A level arrives, but a silent one — which is what a tap on a live
+    // microphone looks like, and what makes this the change-of-mind path.
+    transcriber.publish(0.001)
+    await waitFor { coordinator.sawLevelsForTesting }
+    #expect(coordinator.isBusy, "a dictation in progress should read as busy")
+
+    coordinator.hotkeyReleased()
+
+    for _ in 0 ..< 200 {
+        if !coordinator.isBusy { break }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(!coordinator.isBusy,
+            "the tap left the app permanently busy — every scripted quit and macOS logout would now be refused")
+}
+
+/// The same for a cancelled dictation, the second path that skips the
+/// finalisation Task.
+@MainActor
+@Test func aCancelledDictationDoesNotLeaveTheAppLookingBusy() async {
+    let (coordinator, _, _, _) = make("nothing")
+    coordinator.hotkeyMayBegin()
+    coordinator.hotkeyPressed()
+    #expect(coordinator.isBusy)
+
+    coordinator.hotkeyCancelled(userKeystroke: "x")
+
+    for _ in 0 ..< 200 {
+        if !coordinator.isBusy { break }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(!coordinator.isBusy, "a cancelled dictation left the app permanently busy")
+}
+
+/// A quit that is not an Apple Event is never refusable, whatever the app is
+/// doing — the menu and ⌘Q reach us that way, and refusing one of those is the
+/// far worse bug.
+@Test func aQuitThatIsNotAnAppleEventIsAlwaysHonoured() {
+    // No Apple Event is being dispatched on this thread during a unit test, so
+    // `currentAppleEvent` is nil — the menu/⌘Q shape.
+    #expect(!AppDelegate.isRefusableQuit())
+}

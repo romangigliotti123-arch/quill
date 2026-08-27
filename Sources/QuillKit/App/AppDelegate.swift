@@ -287,7 +287,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // user chose — the menu, ⌘Q, logging out — is honoured immediately, in
         // every state. Refusing one of those would be a far worse bug than the
         // one this is guarding.
-        if Self.dictationInFlight, NSAppleEventManager.shared().currentAppleEvent != nil {
+        if coordinator?.isBusy == true, Self.isRefusableQuit() {
             NSLog("[quill] refused a quit from %@ — a dictation is in flight", Self.appleEventSender())
             Self.recordExit(state: "REFUSED (dictating) " + state, stack: "")
             return .terminateCancel
@@ -298,15 +298,33 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
-    /// True from key-down until the words have landed. Read by
-    /// `applicationShouldTerminate` and nothing else.
+    /// Is this a quit we are allowed to refuse?
     ///
-    /// `@MainActor` rather than `nonisolated(unsafe)`, which is what this was
-    /// first written as and what a reviewer should reject. Both sides genuinely
-    /// are the main actor — `DictationCoordinator` is `@MainActor` and sets it,
-    /// AppKit calls the terminate handler on the main thread and reads it — so
-    /// the isolation is real and can be stated rather than waived.
-    @MainActor static var dictationInFlight = false
+    /// Only a scripted one. The comment above promises that a quit the user
+    /// chose — the menu, ⌘Q, logging out — is honoured immediately in every
+    /// state, and the first version of this broke that promise for the third
+    /// case: logging out, restarting and shutting down are not special IPC, they
+    /// are `kAEQuitApplication` Apple Events sent by `loginwindow`, exactly the
+    /// event class `osascript` sends. Testing `currentAppleEvent != nil` could
+    /// not tell them apart, so a dictation in flight would have stalled the
+    /// user's own logout behind the "an app prevented log out" dialog.
+    ///
+    /// `keyAEQuitReason` is what separates them, and it exists for this. macOS
+    /// attaches it — `kAELogOut`, `kAERestart`, `kAEShutDown`, `kAEReallyLogOut`
+    /// — only when it is ending the session. A scripted quit carries no reason
+    /// at all, so "has a reason" means "the system is going down, get out of the
+    /// way", and everything else is fair to refuse for the length of a sentence.
+    static func isRefusableQuit() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else {
+            // Not an Apple Event at all: the menu, ⌘Q, or our own code. Always
+            // honoured — refusing one of those is the far worse bug.
+            return false
+        }
+        // 'why?' — set by loginwindow for session-ending quits and by nothing else.
+        let quitReason = AEKeyword(0x77687923)
+        if event.attributeDescriptor(forKeyword: quitReason) != nil { return false }
+        return true
+    }
 
     /// Which process asked us to quit, by name.
     ///

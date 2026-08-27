@@ -97,6 +97,24 @@ public final class DictationCoordinator {
     /// that needs to know — the persistent overlay button, so a click toggles
     /// rather than always starting.
     public var isCurrentlyDictating: Bool { isDictating }
+
+    /// Key down until the words have landed — recording OR finalising.
+    ///
+    /// Derived rather than latched, and that is the whole point. This started as
+    /// a separate `AppDelegate.dictationInFlight` flag set in `beginDictation()`
+    /// and cleared in the finalisation Task's `defer`. Three paths leave
+    /// `beginDictation()` without ever reaching that Task — the change-of-mind
+    /// early return, `cancelDictation()` and `fail()` — so a ~200ms silent tap of
+    /// the dictation key stuck it true for the rest of the process, and
+    /// `applicationShouldTerminate` then refused EVERY Apple-Event quit forever:
+    /// the Vorssaint case it was written for, `osascript`, and macOS logout.
+    ///
+    /// A latch with one setter and one clearer is only correct while every path
+    /// remembers, and a fourth path added later would not. These two are
+    /// maintained on every path already — `isDictating` has a `didSet` that
+    /// exists for exactly this reason, and `isFinalising` is cleared by the same
+    /// `defer` that used to clear the flag — so reading them cannot drift.
+    public var isBusy: Bool { isDictating || isFinalising }
     /// Capturing, but not yet committed: the key is down and the gesture has not
     /// resolved. Audio recorded in this window is kept if the gesture becomes a
     /// dictation and thrown away if it does not.
@@ -387,7 +405,6 @@ public final class DictationCoordinator {
             speculativelyBegin()
         }
         isDictating = true
-        AppDelegate.dictationInFlight = true
         inputLost = false
         isSpeculating = false
         // Here and nowhere else on the way in: this is the moment a gesture stops
@@ -514,7 +531,6 @@ public final class DictationCoordinator {
             // ever sends it.
             defer {
                 self.isFinalising = false
-                AppDelegate.dictationInFlight = false
                 self.fireDeferredReturnIfPending()
                 NotificationCenter.default.post(name: .quillDictationSettled, object: nil)
             }
