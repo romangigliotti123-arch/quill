@@ -461,10 +461,44 @@ public struct StyleProfile: Codable, Sendable, Equatable {
         self.exclamations = try c.decodeIfPresent(StyleTrait<Bool>.self, forKey: .exclamations) ?? StyleTrait()
         self.sentenceLength = try c.decodeIfPresent(RunningMean.self, forKey: .sentenceLength) ?? RunningMean()
         self.phrasings = try c.decodeIfPresent([StylePhrasing].self, forKey: .phrasings) ?? []
-        self.correctionCount = try c.decodeIfPresent(Int.self, forKey: .correctionCount) ?? 0
-        self.modelAccepted = try c.decodeIfPresent(Int.self, forKey: .modelAccepted) ?? 0
-        self.modelReverted = try c.decodeIfPresent(Int.self, forKey: .modelReverted) ?? 0
+        self.correctionCount = (try c.decodeIfPresent(Int.self, forKey: .correctionCount) ?? 0).plausibleCounter
+        self.modelAccepted = (try c.decodeIfPresent(Int.self, forKey: .modelAccepted) ?? 0).plausibleCounter
+        self.modelReverted = (try c.decodeIfPresent(Int.self, forKey: .modelReverted) ?? 0).plausibleCounter
         self.lastLearned = try c.decodeIfPresent(Date.self, forKey: .lastLearned)
+    }
+}
+
+// MARK: - Counters that have obviously gone wrong
+
+extension Int {
+
+    /// Beyond this a counter is not a big number, it is damage.
+    ///
+    /// Ten million corrections is more than one person could make in a lifetime
+    /// of dictating — a correction takes seconds, so this is decades of doing
+    /// nothing else — while being nowhere near `Int.max`, so real use can never
+    /// reach it and no legitimate value is ever touched.
+    static let plausibleCounterCeiling = 10_000_000
+
+    /// Clamped on the way IN, which is the only place that heals anything.
+    ///
+    /// The doubling bug (see `StyleProfile.merged`) put 2^62 into Roman's real
+    /// profile AND into the copy of it in Firestore. Repairing the local file
+    /// achieved nothing: the next sync pulled the corrupt cloud copy down,
+    /// merged it with the repaired local one, and wrote 2^62 + 1 back to both.
+    /// Measured, on his machine, minutes after the local repair.
+    ///
+    /// Fixing the merge stops it getting worse; it cannot undo what is already
+    /// stored. Sanitising at the decoder does, because BOTH sides of a sync are
+    /// decoded before they are merged — so the corrupt cloud document is cleaned
+    /// on arrival, the merge sees two sane numbers, and the sane result is what
+    /// gets written back. The bad value cannot survive a single round trip.
+    ///
+    /// Zero rather than the ceiling. A counter this wrong carries no information
+    /// worth preserving, and "from 10000000 corrections" on the Style screen is
+    /// no more honest than the number it replaced.
+    var plausibleCounter: Int {
+        (self < 0 || self > Self.plausibleCounterCeiling) ? 0 : self
     }
 }
 
@@ -782,6 +816,30 @@ public struct RunningMean: Codable, Sendable, Equatable {
     public private(set) var total: Double
     public private(set) var count: Int
 
+    enum CodingKeys: String, CodingKey { case total, count }
+
+    /// Sanitised on the way in, for the reason written on `Int.plausibleCounter`.
+    ///
+    /// His real file held `count` 2^62 and `total` 3.23e19. The pair was still
+    /// internally consistent — the average came out at exactly 7.0 — so a check
+    /// on the mean alone would have passed it. The count is what gives it away,
+    /// and total has to be discarded with it or the next real sample is averaged
+    /// against 3.23e19 and vanishes.
+    ///
+    /// Both go, together, or neither does.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let storedTotal = try c.decodeIfPresent(Double.self, forKey: .total) ?? 0
+        let storedCount = try c.decodeIfPresent(Int.self, forKey: .count) ?? 0
+        if storedCount.plausibleCounter == 0 || !storedTotal.isFinite || storedTotal < 0 {
+            self.total = 0
+            self.count = 0
+        } else {
+            self.total = storedTotal
+            self.count = storedCount
+        }
+    }
+
     /// Beyond this the window slides instead of growing. Forty samples is enough
     /// for the mean to be stable and few enough that a changed habit shows up
     /// within a few weeks.
@@ -852,6 +910,24 @@ extension Int {
 
 /// A rewrite the user has made more than once.
 public struct StylePhrasing: Codable, Sendable, Equatable, Identifiable {
+
+    enum CodingKeys: String, CodingKey { case from, to, count, lastObserved }
+
+    /// Same sanitising as everything else the doubling bug reached — his
+    /// phrasing count was 2^62 too, and a phrasing with an absurd count sorts
+    /// above every real one and survives every trim.
+    ///
+    /// Clamped to 1 rather than 0: unlike a correction tally, the phrasing is
+    /// evidence of itself. It exists because it was observed at least once, and
+    /// zeroing the count would delete a real rewrite the user taught it.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.from = try c.decode(String.self, forKey: .from)
+        self.to = try c.decode(String.self, forKey: .to)
+        let stored = try c.decodeIfPresent(Int.self, forKey: .count) ?? 1
+        self.count = stored.plausibleCounter == 0 ? 1 : stored
+        self.lastObserved = try c.decodeIfPresent(Date.self, forKey: .lastObserved)
+    }
 
     /// What Quill wrote, lowercased — matching is case-insensitive.
     public let from: String

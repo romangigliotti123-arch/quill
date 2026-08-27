@@ -404,4 +404,108 @@ import Testing
         }
         #expect(Set(found.values).count == 1, "these files disagree about which certificate signs Quill: \(found)")
     }
+
+    // MARK: - Being signed in must survive an update
+
+    /// The frozen bytes of a real `account.json`, as shipped builds write it.
+    ///
+    /// Roman's instruction was one sentence: never log him out by itself. The
+    /// way that happens is not a bug anyone writes on purpose — it is adding a
+    /// sixth field to `Session`, whose decoder used to be synthesised, so every
+    /// file written before that version throws, `try?` turns the throw into nil,
+    /// and nil reads as "signed out" everywhere in the app. His tokens would
+    /// still be on disk while the app showed him a login screen.
+    private let shippedAccountJSON = """
+    {"uid":"abc123","email":"someone@example.com","idToken":"header.payload.signature",\
+    "refreshToken":"AMf-refresh-token-value","expiresAt":"2026-08-27T09:00:00Z"}
+    """
+
+    @Test func aSessionWrittenByAnOlderBuildStillDecodes() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let session = try decoder.decode(AccountStore.Session.self,
+                                         from: Data(shippedAccountJSON.utf8))
+        #expect(session.uid == "abc123")
+        #expect(session.email == "someone@example.com")
+        #expect(session.refreshToken == "AMf-refresh-token-value")
+    }
+
+    /// A field a newer build added and an older file does not carry must not be
+    /// able to sign anyone out. This is the test that fails the moment someone
+    /// adds a required sixth field, which is the only moment it is cheap to fix.
+    @Test func anUnknownExtraFieldDoesNotDestroyTheSession() throws {
+        let withExtra = """
+        {"uid":"abc123","email":"someone@example.com","idToken":"a.b.c",\
+        "refreshToken":"r","expiresAt":"2026-08-27T09:00:00Z","somethingNewer":42}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let session = try decoder.decode(AccountStore.Session.self, from: Data(withExtra.utf8))
+        #expect(session.uid == "abc123")
+    }
+
+    /// A damaged `account.json` is not a logout, and `StoreFile` must keep a
+    /// salvage copy rather than let the app write over it.
+    @Test func aDamagedAccountFileIsKeptRatherThanTreatedAsSignedOut() throws {
+        let dir = scratch()
+        let url = dir.appendingPathComponent("account.json")
+        try Data("{\"uid\":\"abc".utf8).write(to: url)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let outcome = StoreFile.read(AccountStore.Session.self, from: url, decoder: decoder)
+
+        guard case .unreadable = outcome else {
+            Issue.record("a truncated account.json read as \(outcome) rather than unreadable")
+            return
+        }
+        // The original is still there, and a salvage copy sits beside it.
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        let salvaged = try FileManager.default
+            .contentsOfDirectory(atPath: dir.path)
+            .filter { $0.contains("unreadable") }
+        #expect(!salvaged.isEmpty, "no salvage copy was kept")
+    }
+
+    // MARK: - Corrupt counters heal on the way in
+
+    /// The doubling bug reached Firestore as well as the local file, so repairing
+    /// the local copy achieved nothing — the next sync pulled the corrupt cloud
+    /// document down and merged it straight back in. Measured on his machine.
+    ///
+    /// Sanitising at the decoder is what breaks that loop: both sides of a sync
+    /// are decoded before they are merged, so the bad value cannot survive a
+    /// single round trip.
+    @Test func aProfileCarryingTheDoublingCorruptionIsHealedWhenItIsRead() throws {
+        // His real file, after logging back in mid-session: 2^62 + 1.
+        let corrupt = """
+        {"correctionCount":4611686018427387905,\
+        "sentenceLength":{"count":4611686018427387905,"total":3.2281802128991715e+19},\
+        "phrasings":[{"count":4611686018427387904,"from":"kashios","to":"CachyOS"}],\
+        "preset":"neutral","isLearningEnabled":true}
+        """
+        let profile = try JSONDecoder().decode(StyleProfile.self, from: Data(corrupt.utf8))
+
+        #expect(profile.correctionCount == 0, "got \(profile.correctionCount)")
+        #expect(profile.sentenceLength.count == 0)
+        #expect(profile.sentenceLength.total == 0)
+        // The phrasing itself is real evidence and is kept, at a count of one.
+        #expect(profile.phrasings.count == 1)
+        #expect(profile.phrasings.first?.count == 1)
+        #expect(profile.phrasings.first?.to == "CachyOS")
+    }
+
+    /// Ordinary values are not touched. A clamp that rounds real data off is a
+    /// worse bug than the one it fixes.
+    @Test func plausibleCountersSurviveTheSanitiser() throws {
+        let ordinary = """
+        {"correctionCount":37,"sentenceLength":{"count":12,"total":168.0},\
+        "phrasings":[{"count":4,"from":"kashios","to":"CachyOS"}],"preset":"neutral"}
+        """
+        let profile = try JSONDecoder().decode(StyleProfile.self, from: Data(ordinary.utf8))
+        #expect(profile.correctionCount == 37)
+        #expect(profile.sentenceLength.count == 12)
+        #expect(profile.sentenceLength.average == 14.0)
+        #expect(profile.phrasings.first?.count == 4)
+    }
 }

@@ -51,6 +51,47 @@ public final class AccountStore: @unchecked Sendable {
         let idToken: String
         let refreshToken: String
         let expiresAt: Date
+
+        init(uid: String, email: String, idToken: String, refreshToken: String, expiresAt: Date) {
+            self.uid = uid
+            self.email = email
+            self.idToken = idToken
+            self.refreshToken = refreshToken
+            self.expiresAt = expiresAt
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case uid, email, idToken, refreshToken, expiresAt
+        }
+
+        /// Decoded key by key, and the reason is the whole point of this type.
+        ///
+        /// A synthesised decoder throws the moment ANY key it expects is absent.
+        /// Add a sixth field to this struct in some future version and every
+        /// `account.json` written by every version before it fails to decode —
+        /// and the caller's `try?` turns that into `session = nil`, which the
+        /// whole app reads as "signed out". Not an error, not a prompt: everyone
+        /// silently logged out by an update, with their tokens still sitting on
+        /// disk, unread.
+        ///
+        /// The same synthesised-Codable failure has already cost this app four
+        /// persisted models once (see `DictationRecord.init(from:)` and
+        /// `user-data-must-survive-every-update`). This is the store where it
+        /// would hurt most, and it was the last one still relying on synthesis.
+        ///
+        /// The five fields below stay required, because a session missing any of
+        /// them cannot be used to talk to Firebase and pretending otherwise would
+        /// just move the failure. What this buys is that field number six, and
+        /// every one after it, must be added with `decodeIfPresent` — and now
+        /// there is an obvious place to do that.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            uid = try c.decode(String.self, forKey: .uid)
+            email = try c.decode(String.self, forKey: .email)
+            idToken = try c.decode(String.self, forKey: .idToken)
+            refreshToken = try c.decode(String.self, forKey: .refreshToken)
+            expiresAt = try c.decode(Date.self, forKey: .expiresAt)
+        }
     }
 
     static let fileURL: URL = QuillData.directory.appendingPathComponent("account.json")
@@ -60,6 +101,10 @@ public final class AccountStore: @unchecked Sendable {
     private var listeners: [UUID: (Account?) -> Void] = [:]
     private var config: FirebaseConfig?
     private var loadedFromDisk = false
+    /// Set when `account.json` exists and will not decode. While it is set the
+    /// store never deletes that file, so a damaged session stays recoverable
+    /// instead of becoming a logout.
+    private var sessionFileUnreadable = false
 
     private init() {}
 
@@ -152,13 +197,47 @@ public final class AccountStore: @unchecked Sendable {
     private func loadSessionIfNeeded() {
         guard !loadedFromDisk else { return }
         loadedFromDisk = true
-        guard let data = try? Data(contentsOf: Self.fileURL) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        session = try? decoder.decode(Session.self, from: data)
+        // Three states, not two — the same distinction `StoreFile` was written
+        // for and the one store that had never adopted it.
+        //
+        // This used to be `session = try? decoder.decode(...)`, which collapses
+        // "no file, never signed in" and "a file I could not read" into the same
+        // answer: signed out. They call for opposite behaviour. The first is
+        // correct and ordinary. The second means the user IS signed in, their
+        // tokens are on disk, and the app is about to tell them they are not —
+        // and then, on the next `signOut()`, delete the file that proves it.
+        //
+        // Roman asked for exactly one thing here: never log him out by itself.
+        // A silent logout is not a logout the user did; it is data loss wearing
+        // a login screen.
+        switch StoreFile.read(Session.self, from: Self.fileURL, decoder: decoder) {
+        case .missing:
+            session = nil
+        case .decoded(let stored):
+            session = stored
+        case .unreadable:
+            // Signed out in memory, because there is no usable token — but the
+            // file is NOT ours to destroy. `StoreFile.read` has already put a
+            // salvage copy beside it and logged where.
+            session = nil
+            sessionFileUnreadable = true
+            NSLog("[quill] account.json could not be read — not signing out, and refusing to overwrite it")
+        }
     }
 
     private func persist(_ newSession: Session?) {
+        // Never write over a file we could not read. Clearing it would turn a
+        // recoverable session into a real logout, which is the failure this
+        // whole path exists to avoid. A deliberate sign-in overwrites it —
+        // that is a session the user just proved they wanted.
+        if sessionFileUnreadable, newSession == nil {
+            NSLog("[quill] refusing to delete an unreadable account.json")
+            session = nil
+            return
+        }
+        if newSession != nil { sessionFileUnreadable = false }
         session = newSession
         guard let newSession else {
             try? FileManager.default.removeItem(at: Self.fileURL)
